@@ -39,6 +39,8 @@ Demo users (password `1234`, approval PIN `1234`): `charoen` (owner), `suda` (ma
 | `BACKUP_SCRIPT` | unset | On-prem only: runs `<script> -Reason shift-close` after a shift closes. `.ps1` files run through `powershell.exe` (Windows) or `pwsh`. Fire-and-forget: it never blocks or fails the close |
 | `MDNS_SERVICE_TYPE` | `_scgerp._tcp` | On-prem only: mDNS advertisement (PTR/SRV/TXT/A) through the pure-JS `multicast-dns` package. `off` disables it |
 | `CORS_ORIGIN` | unset | Comma-separated origins for a separately hosted web dev server |
+| `TRUST_PROXY` | off | Cloud only: `1` honours `X-Forwarded-For` behind a load balancer. Always off on-prem, so `req.ip` is the socket address |
+| `REQUIRE_DEVICE_PAIRING` | on (on-prem) | On-prem: authenticated `/api/*` calls from any non-loopback address need a paired `erp_device` cookie (403 `details.reason = DEVICE_NOT_PAIRED`). Login, meta, healthz and `/pair` stay open; the main machine (localhost) is exempt. `0` turns it off |
 | `DB_POOL_MAX`, `LOG_LEVEL`, `APP_VERSION` | 10, info, 0.1.0 | |
 | `MIGRATIONS_DIR` | next to `migrate.mjs` / `packages/db/migrations` | Used by the migrator |
 | `PROMPTPLUS_BASE_URL`, `PROMPTPLUS_CLIENT_ID` | unset | Cloud only, read only in `adapters/promptplus.ts` |
@@ -70,6 +72,33 @@ Demo users (password `1234`, approval PIN `1234`): `charoen` (owner), `suda` (ma
   is inside `if (process.env.EDITION === 'cloud')`. The on-prem `/api/meta` sends only `{ scgFamily }`. The
   contract fills in `promptPlusOrders` and `promptPlusSso` as `false`, so no cloud-only name ships on-prem.
 
+## Database roles (on-prem installer)
+
+`apps/installer/scripts/install-main.ps1` creates three roles as the `postgres` superuser:
+
+| Role | Login | Used by | Rights |
+| --- | --- | --- | --- |
+| `erp` | yes | migrations, backups (`backup.ps1`) | Owns the database and tables. Not a superuser. `BYPASSRLS`, so `pg_dump` can read every tenant row |
+| `erp_app` | no | the server, per transaction (`SET LOCAL ROLE`) | SELECT/INSERT/UPDATE only, from the migration grants. No DELETE or TRUNCATE. No UPDATE on `audit_log`. Row-level security applies |
+| `erp_server` | yes | the server service (`DATABASE_URL`) | Member of `erp_app`, nothing else |
+
+The shift-close backup hook does not pass the server's `DATABASE_URL` to the script. `backup.ps1` then falls back
+to the owner credentials in `config\secrets.json`. This setup was rehearsed on Linux with equivalent roles
+(migrate and seed as the owner, run the server as the restricted role, sell, `pg_dump`). It has not been run on Windows.
+
+## Approvals
+
+`lib/approval.ts` applies to discount, price change, below-cost, void and return approvals.
+- The approver must be another user. A self-approval returns `SELF_APPROVAL`. An owner selling below cost
+  himself is still allowed and is logged.
+- The approver must be active and have an allowed role.
+- Each wrong PIN is counted on the approver and audited (`approval-failed`) in a separate transaction. That
+  transaction commits even though the request rolls back. After 5 failures the approver's PIN is locked for 15 minutes (`LOCKED`).
+- `POST /api/users/:id/unlock` clears the login lock and the PIN lock. The owner can unlock anyone. A manager can
+  unlock anyone except the owner.
+- A locked account's existing tokens stop working.
+- Approving an adjustment request you created yourself is refused unless you are the owner.
+
 ## Routes
 
 All bodies and responses follow `packages/contracts/src/index.ts`. Errors use
@@ -78,7 +107,9 @@ All bodies and responses follow `packages/contracts/src/index.ts`. Errors use
 | Route | Notes |
 | --- | --- |
 | `GET /healthz` | DB ping. 503 when the DB is down |
-| `GET /api/meta` | Public. Shop comes from the bearer token, `?shop=<code>`, or the single on-prem tenant |
+| `GET /api/meta` | Public. Shop comes from the bearer token, `?shop=<code>`, or the single on-prem tenant. `needsSetup: true` on an empty on-prem database |
+| `POST /api/setup` | On-prem only, loopback only, only while there are no tenants or users. Creates the shop, WH1 (POS) and the owner (password and PIN), then returns `LoginRes`. The web shows its setup screen when `needsSetup` is true |
+| `GET /api/users/approvers` | Active owners and managers, for the approval pickers (added by the web agent) |
 | `POST /api/auth/login`, `GET /api/auth/me` | argon2id. Locks after 5 failures. Resigned users are rejected. Every attempt is audited |
 | `POST /api/users/:id/unlock` | Owner (`sys.users`) |
 | `GET/POST /api/products`, `PATCH /api/products/:id` | `cost` is null without `data.cost`. Writes need `data.master` |
@@ -104,6 +135,9 @@ All bodies and responses follow `packages/contracts/src/index.ts`. Errors use
 | `returns.test.ts` | Eligible search by customer name, phone (formatted and digits), product name and SKU, bill number, amount, and tax ID; multi-word AND; 7/30/all period filters; newest first; cursor pages; max limit; trigram index exists. Returns: cashier needs a PIN; good condition restocks at the original average FIFO cost (119.3567) into the chosen warehouse; cash refund counts in the shift; quantity over sold minus returned is rejected; the last return gets the exact remainder; fully returned bills leave the picker; bad condition does not restock; cash refund needs a shift; credit refund needs a receivable; DOWNSTREAM_FIRST on void |
 | `inventory.test.ts` | Multi-line transfer keeps lot cost; shortage rolls back every line; same warehouse rejected. Multi-line issue with a pack unit; shortage rollback; cashier forbidden; services rejected. Manual receipt: bill discount goes into lot cost; duplicate vendor invoice rejected. Adjustment request, `wh` cannot approve, manager approves, double approve returns 409; negative approval refused and the request stays pending; reject. Stock paging; lots need `data.cost`. Shift: cash in/out, X report with split payments, close needs a note for a difference, Z values, closed shift cannot sell |
 | `platform.test.ts` | BR-14 RLS: a query with no WHERE sees only its tenant; no tenant set sees nothing; cross-tenant insert refused; API isolation. BR-18: audit entries and a valid hash chain; UPDATE/DELETE refused for the app role and, by trigger, for a superuser; tampering detected. M19 meta and the route table for both editions. Pairing code is single use and sets a cookie. Backup hook runs after close; a failing script does not fail the close. `/healthz`. SPA fallback and JSON 404 for the API |
+| `review-fixes.test.ts` | Regression tests for the review findings. **F1**: negative unit price, negative line or bill discount, and pct over 100 are rejected. **F2**: approver PIN locks after 5 failures; failures are audited despite the rollback; unlock resets. **F3**: no self-approval for discount or void. **F4**: a shift close waits for an in-flight sale and counts it; a later sale gets SHIFT_REQUIRED. **F5**: stock-to-service flip refused while lots remain. **F6**: negative receipt cost rejected. **F7**: duplicate receipt lines give a sequential moving average (180.6154). **F8**: X-Forwarded-For ignored; limiter bounded; device cookie enforced off-loopback. **F9**: issue hides unitCost without data.cost. **F10**: locked account's token rejected. **F11**: adjust self-approval refused unless owner |
+| `setup.test.ts` | **F15**: `needsSetup` on an empty on-prem DB and never on cloud; setup refused from the LAN; body validation; creates shop, warehouse and owner, signs in; second run returns 409 |
+| `packages/db/src/tx.test.ts` | **F14**: `withTenant` destroys the connection (`release(err)`) when ROLLBACK fails |
 | `master.test.ts` | Product create/update/permissions/duplicate SKU/base-unit check; cursor paging and limits; customer auto code and phone search; warehouses and vendors; document list paging and preview |
 
 ## Not done in this phase
@@ -113,8 +147,7 @@ All bodies and responses follow `packages/contracts/src/index.ts`. Errors use
 - **Prompt Plus.** The client paths are placeholders.
 - **Credit sales.** POS sales are always fully paid. `docs.ar_balance` exists and credit refunds reduce it, but
   nothing creates a receivable yet.
-- **On-prem first run.** Creating the first tenant and owner on-prem is not built. Use the seed script or add a
-  setup flow.
-- **Device cookie.** `/pair` issues the `erp_device` cookie, but API requests do not require it yet.
+- **Setup in the installer and e2e.** The installer does not call `POST /api/setup` yet; the owner fills in the
+  web setup screen on the main machine. No e2e case covers setup, because the e2e database is always seeded.
 - **Unknown routes on-prem.** An unknown `/api/*` route returns `404 NOT_FOUND`, not `NOT_AVAILABLE_IN_EDITION`.
   The guard forbids the on-prem bundle from naming the Prompt Plus paths.

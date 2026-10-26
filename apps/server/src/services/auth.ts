@@ -69,15 +69,21 @@ export async function login(pool: Pool, body: { username: string; password: stri
 /** Re-reads the token's user on every request: resigned or role-changed users take effect immediately. */
 export async function loadActiveUser(tx: Tx, userId: string): Promise<{ id: string; name: string; role: Role } | null> {
   if (!isUuid(userId)) return null;
-  const r = await tx.query<{ id: string; name: string; role: Role; status: string }>(`select id, name, role, status from users where id = $1`, [userId]);
+  const r = await tx.query<{ id: string; name: string; role: Role; status: string; locked: boolean }>(
+    `select id, name, role, status, locked_at is not null locked from users where id = $1`, [userId]);
   const u = r.rows[0];
-  return u && u.status === 'active' ? u : null;
+  return u && u.status === 'active' && !u.locked ? u : null; // resigned or locked: existing tokens stop working
 }
 
+/** Clears the login lock and the approval-PIN lock. Owner: anyone; manager: anyone except an owner. */
 export async function unlockUser(tx: Tx, ctx: Ctx, userId: string): Promise<{ id: string; status: string }> {
-  if (ctx.role !== 'owner' && perm(ctx.role, 'sys.users') !== 1) throw E.forbidden('Permission sys.users is required');
+  if (ctx.role !== 'owner' && ctx.role !== 'manager' && perm(ctx.role, 'sys.users') !== 1) throw E.forbidden('Only the owner or a manager can unlock users');
   if (!isUuid(userId)) throw E.notFound('User not found');
-  const r = await tx.query<{ id: string; username: string; status: string }>(`update users set failed_logins = 0, locked_at = null where id = $1 returning id, username, status`, [userId]);
+  const target = (await tx.query<{ role: Role }>(`select role from users where id = $1`, [userId])).rows[0];
+  if (!target) throw E.notFound('User not found');
+  if (target.role === 'owner' && ctx.role !== 'owner') throw E.forbidden('Only the owner can unlock the owner');
+  const r = await tx.query<{ id: string; username: string; status: string }>(
+    `update users set failed_logins = 0, locked_at = null, pin_failed = 0, pin_locked_until = null where id = $1 returning id, username, status`, [userId]);
   if (!r.rows[0]) throw E.notFound('User not found');
   await writeAudit(tx, ctx, [{ action: 'unlock', object: 'user', ref: r.rows[0].username }]);
   return { id: r.rows[0].id, status: r.rows[0].status };

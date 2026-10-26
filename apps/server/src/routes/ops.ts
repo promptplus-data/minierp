@@ -7,7 +7,7 @@ import {
 } from '@erp/contracts';
 import { requireAny, type Deps } from '../lib/context';
 import type { Authed } from '../plugins/auth';
-import { approveAdjust, balances, issue, listAdjust, lots, receipt, rejectAdjust, requestAdjust, transfer } from '../services/inventory';
+import { approveAdjust, balances, issue, listAdjust, lots, maskStockDoc, receipt, rejectAdjust, requestAdjust, transfer } from '../services/inventory';
 import { createReturn, eligible } from '../services/returns';
 import { getDoc, listDocs, posSale, voidDoc } from '../services/sales';
 import { cashMove, closeShift, currentShift, openShift } from '../services/shifts';
@@ -25,22 +25,25 @@ export function opsRoutes(app: FastifyInstance, deps: Deps, authed: Authed): voi
   app.get('/api/stock/lots', authed(async (tx, ctx, req) => lots(tx, ctx, stockQuery.parse(req.query))));
   app.post('/api/stock/receipts', authed(async (tx, ctx, req, reply) => {
     reply.status(201);
-    return receipt(tx, deps, ctx, ManualReceiptReq.parse(req.body));
+    return maskStockDoc(ctx, await receipt(tx, deps, ctx, ManualReceiptReq.parse(req.body)));
   }));
   app.post('/api/stock/transfers', authed(async (tx, ctx, req, reply) => {
     reply.status(201);
-    return transfer(tx, deps, ctx, TransferReq.parse(req.body));
+    return maskStockDoc(ctx, await transfer(tx, deps, ctx, TransferReq.parse(req.body)));
   }));
   app.post('/api/stock/issues', authed(async (tx, ctx, req, reply) => {
     reply.status(201);
-    return issue(tx, deps, ctx, IssueReq.parse(req.body));
+    return maskStockDoc(ctx, await issue(tx, deps, ctx, IssueReq.parse(req.body)));
   }));
   app.post('/api/stock/adjust-requests', authed(async (tx, ctx, req, reply) => {
     reply.status(201);
     return requestAdjust(tx, deps, ctx, AdjustRequestReq.parse(req.body));
   }));
   app.get('/api/stock/adjust-requests', authed(async (tx, ctx, req) => listAdjust(tx, ctx, AdjustListQuery.parse(req.query))));
-  app.post('/api/stock/adjust-requests/:id/approve', authed(async (tx, ctx, req) => approveAdjust(tx, deps, ctx, idParam(req))));
+  app.post('/api/stock/adjust-requests/:id/approve', authed(async (tx, ctx, req) => {
+    const r = await approveAdjust(tx, deps, ctx, idParam(req));
+    return { ...r, doc: maskStockDoc(ctx, r.doc) };
+  }));
   app.post('/api/stock/adjust-requests/:id/reject', authed(async (tx, ctx, req) =>
     rejectAdjust(tx, ctx, idParam(req), z.object({ note: z.string().optional() }).parse(req.body ?? {}).note)));
 

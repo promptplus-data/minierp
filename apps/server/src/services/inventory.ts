@@ -3,11 +3,15 @@ import type { Tx } from '@erp/db';
 import type { StockDoc } from '@erp/contracts';
 import { allocate, d, fmtTHB, money, movingAverage, qty4, sum } from '@erp/core';
 import { writeAudit } from '../lib/audit';
-import { requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
+import { can, requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
 import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { addLot, applyOut, currentAvgCost, lockLots, planTakes, recordIn, type LockedLot } from '../lib/stock';
+
+/** F9: unit costs in stock documents are shown only with data.cost. */
+export const maskStockDoc = (ctx: Ctx, doc: StockDoc): StockDoc =>
+  can(ctx, 'data.cost') === 1 ? doc : { ...doc, lines: doc.lines.map((l) => ({ ...l, unitCost: null })) };
 import { loadProducts, requireWarehouse, unitOf, type ProductRow } from './master';
 
 interface LineIn { productId: string; unitIdx: number; qty: string }
@@ -116,6 +120,7 @@ export async function receipt(
   const wh = await requireWarehouse(tx, req.warehouseId);
   const dup = await tx.query<{ no: string }>(`select no from stock_docs where vendor_id = $1 and vendor_invoice_no = $2`, [req.vendorId, req.vendorInvoiceNo]);
   if (dup.rows[0]) throw E.conflict(`Vendor invoice ${req.vendorInvoiceNo} was already received as ${dup.rows[0].no}`);
+  if (req.lines.some((l) => d(l.unitCost).lt(0))) throw E.validation('Unit cost must not be negative');
   const lines = await baseLines(tx, req.lines);
   const amounts = req.lines.map((l) => money(d(l.qty).times(d(l.unitCost))));
   if (d(req.billDiscount).lt(0) || d(req.billDiscount).gt(sum(amounts))) throw E.validation('Bill discount must be between 0 and the receipt total');
@@ -126,9 +131,11 @@ export async function receipt(
   for (const [i, l] of lines.entries()) {
     const net = d(amounts[i]!).minus(disc[i]!);
     const unitCost = qty4(net.div(d(l.baseQty)));
-    // moving-average product cost (shown as product.cost) before the new lot is added
-    const prev = await tx.query<{ q: string | null }>(`select sum(remaining)::text q from stock_lots where product_id = $1`, [l.p.id]);
-    await tx.query(`update products set cost = $1 where id = $2`, [movingAverage(prev.rows[0]?.q ?? 0, l.p.cost, l.baseQty, unitCost), l.p.id]);
+    // Moving-average product cost (shown as product.cost), from the CURRENT cost and stock before this lot, so
+    // several lines of one product in a receipt chain correctly.
+    const prev = await tx.query<{ q: string | null; cost: string }>(
+      `select (select sum(remaining) from stock_lots where product_id = $1)::text q, cost::text from products where id = $1`, [l.p.id]);
+    await tx.query(`update products set cost = $1 where id = $2`, [movingAverage(prev.rows[0]?.q ?? 0, prev.rows[0]!.cost, l.baseQty, unitCost), l.p.id]);
     const lotId = await addLot(tx, ctx, { productId: l.p.id, warehouseId: wh.id, qty: l.baseQty, unitCost, ref: no });
     await recordIn(tx, ctx, wh.id, l.p.id, [{ lotId, qty: l.baseQty, unitCost }], { docType: 'GR', docNo: no, docId, note: `รับสินค้า · ${req.vendorInvoiceNo}` });
     out.push({ productId: l.p.id, qty: l.baseQty, unitCost });
@@ -196,8 +203,8 @@ export async function issue(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: st
   return doc;
 }
 
-interface AdjRow { id: string; no: string; warehouse_id: string; lines: { productId: string; qtyDelta: string }[]; reason: string; status: 'pending' | 'approved' | 'rejected'; requested_by: string; decided_by: string | null; result_doc_no: string | null; created_at: Date }
-const ADJ_SELECT = `select a.id, a.no, a.warehouse_id, a.lines, a.reason, a.status, ru.name requested_by, du.name decided_by, a.result_doc_no, a.created_at
+interface AdjRow { id: string; requested_by_id: string; no: string; warehouse_id: string; lines: { productId: string; qtyDelta: string }[]; reason: string; status: 'pending' | 'approved' | 'rejected'; requested_by: string; decided_by: string | null; result_doc_no: string | null; created_at: Date }
+const ADJ_SELECT = `select a.id, a.requested_by requested_by_id, a.no, a.warehouse_id, a.lines, a.reason, a.status, ru.name requested_by, du.name decided_by, a.result_doc_no, a.created_at
   from adjust_requests a join users ru on ru.id = a.requested_by left join users du on du.id = a.decided_by`;
 const toAdj = (r: AdjRow) => ({
   id: r.id, no: r.no, warehouseId: r.warehouse_id, lines: r.lines, reason: r.reason, status: r.status, requestedBy: r.requested_by,
@@ -254,6 +261,7 @@ async function lockPending(tx: Tx, id: string): Promise<AdjRow> {
 export async function approveAdjust(tx: Tx, deps: Deps, ctx: Ctx, id: string) {
   requirePerm(ctx, 'inv.adjApprove');
   const a = await lockPending(tx, id);
+  if (a.requested_by_id === ctx.userId && ctx.role !== 'owner') throw E.forbidden('You cannot approve your own adjustment request', { reason: 'SELF_APPROVAL' });
   const products = await loadProducts(tx, a.lines.map((l) => l.productId));
   const no = await nextDocNo(tx, ctx.tenantId, 'ADJ', deps.today());
   const docId = await newId(tx);

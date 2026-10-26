@@ -82,6 +82,16 @@ export async function createProduct(tx: Tx, ctx: Ctx, p: ProductInput): Promise<
 export async function updateProduct(tx: Tx, ctx: Ctx, id: string, p: Partial<ProductInput>): Promise<Product> {
   if (!isUuid(id)) throw E.notFound('Product not found');
   if (p.units) checkUnits(p.units);
+  if (p.kind) {
+    // Flipping stock <-> service while lots remain would let sales bypass stock (BR-07) or strand the lots.
+    const cur = await tx.query<{ kind: string; left: string | null }>(
+      `select kind, (select sum(remaining) from stock_lots l where l.product_id = p.id)::text "left" from products p where id = $1`, [id]);
+    const row = cur.rows[0];
+    if (!row) throw E.notFound('Product not found');
+    if (row.kind !== p.kind && row.left && Number(row.left) > 0) {
+      throw E.conflict(`Cannot change ${row.kind} to ${p.kind} while ${row.left} units are in stock; issue or adjust them out first`, { remaining: row.left });
+    }
+  }
   const cols: Record<string, unknown> = {
     sku: p.sku, name: p.name, barcode: p.barcode, category: p.category, is_scg: p.isScg, kind: p.kind, vat: p.vat, price: p.price,
     units: p.units ? JSON.stringify(p.units) : undefined, reorder_point: p.reorderPoint, active: p.active,

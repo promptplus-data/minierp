@@ -77,13 +77,19 @@ export function searchText(parts: { no: string; customer?: { name: string; code?
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
-/** BR-20: the caller's own open shift. */
+/**
+ * BR-20: the caller's own open shift, locked FOR SHARE until COMMIT. Closing a shift takes FOR UPDATE, so a
+ * sale / cash refund and a close serialize: either the close waits and then counts this document, or the
+ * document sees the shift already closed.
+ */
 export async function requireOwnOpenShift(tx: Tx, ctx: Ctx, shiftId?: string): Promise<{ id: string; no: string; device_id: string }> {
-  const r = shiftId
-    ? isUuid(shiftId)
-      ? await tx.query<{ id: string; no: string; device_id: string; user_id: string; closed_at: Date | null }>(`select id, no, device_id, user_id, closed_at from shifts where id = $1`, [shiftId])
-      : { rows: [] }
-    : await tx.query<{ id: string; no: string; device_id: string; user_id: string; closed_at: Date | null }>(`select id, no, device_id, user_id, closed_at from shifts where user_id = $1 and closed_at is null`, [ctx.userId]);
+  if (shiftId !== undefined && !isUuid(shiftId)) throw E.shiftRequired();
+  const r = await tx.query<{ id: string; no: string; device_id: string; user_id: string; closed_at: Date | null }>(
+    shiftId
+      ? `select id, no, device_id, user_id, closed_at from shifts where id = $1 for share`
+      : `select id, no, device_id, user_id, closed_at from shifts where user_id = $1 and closed_at is null for share`,
+    [shiftId ?? ctx.userId],
+  );
   const s = r.rows[0];
   if (!s || s.closed_at || s.user_id !== ctx.userId) throw E.shiftRequired();
   return s;
@@ -122,11 +128,16 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     if (!p.active) throw E.validation(`Product ${p.sku} is inactive`);
     const u = unitOf(p, l.unitIdx);
     if (!d(l.qty).gt(0)) throw E.validation(`Line ${i + 1}: qty must be > 0`);
+    if (d(l.unitPrice).lt(0)) throw E.validation(`Line ${i + 1}: unit price must not be negative`);
+    if (l.discount && (d(l.discount.value).lt(0) || (l.discount.kind === 'pct' && d(l.discount.value).gt(100)))) {
+      throw E.validation(`Line ${i + 1}: discount must be 0..100% or a non-negative amount`);
+    }
     const list = u.price != null ? d(u.price) : d(p.price).times(d(u.factor));
     if (!d(l.unitPrice).eq(list)) priceChanged = true;
     const core: CoreLine & { baseQty: string } = { qty: l.qty, unitPrice: l.unitPrice, discount: l.discount ?? null, vat: p.vat, baseQty: qty4(d(l.qty).times(d(u.factor))) };
     return { req: l, p, u, core };
   });
+  if (d(req.billDiscount).lt(0)) throw E.validation('Bill discount must not be negative');
   const totals = calcDoc(lines.map((l) => l.core), vatMode, req.billDiscount);
 
   // Discount over the role cap (cashier 0, OQ-10) or a changed unit price needs a manager / owner PIN.
@@ -137,7 +148,7 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
   if (overCap || priceNeedsApproval) {
     const need = { pct, cap, priceChanged: priceNeedsApproval, need: 'discountApproval' };
     if (!req.discountApproval) throw E.forbidden(overCap ? `Discount ${pct}% is over your cap of ${cap}%` : 'Changing the unit price needs approval', need);
-    const a = await verifyApproval(tx, req.discountApproval, approverRoles('pos.discCap'));
+    const a = await verifyApproval(tx, deps.pool, ctx, req.discountApproval, approverRoles('pos.discCap'), `ส่วนลด ${pct}%`);
     if (!a.ok) throw E.forbidden('Discount approval rejected', { ...need, approvalError: a.reason });
     audits.push({ action: 'approve', object: 'discount', detail: `ส่วนลด ${pct}% (สิทธิ์ ${cap}%)${priceNeedsApproval ? ' · เปลี่ยนราคา' : ''} · อนุมัติโดย ${a.approver.name}` });
   }
@@ -170,7 +181,7 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     if (ctx.role === 'owner') {
       audits.push({ action: 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · เจ้าของร้าน (ยืนยันเอง)` });
     } else if (req.belowCostApproval) {
-      const a = await verifyApproval(tx, req.belowCostApproval, approverRoles('sales.belowCost'));
+      const a = await verifyApproval(tx, deps.pool, ctx, req.belowCostApproval, approverRoles('sales.belowCost'), 'ขายต่ำกว่าทุน');
       if (!a.ok) throw E.belowCost('Below-cost sale needs the owner\'s PIN', { lines: detail, approvalError: a.reason });
       audits.push({ action: 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · อนุมัติโดย ${a.approver.name}` });
     } else {
@@ -247,7 +258,7 @@ export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { 
   let approvedBy = '';
   if (p === 'apv') {
     if (!body.approverUserId || !body.pin) throw E.forbidden('Voiding needs a manager or owner PIN', { need: 'approval' });
-    const a = await verifyApproval(tx, { approverUserId: body.approverUserId, pin: body.pin }, approverRoles('sales.voidDoc'));
+    const a = await verifyApproval(tx, deps.pool, ctx, { approverUserId: body.approverUserId, pin: body.pin }, approverRoles('sales.voidDoc'), `ยกเลิก ${no}`);
     if (!a.ok) throw E.forbidden('Void approval rejected', { approvalError: a.reason });
     approvedBy = ` · อนุมัติโดย ${a.approver.name}`;
   } else if (p !== 1) {

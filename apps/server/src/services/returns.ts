@@ -47,7 +47,7 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
   let approvedBy = '';
   if (p === 'apv') {
     if (!req.approval) throw E.forbidden('A return needs a manager or owner PIN', { need: 'approval' });
-    const a = await verifyApproval(tx, req.approval, approverRoles('sales.return'));
+    const a = await verifyApproval(tx, deps.pool, ctx, req.approval, approverRoles('sales.return'), `รับคืนจาก ${req.sourceDocNo}`);
     if (!a.ok) throw E.forbidden('Return approval rejected', { approvalError: a.reason });
     approvedBy = ` · อนุมัติโดย ${a.approver.name}`;
   } else if (p !== 1) {

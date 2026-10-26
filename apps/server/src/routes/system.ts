@@ -1,13 +1,18 @@
-/** /healthz, /api/meta, on-prem pairing. */
+/** /healthz, /api/meta, on-prem first-run setup and client pairing. */
 import type { FastifyInstance } from 'fastify';
 import { withTenant } from '@erp/db';
+import { SetupReq } from '@erp/contracts';
 import type { Deps } from '../lib/context';
-import { optionalTenant, type Authed } from '../plugins/auth';
+import { E } from '../lib/errors';
+import { FailureLimiter } from '../lib/limiter';
+import { DEVICE_COOKIE, isLoopback } from '../lib/net';
+import { optionalTenant, signToken, type Authed } from '../plugins/auth';
 import { createPairingCode, redeemPairingCode } from '../services/admin';
+import { sessionUser } from '../services/auth';
+import { needsSetup, runSetup } from '../services/setup';
 import { capabilities } from '../capabilities';
 
 export const APP_VERSION = process.env.APP_VERSION ?? '0.1.0';
-const DEVICE_COOKIE = 'erp_device';
 
 interface ShopRow { name: string; tax_id: string; branch: string; vat_registered: boolean; b2b_vat_mode: 'inc' | 'exc' }
 
@@ -42,10 +47,19 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
         ? { name: shop.name, taxId: shop.tax_id, branch: shop.branch, vatRegistered: shop.vat_registered, b2bVatMode: shop.b2b_vat_mode }
         : { name: 'SCG Shop ERP', taxId: '', branch: '', vatRegistered: true, b2bVatMode: 'exc' },
       version: APP_VERSION,
+      needsSetup: !shop && deps.edition === 'onprem' ? await needsSetup(deps.pool) : false,
     };
   });
 
   if (deps.edition !== 'onprem') return;
+
+  // ---------- on-prem first run: only from the main machine itself, only while the database is empty ----------
+  app.post('/api/setup', async (req, reply) => {
+    if (!isLoopback(req.ip)) throw E.forbidden('Run the first-time setup on the main machine (https://localhost)');
+    const ctx = await runSetup(deps.pool, SetupReq.parse(req.body));
+    reply.status(201);
+    return { token: signToken(app, ctx), user: sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role }) };
+  });
 
   // ---------- on-prem pairing (docs/DEPLOY.md §3) ----------
   app.post('/api/devices/pairing-code', authed(async (tx, ctx, _req, reply) => {
@@ -53,20 +67,20 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
     return createPairingCode(tx, ctx);
   }));
 
-  // Naive brute-force brake: 10 wrong codes per client IP per 10 minutes.
-  const failures = new Map<string, { n: number; until: number }>();
+  // Brute-force brake: 10 wrong codes per client IP per 10 minutes. req.ip is the socket address (trustProxy is
+  // off on-prem), and the limiter tracks at most 10 000 addresses.
+  const failures = new FailureLimiter({ max: 10, windowMs: 10 * 60_000, maxEntries: 10_000 });
   app.get('/pair', async (req, reply) => {
     const ip = req.ip;
-    const f = failures.get(ip);
     const wantsJson = (req.headers.accept ?? '').includes('application/json');
-    if (f && f.n >= 10 && f.until > Date.now()) return reply.status(429).send({ code: 'FORBIDDEN', message: 'Too many wrong pairing codes; wait 10 minutes' });
+    if (failures.blocked(ip)) return reply.status(429).send({ code: 'FORBIDDEN', message: 'Too many wrong pairing codes; wait 10 minutes' });
     const { code = '', name } = req.query as { code?: string; name?: string };
     const r = await redeemPairingCode(deps.pool, code.trim(), (name ?? req.headers['user-agent'] ?? 'client').slice(0, 120));
     if (!r) {
-      failures.set(ip, { n: (f && f.until > Date.now() ? f.n : 0) + 1, until: Date.now() + 10 * 60_000 });
+      failures.fail(ip);
       return reply.status(400).send({ code: 'VALIDATION', message: 'Pairing code is wrong, used or expired' });
     }
-    failures.delete(ip);
+    failures.clear(ip);
     const secure = req.protocol === 'https' ? '; Secure' : '';
     reply.header('set-cookie', `${DEVICE_COOKIE}=${r.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 3650}${secure}`);
     if (wantsJson) return { deviceId: r.deviceId, token: r.token };

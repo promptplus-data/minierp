@@ -134,7 +134,7 @@ describe('editions (M19)', () => {
     const { body, allRoutes } = await metaOf('cloud');
     expect(body.edition).toBe('cloud');
     expect(Meta.parse(body).capabilities).toEqual({ promptPlusOrders: true, promptPlusSso: true, scgFamily: true });
-    expect(allRoutes.filter((r) => !r.registered).map((r) => r.k).sort()).toEqual(['pair', 'pairingCode']);
+    expect(allRoutes.filter((r) => !r.registered).map((r) => r.k).sort()).toEqual(['pair', 'pairingCode', 'setup']);
   });
 });
 

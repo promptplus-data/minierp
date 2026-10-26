@@ -1,11 +1,12 @@
 /** Audit log reads (BR-18) and on-prem client pairing. */
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import { withTenant, type Pool, type Tx } from '@erp/db';
 import type { PageQuery } from '@erp/contracts';
 import { writeAudit } from '../lib/audit';
 import { requirePerm, type Ctx } from '../lib/context';
 import { E } from '../lib/errors';
 import { decodeCursor, pageOf } from '../lib/paging';
+import { sha256 } from '../lib/net';
 
 export async function auditLog(tx: Tx, ctx: Ctx, q: PageQuery) {
   requirePerm(ctx, 'sys.log', { readOnly: true });
@@ -37,7 +38,6 @@ export async function verifyAudit(tx: Tx, ctx: Ctx): Promise<{ ok: boolean; brok
 }
 
 export const PAIRING_TTL_MIN = 10;
-const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 export async function createPairingCode(tx: Tx, ctx: Ctx): Promise<{ code: string; expiresAt: string }> {
   if (!['owner', 'manager'].includes(ctx.role)) throw E.forbidden('Only the owner or a manager can pair a new machine');

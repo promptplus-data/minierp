@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { withTenant, type Tx } from '@erp/db';
 import type { Ctx, Deps } from '../lib/context';
 import { E, isUuid } from '../lib/errors';
+import { cookie, DEVICE_COOKIE, isLoopback, sha256 } from '../lib/net';
 import { loadActiveUser } from '../services/auth';
 
 export interface TokenClaims { sub: string; tid: string }
@@ -46,6 +47,11 @@ export function makeAuthed(deps: Deps) {
     return withTenant(deps.pool, claims.tid, async (tx) => {
       const u = await loadActiveUser(tx, claims.sub);
       if (!u) throw E.unauthorized('User is not active');
+      if (deps.requireDevicePairing && !isLoopback(req.ip)) {
+        const token = cookie(req, DEVICE_COOKIE);
+        const ok = token && (await tx.query(`select 1 from devices where token_hash = $1 and revoked_at is null`, [sha256(token)])).rowCount;
+        if (!ok) throw E.forbidden('This machine is not paired with the main machine; pair it with a code first', { reason: 'DEVICE_NOT_PAIRED' });
+      }
       return handler(tx, { tenantId: claims.tid, userId: u.id, name: u.name, role: u.role }, req, reply);
     });
   };

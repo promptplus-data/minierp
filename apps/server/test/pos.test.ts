@@ -131,10 +131,13 @@ describe('below cost (BR-16)', () => {
     expect(r.body.details.lines[0]).toMatchObject({ productId: env.seed.products.p1, sell: '112.15', cost: '124.44' });
   });
 
-  it('rejects a manager PIN (owner only)', async () => {
-    const r = await suda.post('/api/sales/pos', { ...body(), belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
+  it('rejects a manager PIN (owner only), and nobody approves their own sale', async () => {
+    const bySuda = { ...saleBody(env.seed, praeShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00'), discountApproval: { approverUserId: env.seed.users.suda, pin: '1234' } };
+    const r = await prae.post('/api/sales/pos', { ...bySuda, belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
     expect(r.status).toBe(409);
     expect(r.body.details.approvalError).toBe('ROLE_NOT_ALLOWED');
+    const self = await suda.post('/api/sales/pos', { ...body(), belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
+    expect(self.body.details.approvalError).toBe('SELF_APPROVAL');
   });
 
   it('rejects a wrong owner PIN', async () => {

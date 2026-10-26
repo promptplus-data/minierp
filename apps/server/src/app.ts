@@ -27,6 +27,10 @@ export interface BuildOptions {
   /** Allowed CORS origin(s) for a separately hosted web dev server. */
   corsOrigin?: string;
   https?: { pfx: Buffer; passphrase?: string };
+  /** Honour X-Forwarded-For (cloud behind a load balancer only). Default false; always false on-prem. */
+  trustProxy?: boolean;
+  /** Default: true on-prem. API calls from non-loopback clients need a paired device cookie. */
+  requireDevicePairing?: boolean;
   logger?: FastifyServerOptions['logger'];
   hooks?: TestHooks;
   today?: () => string;
@@ -34,10 +38,14 @@ export interface BuildOptions {
 
 export async function buildApp(opts: BuildOptions): Promise<FastifyInstance> {
   const edition: Edition = opts.edition ?? (process.env.EDITION === 'onprem' ? 'onprem' : 'cloud');
+  const trustProxy = edition === 'cloud' && opts.trustProxy === true;
   const app = (opts.https
-    ? Fastify({ logger: opts.logger ?? false, https: opts.https, trustProxy: true })
-    : Fastify({ logger: opts.logger ?? false, trustProxy: true })) as unknown as FastifyInstance;
-  const deps: Deps = { pool: opts.pool, edition, hooks: opts.hooks ?? {}, today: opts.today ?? bangkokToday, backupScript: opts.backupScript };
+    ? Fastify({ logger: opts.logger ?? false, https: opts.https, trustProxy })
+    : Fastify({ logger: opts.logger ?? false, trustProxy })) as unknown as FastifyInstance;
+  const deps: Deps = {
+    pool: opts.pool, edition, hooks: opts.hooks ?? {}, today: opts.today ?? bangkokToday, backupScript: opts.backupScript,
+    requireDevicePairing: opts.requireDevicePairing ?? edition === 'onprem',
+  };
 
   registerErrorHandler(app);
   if (opts.corsOrigin) await app.register(cors, { origin: opts.corsOrigin.split(',').map((s) => s.trim()) });

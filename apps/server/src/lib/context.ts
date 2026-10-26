@@ -24,6 +24,8 @@ export interface Deps {
   /** Business date 'YYYY-MM-DD' in the shop's time zone (Asia/Bangkok). */
   today: () => string;
   backupScript?: string;
+  /** On-prem: API requests from other LAN machines must carry a paired erp_device cookie. */
+  requireDevicePairing: boolean;
 }
 
 export const bangkokToday = (): string =>

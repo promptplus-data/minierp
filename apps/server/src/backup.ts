@@ -8,7 +8,9 @@ export function runBackupHook(script: string, log: FastifyBaseLogger, reason = '
     const [cmd, args] = isPs1
       ? [process.platform === 'win32' ? 'powershell.exe' : 'pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Reason', reason]]
       : [script, ['-Reason', reason]];
-    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, env: process.env });
+    // Not the server's DATABASE_URL: that role is RLS-restricted; backup.ps1 then uses the owner from secrets.json.
+    const { DATABASE_URL: _serverDb, ...env } = process.env;
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, env });
     child.on('error', (err) => log.warn({ err, script }, 'backup hook failed to start'));
     child.on('exit', (code) => (code ? log.warn({ code, script }, 'backup hook exited with an error') : log.info({ script }, 'backup hook finished')));
     child.unref();

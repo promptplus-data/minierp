@@ -38,6 +38,8 @@ const app = await buildApp({
   backupScript: edition === 'onprem' ? env.BACKUP_SCRIPT : undefined,
   corsOrigin: env.CORS_ORIGIN,
   https,
+  trustProxy: /^(1|true)$/i.test(env.TRUST_PROXY ?? ''),
+  requireDevicePairing: edition === 'onprem' && env.REQUIRE_DEVICE_PAIRING !== '0',
   logger: { level: env.LOG_LEVEL ?? 'info' },
 });
 

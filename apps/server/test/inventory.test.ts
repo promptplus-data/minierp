@@ -81,12 +81,13 @@ describe('manual receipt (REQ-M05-06)', () => {
       vendorId: env.seed.vendors.v1, vendorInvoiceNo: 'IV-001', deliveryNo: 'DN-001', warehouseId: W('WH2'),
       lines: [{ productId: P('p1'), qty: '100', unitCost: '120.00' }, { productId: P('p6'), unitIdx: 1, qty: '1', unitCost: '1400.00' }], billDiscount: '134.00',
     };
-    const r = await chai.post('/api/stock/receipts', body);
+    const r = await suda.post('/api/stock/receipts', body); // manager: sees costs (data.cost)
     expect(r.status).toBe(201);
     expect(r.body.no).toBe('GR2610-0001');
     // 12000 + 1400 = 13400; discount 1% each → p1 118.80 / bag, p6 1386 / 20 = 69.30 per เส้น
     expect(r.body.lines).toEqual([{ productId: P('p1'), qty: '100', unitCost: '118.8' }, { productId: P('p6'), qty: '20', unitCost: '69.3' }]);
     const dup = await chai.post('/api/stock/receipts', body);
+    expect(dup.body.code).toBe('CONFLICT');
     expect(dup.status).toBe(409);
   });
 });
