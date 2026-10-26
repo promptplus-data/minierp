@@ -19,5 +19,7 @@ export const Meta = z.object({
   capabilities: Capabilities,
   shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
   version: z.string(),
+  /** On-prem first run: no shop yet; the web shows the setup screen (POST /api/setup). */
+  needsSetup: z.boolean().default(false),
 });
 export type Meta = z.infer<typeof Meta>;

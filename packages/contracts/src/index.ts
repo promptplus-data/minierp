@@ -7,6 +7,8 @@ import { z } from 'zod';
 
 export const Dec = z.string().regex(/^-?\d+(\.\d+)?$/, 'decimal string');
 export type Dec = z.infer<typeof Dec>;
+/** Decimal string that may not be negative: prices, costs, discounts, payments, cash amounts. */
+export const DecNN = Dec.refine((s) => !s.startsWith('-'), 'must not be negative');
 
 // Edition, Capabilities and Meta live in ./meta so a server bundle that does not import them
 // (the on-prem server) carries none of the cloud-only capability names (scripts/check-onprem.mjs).
@@ -44,11 +46,11 @@ export const Approver = z.object({ id: z.string(), name: z.string(), role: Role 
 export type Approver = z.infer<typeof Approver>;
 
 // ---------- master data (M03) ----------
-export const ProductUnit = z.object({ name: z.string(), factor: Dec, price: Dec.optional() });
+export const ProductUnit = z.object({ name: z.string(), factor: Dec, price: DecNN.optional() });
 export const Product = z.object({
   id: z.string(), sku: z.string(), name: z.string(), barcode: z.string().nullable(), category: z.string(),
   isScg: z.boolean(), kind: z.enum(['stock', 'service']), vat: z.enum(['v7', 'exempt']),
-  price: Dec, cost: Dec.nullable(), // cost hidden (null) when caller lacks data.cost
+  price: DecNN, cost: Dec.nullable(), // cost hidden (null) when caller lacks data.cost
   units: z.array(ProductUnit).min(1), reorderPoint: Dec, active: z.boolean(),
 });
 export type Product = z.infer<typeof Product>;
@@ -72,7 +74,7 @@ export const StockLot = z.object({ id: z.string(), productId: z.string(), wareho
 export const StockLineIn = z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec });
 export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on onprem)
   vendorId: z.string(), vendorInvoiceNo: z.string().min(1), deliveryNo: z.string().min(1), warehouseId: z.string(),
-  lines: z.array(StockLineIn.extend({ unitCost: Dec })).min(1), billDiscount: Dec.default('0'),
+  lines: z.array(StockLineIn.extend({ unitCost: DecNN })).min(1), billDiscount: DecNN.default('0'),
 });
 export const TransferReq = z.object({ fromWarehouseId: z.string(), toWarehouseId: z.string(), lines: z.array(StockLineIn).min(1), note: z.string().optional() });
 export const IssueReq = z.object({ warehouseId: z.string(), lines: z.array(StockLineIn).min(1), reason: z.string().min(1) });
@@ -91,9 +93,9 @@ export const AdjustRequest = z.object({
 export const AdjustListQuery = pageQuery.extend({ status: z.enum(['pending', 'approved', 'rejected']).optional() });
 
 // ---------- shift (M07-06) ----------
-export const OpenShiftReq = z.object({ float: Dec, deviceId: z.string() });
-export const CashMoveReq = z.object({ type: z.enum(['in', 'out']), amount: Dec, note: z.string().min(1) });
-export const CloseShiftReq = z.object({ counted: Dec, note: z.string().optional() });
+export const OpenShiftReq = z.object({ float: DecNN, deviceId: z.string() });
+export const CashMoveReq = z.object({ type: z.enum(['in', 'out']), amount: DecNN, note: z.string().min(1) });
+export const CloseShiftReq = z.object({ counted: DecNN, note: z.string().optional() });
 export const Shift = z.object({
   id: z.string(), no: z.string(), userId: z.string(), deviceId: z.string(), openedAt: z.string(), closedAt: z.string().nullable(),
   float: Dec, cashSales: Dec, cashRefunds: Dec, cashIn: Dec, cashOut: Dec, expected: Dec, counted: Dec.nullable(), diff: Dec.nullable(),
@@ -102,16 +104,17 @@ export const Shift = z.object({
 export type Shift = z.infer<typeof Shift>;
 
 // ---------- sales (M07, M08) ----------
-export const Discount = z.object({ kind: z.enum(['pct', 'amt']), value: Dec });
+export const Discount = z.object({ kind: z.enum(['pct', 'amt']), value: DecNN })
+  .refine((x) => x.kind !== 'pct' || Number(x.value) <= 100, { message: 'percent discount must be 0..100', path: ['value'] });
 export const PaymentMethod = z.enum(['cash', 'transfer', 'promptpay', 'card']);
 export const PosSaleReq = z.object({
   idempotencyKey: z.string().uuid(),
   shiftId: z.string(), warehouseId: z.string(),
   docKind: z.enum(['abb', 'full', 'receipt']), // receipt = non-VAT shop
   customerId: z.string().optional(),
-  lines: z.array(z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: Dec, discount: Discount.optional() })).min(1),
-  billDiscount: Dec.default('0'),
-  payments: z.array(z.object({ method: PaymentMethod, amount: Dec })).min(1),
+  lines: z.array(z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional() })).min(1),
+  billDiscount: DecNN.default('0'),
+  payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).min(1),
   belowCostApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(), // BR-16 owner only
   discountApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),  // over role cap
 });
@@ -144,6 +147,16 @@ export const ReturnReq = z.object({
 // ---------- audit (BR-18) ----------
 export const AuditEntry = z.object({ id: z.string(), at: z.string(), user: z.string(), action: z.string(), object: z.string(), ref: z.string().nullable(), detail: z.string() });
 
+// ---------- on-prem first run (GET /api/meta needsSetup) ----------
+export const SetupReq = z.object({
+  shop: z.object({
+    name: z.string().min(1), taxId: z.string().default(''), branch: z.string().default('สำนักงานใหญ่'), address: z.string().default(''), phone: z.string().default(''),
+    vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']).default('exc'),
+  }),
+  owner: z.object({ username: z.string().min(1), name: z.string().min(1), password: z.string().min(6), pin: z.string().regex(/^\d{4,6}$/) }),
+});
+export type SetupReq = z.infer<typeof SetupReq>;
+
 // ---------- on-prem client pairing ----------
 export const PairingCode = z.object({ code: z.string().regex(/^\d{6}$/), expiresAt: z.string() });
 
@@ -161,7 +174,7 @@ export const routes = {
   vendors: 'GET /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
   healthz: 'GET /healthz',
   // onprem only
-  pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair',
+  pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair', setup: 'POST /api/setup',
   // cloud only — not registered (404 NOT_AVAILABLE_IN_EDITION) on onprem
   ppIncoming: 'GET /api/promptplus/incoming', ppOrderFromDoc: 'POST /api/promptplus/orders',
 } as const;
