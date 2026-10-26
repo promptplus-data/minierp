@@ -18,6 +18,17 @@ describe('auth (M01, BR-18)', () => {
     expect(me.body.id).toBe(env.seed.users.prae);
   });
 
+  it('lists active approvers (owner, manager) for PIN approvals', async () => {
+    const r = await login(env.app, 'prae');
+    const res = await r.get('/api/users/approvers');
+    expect(res.status).toBe(200);
+    expect(res.body.items).toEqual([
+      { id: env.seed.users.charoen, name: 'คุณเจริญ ศรีสุข', role: 'owner' },
+      { id: env.seed.users.suda, name: 'คุณสุดา ศรีสุข', role: 'manager' },
+    ]);
+    expect((await client(env.app).get('/api/users/approvers')).status).toBe(401);
+  });
+
   it('rejects requests without a token', async () => {
     const r = await client(env.app).get('/api/products');
     expect(r.status).toBe(401);

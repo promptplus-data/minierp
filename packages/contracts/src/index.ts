@@ -39,6 +39,9 @@ export const LoginReq = z.object({
 export const SessionUser = z.object({ id: z.string(), name: z.string(), role: Role, perms: z.record(z.union([z.literal(0), z.literal(1), z.literal('ro'), z.literal('apv'), z.number()])) });
 export type SessionUser = z.infer<typeof SessionUser>;
 export const LoginRes = z.object({ token: z.string(), user: SessionUser });
+/** GET /api/users/approvers: active users whose PIN can approve (owner, manager). The UI needs their ids for `Approval`. */
+export const Approver = z.object({ id: z.string(), name: z.string(), role: Role });
+export type Approver = z.infer<typeof Approver>;
 
 // ---------- master data (M03) ----------
 export const ProductUnit = z.object({ name: z.string(), factor: Dec, price: Dec.optional() });
@@ -155,7 +158,7 @@ export const routes = {
   posSale: 'POST /api/sales/pos', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
   returnsEligible: 'GET /api/returns/eligible', returnCreate: 'POST /api/returns',
   audit: 'GET /api/audit-log', auditVerify: 'GET /api/audit-log/verify',
-  vendors: 'GET /api/vendors', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
+  vendors: 'GET /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
   healthz: 'GET /healthz',
   // onprem only
   pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair',

@@ -16,6 +16,13 @@ export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): vo
     return { token: signToken(app, ctx), user: sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role }) };
   });
   app.get('/api/auth/me', authed(async (_tx, ctx) => sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role })));
+  // Who can approve with a PIN (owner, manager): the UI needs their ids for discount / below-cost / void / return approvals.
+  app.get('/api/users/approvers', authed(async (tx) => {
+    const r = await tx.query<{ id: string; name: string; role: 'owner' | 'manager' }>(
+      `select id, name, role from users where status = 'active' and role in ('owner','manager') order by case role when 'owner' then 0 else 1 end, name`,
+    );
+    return { items: r.rows };
+  }));
   app.post('/api/users/:id/unlock', authed(async (tx, ctx, req) => unlockUser(tx, ctx, (req.params as { id: string }).id)));
 
   app.get('/api/products', authed(async (tx, ctx, req) => {
