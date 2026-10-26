@@ -55,6 +55,17 @@ describe('BR-14 tenant isolation (RLS)', () => {
 });
 
 describe('BR-18 audit log', () => {
+  it('lists newest first by numeric chain_seq and pages without gaps past 9 entries', async () => {
+    for (let i = 0; i < 12; i++) await login(env.app, 'suda'); // 12 more audit rows
+    const owner = await login(env.app, 'charoen');
+    const all = (await owner.get('/api/audit-log?limit=100')).body.items.map((e: { id: string }) => Number(e.id));
+    expect(all.length).toBeGreaterThan(12);
+    expect(all).toEqual([...all].sort((a, b) => b - a));
+    const p1 = await owner.get('/api/audit-log?limit=5');
+    const p2 = await owner.get(`/api/audit-log?limit=5&cursor=${p1.body.nextCursor}`);
+    expect([...p1.body.items, ...p2.body.items].map((e: { id: string }) => Number(e.id))).toEqual(all.slice(0, 10));
+  });
+
   it('every mutation is logged with a valid per-tenant hash chain', async () => {
     const owner = await login(env.app, 'charoen');
     const page = await owner.get('/api/audit-log?limit=100');

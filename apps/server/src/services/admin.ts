@@ -23,7 +23,7 @@ export async function auditLog(tx: Tx, ctx: Ctx, q: PageQuery) {
   params.push(q.limit + 1);
   const r = await tx.query<{ id: string; chain_seq: string; at: Date; user_name: string; action: string; object: string; ref: string | null; detail: string }>(
     `select id::text, chain_seq::text, at, user_name, action, object, ref, detail from audit_log
-      ${where.length ? 'where ' + where.join(' and ') : ''} order by chain_seq desc limit $${params.length}`,
+      ${where.length ? 'where ' + where.join(' and ') : ''} order by audit_log.chain_seq desc limit $${params.length}`,
     params,
   );
   return pageOf(r.rows, q.limit, (a) => [a.chain_seq], (a) => ({ id: a.id, at: a.at.toISOString(), user: a.user_name, action: a.action, object: a.object, ref: a.ref, detail: a.detail }));
