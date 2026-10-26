@@ -8,8 +8,9 @@ import { z } from 'zod';
 export const Dec = z.string().regex(/^-?\d+(\.\d+)?$/, 'decimal string');
 export type Dec = z.infer<typeof Dec>;
 
-export const Edition = z.enum(['cloud', 'onprem']);
-export type Edition = z.infer<typeof Edition>;
+// Edition, Capabilities and Meta live in ./meta so a server bundle that does not import them
+// (the on-prem server) carries none of the cloud-only capability names (scripts/check-onprem.mjs).
+export * from './meta';
 
 export const pageQuery = z.object({
   q: z.string().optional(),
@@ -22,29 +23,19 @@ export type Page<T> = { items: T[]; nextCursor: string | null };
 
 /** Error body for every non-2xx response. */
 export const ApiError = z.object({
-  code: z.enum(['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'BELOW_COST', 'INSUFFICIENT_STOCK', 'SHIFT_REQUIRED', 'NOT_AVAILABLE_IN_EDITION', 'DOWNSTREAM_FIRST']),
+  code: z.enum(['VALIDATION', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'BELOW_COST', 'INSUFFICIENT_STOCK', 'SHIFT_REQUIRED', 'NOT_AVAILABLE_IN_EDITION', 'DOWNSTREAM_FIRST', 'INTERNAL']),
   message: z.string(),
   details: z.unknown().optional(),
 });
 export type ApiError = z.infer<typeof ApiError>;
 
-// ---------- meta / auth (M01, M19) ----------
-export const Capabilities = z.object({
-  promptPlusOrders: z.boolean(), // REQ-M05-01/02/05, M08-11 — false on onprem (REQ-M19-03)
-  promptPlusSso: z.boolean(),    // REQ-M01-01 — false on onprem
-  scgFamily: z.boolean(),        // M13 — onprem: true only while online
-});
-export const Meta = z.object({
-  edition: Edition,
-  capabilities: Capabilities,
-  shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
-  version: z.string(),
-});
-export type Meta = z.infer<typeof Meta>;
-
+// ---------- auth (M01) ----------
 export const Role = z.enum(['owner', 'manager', 'cashier', 'sales', 'wh', 'driver', 'acct', 'extacct']);
 export type Role = z.infer<typeof Role>;
-export const LoginReq = z.object({ username: z.string().min(1), password: z.string().min(1) });
+export const LoginReq = z.object({
+  username: z.string().min(1), password: z.string().min(1),
+  tenant: z.string().optional(), // shop code; only needed (cloud) when the username exists in several shops
+});
 export const SessionUser = z.object({ id: z.string(), name: z.string(), role: Role, perms: z.record(z.union([z.literal(0), z.literal(1), z.literal('ro'), z.literal('apv'), z.number()])) });
 export type SessionUser = z.infer<typeof SessionUser>;
 export const LoginRes = z.object({ token: z.string(), user: SessionUser });
@@ -66,6 +57,9 @@ export const Customer = z.object({
   term: z.discriminatedUnion('t', [z.object({ t: z.literal('cash') }), z.object({ t: z.literal('days'), x: z.number().int() }), z.object({ t: z.literal('nextDay'), x: z.number().int() }), z.object({ t: z.literal('eom') })]),
 });
 export type Customer = z.infer<typeof Customer>;
+export const CustomerCreate = Customer.omit({ id: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true });
+export const Vendor = z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable() });
+export type Vendor = z.infer<typeof Vendor>;
 export const Warehouse = z.object({ id: z.string(), name: z.string(), isPos: z.boolean(), active: z.boolean() });
 export type Warehouse = z.infer<typeof Warehouse>;
 
@@ -81,6 +75,17 @@ export const TransferReq = z.object({ fromWarehouseId: z.string(), toWarehouseId
 export const IssueReq = z.object({ warehouseId: z.string(), lines: z.array(StockLineIn).min(1), reason: z.string().min(1) });
 export const AdjustRequestReq = z.object({ warehouseId: z.string(), lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec })).min(1), reason: z.string().min(1) });
 export const StockShortage = z.object({ productId: z.string(), warehouseId: z.string(), need: Dec, have: Dec });
+/** Response of receipts / transfers / issues / adjustment approvals. Quantities in base units. */
+export const StockDoc = z.object({
+  id: z.string(), no: z.string(), type: z.enum(['GR', 'TR', 'ADJ']), date: z.string(), warehouseId: z.string(), toWarehouseId: z.string().nullable(),
+  lines: z.array(z.object({ productId: z.string(), qty: Dec, unitCost: Dec.nullable() })),
+});
+export type StockDoc = z.infer<typeof StockDoc>;
+export const AdjustRequest = z.object({
+  id: z.string(), no: z.string(), warehouseId: z.string(), lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec })), reason: z.string(),
+  status: z.enum(['pending', 'approved', 'rejected']), requestedBy: z.string(), decidedBy: z.string().nullable(), resultDocNo: z.string().nullable(), createdAt: z.string(),
+});
+export const AdjustListQuery = pageQuery.extend({ status: z.enum(['pending', 'approved', 'rejected']).optional() });
 
 // ---------- shift (M07-06) ----------
 export const OpenShiftReq = z.object({ float: Dec, deviceId: z.string() });
@@ -120,6 +125,8 @@ export const SalesDoc = z.object({
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });
 export type DocSummary = z.infer<typeof DocSummary>;
+/** PIN approval by another user (manager / owner), e.g. for a cashier's return. */
+export const Approval = z.object({ approverUserId: z.string(), pin: z.string() });
 export const VoidReq = z.object({ reason: z.string().min(1), approverUserId: z.string().optional(), pin: z.string().optional() });
 
 // ---------- returns (M08-06) ----------
@@ -128,10 +135,14 @@ export const EligibleQuery = pageQuery.extend({ days: z.enum(['7', '30', '90', '
 export const ReturnReq = z.object({
   sourceDocNo: z.string(), lines: z.array(z.object({ lineId: z.string(), qty: Dec })).min(1),
   condition: z.enum(['good', 'bad']), warehouseId: z.string().optional(), refund: z.enum(['cash', 'transfer', 'credit']), reason: z.string().min(1),
+  approval: Approval.optional(), // needed when the caller's sales.return is 'apv' (cashier, sales)
 });
 
 // ---------- audit (BR-18) ----------
 export const AuditEntry = z.object({ id: z.string(), at: z.string(), user: z.string(), action: z.string(), object: z.string(), ref: z.string().nullable(), detail: z.string() });
+
+// ---------- on-prem client pairing ----------
+export const PairingCode = z.object({ code: z.string().regex(/^\d{6}$/), expiresAt: z.string() });
 
 /** Route table — the single source of truth both apps import. */
 export const routes = {
@@ -143,7 +154,11 @@ export const routes = {
   shiftCurrent: 'GET /api/shifts/current', shiftOpen: 'POST /api/shifts/open', shiftMove: 'POST /api/shifts/:id/cash-moves', shiftClose: 'POST /api/shifts/:id/close',
   posSale: 'POST /api/sales/pos', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
   returnsEligible: 'GET /api/returns/eligible', returnCreate: 'POST /api/returns',
-  audit: 'GET /api/audit-log',
+  audit: 'GET /api/audit-log', auditVerify: 'GET /api/audit-log/verify',
+  vendors: 'GET /api/vendors', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
+  healthz: 'GET /healthz',
+  // onprem only
+  pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair',
   // cloud only — not registered (404 NOT_AVAILABLE_IN_EDITION) on onprem
   ppIncoming: 'GET /api/promptplus/incoming', ppOrderFromDoc: 'POST /api/promptplus/orders',
 } as const;

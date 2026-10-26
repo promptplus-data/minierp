@@ -1,3 +1,15 @@
-{ "name": "@erp/contracts", "version": "0.1.0", "type": "module", "main": "src/index.ts", "types": "src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit", "test": "echo no tests" },
-  "dependencies": { "zod": "^3.23.8" } }
+{
+  "name": "@erp/contracts",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "echo no tests"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "sideEffects": false
+}
