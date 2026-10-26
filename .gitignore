@@ -11,3 +11,4 @@ dist-onprem
 apps/installer/build
 apps/installer/Output
 apps/desktop/src-tauri/gen
+test-results
