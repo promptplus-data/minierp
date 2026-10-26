@@ -9,7 +9,9 @@
     - The server after a shift is closed (it runs the script named in its BACKUP_SCRIPT env
       with -Reason shift-close; the service account is LocalService)
     - The installer before an upgrade (-Reason pre-upgrade)
-  Connection: $env:DATABASE_URL if set (the server passes its own), else config\secrets.json.
+  Connection: $env:DATABASE_URL if set, else config\secrets.json (owner role erp, BYPASSRLS so every tenant
+  row is dumped). The server's shift-close hook deliberately does NOT pass its own DATABASE_URL: the server's
+  role is restricted by row-level security.
   Exit code 0 on success, 1 on failure. Prints the dump path on success.
 
   STATUS: NOT executed on a real Windows host yet.

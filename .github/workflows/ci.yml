@@ -141,4 +141,7 @@ jobs:
       - if: steps.detect.outputs.present == 'true'
         run: pnpm install --frozen-lockfile
       - if: steps.detect.outputs.present == 'true'
+        name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+      - if: steps.detect.outputs.present == 'true'
         run: pnpm e2e

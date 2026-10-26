@@ -83,6 +83,11 @@ if (Test-Path $secretsFile) {
   }
   $secrets | ConvertTo-Json | Set-Content -Path $secretsFile -Encoding UTF8
 }
+# Upgrades from builds before the restricted server role: add its password once.
+if (-not $secrets.PSObject.Properties['appDbPassword']) {
+  $secrets | Add-Member -NotePropertyName appDbPassword -NotePropertyValue (New-Secret)
+  $secrets | ConvertTo-Json | Set-Content -Path $secretsFile -Encoding UTF8
+}
 Set-RestrictedAcl $Dirs.config -AllowLocalService
 
 # ---- 3. initdb (first install only) ------------------------------------------
@@ -150,12 +155,19 @@ New-Item -ItemType Directory -Force -Path $Services | Out-Null
 Set-RestrictedAcl $Services -AllowLocalService
 $tokens = @{
   APP_DIR = $AppDir; DATA_DIR = $DataDir; PG_PORT = $PgPort; PG_MAJOR = '16'; HTTPS_PORT = $HttpsPort
-  DB_PASSWORD = $secrets.dbPassword; JWT_SECRET = $secrets.jwtSecret; PFX_PASSWORD = $secrets.pfxPassword
+  DB_APP_PASSWORD = $secrets.appDbPassword; JWT_SECRET = $secrets.jwtSecret; PFX_PASSWORD = $secrets.pfxPassword
 }
 Install-WinswService 'scgerp-postgres' $tokens
 Install-WinswService 'scgerp-server' $tokens
 
-# ---- 6. database, role, migrations -------------------------------------------
+# ---- 6. database, roles, migrations -------------------------------------------
+# Three roles (see apps/server/README.md "Database roles"):
+#   erp        LOGIN, owns the database and tables; runs migrations and backups. BYPASSRLS so pg_dump can read
+#              every tenant row (tables use FORCE ROW LEVEL SECURITY). Not a superuser. Never used by the server.
+#   erp_app    NOLOGIN; the server switches to it per transaction (SET LOCAL ROLE). SELECT/INSERT/UPDATE only,
+#              no DELETE/TRUNCATE, no UPDATE on audit_log; row-level security applies. Grants come from the migrations.
+#   erp_server LOGIN, member of erp_app; the only credentials the server service has (DATABASE_URL).
+# Created here as the postgres superuser because erp itself may not create roles.
 Start-Service scgerp-postgres
 Wait-Postgres
 $env:PGPASSWORD = $secrets.pgSuperPassword
@@ -165,11 +177,23 @@ if ($roleExists -ne '1') {
   Invoke-Native $psql @('-h', '127.0.0.1', '-p', $PgPort, '-U', 'postgres', '-v', 'ON_ERROR_STOP=1',
     '-c', "CREATE ROLE erp LOGIN PASSWORD '$($secrets.dbPassword)'", '-c', 'CREATE DATABASE erp OWNER erp')
 }
+$roleSql = @"
+ALTER ROLE erp NOSUPERUSER BYPASSRLS;
+DO `$`$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_app') THEN CREATE ROLE erp_app NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erp_server') THEN CREATE ROLE erp_server LOGIN; END IF;
+END `$`$;
+ALTER ROLE erp_server LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '$($secrets.appDbPassword)';
+GRANT erp_app TO erp_server;
+GRANT erp_app TO erp WITH ADMIN OPTION;
+GRANT CONNECT ON DATABASE erp TO erp_server;
+"@
+Invoke-Native $psql @('-h', '127.0.0.1', '-p', $PgPort, '-U', 'postgres', '-d', 'erp', '-v', 'ON_ERROR_STOP=1', '-c', $roleSql)
 Remove-Item Env:PGPASSWORD
 
 $migrate = Join-Path $AppDir 'server\migrate.mjs'
 if (Test-Path $migrate) {
-  Write-Host 'Running database migrations...'
+  Write-Host 'Running database migrations (as the owner role erp)...'
   $env:DATABASE_URL = "postgres://erp:$($secrets.dbPassword)@127.0.0.1:$PgPort/erp"
   $env:MIGRATIONS_DIR = Join-Path $AppDir 'server\migrations'
   $env:EDITION = 'onprem'

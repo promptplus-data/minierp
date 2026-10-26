@@ -21,7 +21,8 @@
   <env name="EDITION" value="onprem"/>
   <env name="HOST" value="0.0.0.0"/>
   <env name="PORT" value="{{HTTPS_PORT}}"/>
-  <env name="DATABASE_URL" value="postgres://erp:{{DB_PASSWORD}}@127.0.0.1:{{PG_PORT}}/erp"/>
+  <!-- restricted role (member of erp_app); migrations and backups use the owner erp from config\secrets.json -->
+  <env name="DATABASE_URL" value="postgres://erp_server:{{DB_APP_PASSWORD}}@127.0.0.1:{{PG_PORT}}/erp"/>
   <env name="JWT_SECRET" value="{{JWT_SECRET}}"/>
   <env name="WEB_DIST_DIR" value="{{APP_DIR}}\web"/>
   <env name="MIGRATIONS_DIR" value="{{APP_DIR}}\server\migrations"/>
