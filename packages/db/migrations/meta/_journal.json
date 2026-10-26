@@ -15,6 +15,13 @@
       "when": 1793031068199,
       "tag": "0001_rls_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793035067763,
+      "tag": "0002_approval_pin_lock",
+      "breakpoints": true
     }
   ]
 }

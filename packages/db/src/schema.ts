@@ -47,6 +47,9 @@ export const users = pgTable('users', {
   status: text('status').notNull().default('active'),
   failedLogins: integer('failed_logins').notNull().default(0),
   lockedAt: timestamp('locked_at', { withTimezone: true }),
+  /** Failed approval PINs (counted in their own committed transaction); approvals lock for 15 min at 5. */
+  pinFailed: integer('pin_failed').notNull().default(0),
+  pinLockedUntil: timestamp('pin_locked_until', { withTimezone: true }),
   phone: text('phone'),
   createdAt: createdAt(),
 }, (t) => [

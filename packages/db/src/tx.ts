@@ -45,6 +45,7 @@ export async function withTenant<T>(
 ): Promise<T> {
   const useRole = await canUseAppRole(pool);
   const client = await pool.connect();
+  let broken: Error | undefined;
   try {
     await client.query('BEGIN');
     if (useRole) await client.query('SET LOCAL ROLE erp_app');
@@ -56,9 +57,14 @@ export async function withTenant<T>(
     await client.query('COMMIT');
     return out;
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
+    // If even ROLLBACK fails the connection is in an unknown state: destroy it instead of returning it to the pool.
+    try {
+      await client.query('ROLLBACK');
+    } catch (rbErr) {
+      broken = rbErr instanceof Error ? rbErr : new Error(String(rbErr));
+    }
     throw err;
   } finally {
-    client.release();
+    client.release(broken);
   }
 }
