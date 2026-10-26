@@ -1,0 +1,3 @@
+{ "name": "@erp/core", "version": "0.1.0", "type": "module", "main": "src/index.ts", "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": { "decimal.js": "^10.4.3" } }

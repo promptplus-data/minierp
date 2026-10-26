@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+*.log
+coverage
+apps/desktop/src-tauri/target
+playwright-report
+test-results

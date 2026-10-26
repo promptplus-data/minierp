@@ -1,0 +1,27 @@
+{
+  "name": "scg-shop-erp",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev:server": "pnpm --filter @erp/server dev",
+    "dev:web": "pnpm --filter @erp/web dev",
+    "db:migrate": "pnpm --filter @erp/db migrate",
+    "db:seed": "pnpm --filter @erp/db seed",
+    "check:onprem": "node scripts/check-onprem.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "esbuild"
+    ]
+  }
+}
