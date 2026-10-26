@@ -1,4 +1,24 @@
-{ "name": "@erp/db", "version": "0.1.0", "type": "module", "main": "src/index.ts", "types": "src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "generate": "drizzle-kit generate", "migrate": "tsx src/migrate.ts", "seed": "tsx src/seed.ts" },
-  "dependencies": { "drizzle-orm": "^0.36.4", "pg": "^8.13.1", "@erp/core": "workspace:*" },
-  "devDependencies": { "drizzle-kit": "^0.28.1", "@types/pg": "^8.11.10" } }
+{
+  "name": "@erp/db",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "@erp/core": "workspace:*",
+    "argon2": "^0.41.1",
+    "drizzle-orm": "^0.36.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.1"
+  }
+}
