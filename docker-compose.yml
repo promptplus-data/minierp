@@ -1,0 +1,36 @@
+# Local development.
+#   docker compose up -d db          # just PostgreSQL; run `pnpm dev:server` / `pnpm dev:web` on the host
+#   docker compose up --build        # PostgreSQL + the production cloud image on http://localhost:3000
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: erp
+      POSTGRES_DB: erp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://erp:erp@db:5432/erp
+      EDITION: cloud
+      JWT_SECRET: dev-only-change-me
+      PORT: "3000"
+      RUN_MIGRATIONS: "1"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

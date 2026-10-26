@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SCG Shop ERP – Connect</title>
+  <style>
+    :root { --brand: #c8102e; --ink: #1d1d1f; --muted: #6b6b70; --line: #d9d9de; --bg: #f5f5f7; --card: #fff; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #f2f2f4; --muted: #a0a0a8; --line: #3a3a40; --bg: #18181b; --card: #222226; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--ink);
+      font: 15px/1.5 "Segoe UI", "Leelawadee UI", system-ui, sans-serif; }
+    main { width: min(440px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 28px; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    p.sub { margin: 0 0 20px; color: var(--muted); }
+    label { display: block; font-weight: 600; margin: 16px 0 6px; }
+    input, select { width: 100%; padding: 10px 12px; font: inherit; color: inherit; background: transparent;
+      border: 1px solid var(--line); border-radius: 8px; }
+    input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px; }
+    .row { display: flex; gap: 8px; }
+    .row > :first-child { flex: 1; }
+    #port { width: 96px; flex: none; }
+    #code { letter-spacing: 0.4em; font-size: 20px; text-align: center; }
+    button { font: inherit; border-radius: 8px; padding: 10px 14px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: inherit; }
+    button.primary { width: 100%; margin-top: 22px; background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .status { min-height: 1.5em; margin-top: 12px; color: var(--muted); font-size: 13px; }
+    .status.error { color: var(--brand); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>SCG Shop ERP</h1>
+    <p class="sub">เชื่อมต่อกับเครื่องหลัก · Connect to the main machine</p>
+
+    <label for="found">เครื่องหลักที่พบในเครือข่าย · Found on this network</label>
+    <div class="row">
+      <select id="found"><option value="">— searching… —</option></select>
+      <button id="rescan" type="button">ค้นหาใหม่</button>
+    </div>
+
+    <label for="host">หรือพิมพ์ IP · Or type the IP address</label>
+    <div class="row">
+      <input id="host" placeholder="192.168.1.10" inputmode="decimal" autocomplete="off" />
+      <input id="port" value="8443" inputmode="numeric" aria-label="Port" />
+    </div>
+
+    <label for="code">รหัสจับคู่ 6 หลัก · 6-digit pairing code</label>
+    <input id="code" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="000000" />
+
+    <button id="connect" class="primary" type="button" disabled>เชื่อมต่อ · Connect</button>
+    <div id="status" class="status" role="status"></div>
+  </main>
+
+  <script>
+    // Runs inside the Tauri webview (withGlobalTauri exposes window.__TAURI__).
+    // Opened in a plain browser for design work, discovery is skipped.
+    const invoke = window.__TAURI__?.core?.invoke;
+    const $ = (id) => document.getElementById(id);
+    const found = $('found'), host = $('host'), port = $('port'), code = $('code'), btn = $('connect'), status = $('status');
+    const LAST = 'scgerp.lastMain';
+
+    function setStatus(msg, isError = false) { status.textContent = msg; status.className = 'status' + (isError ? ' error' : ''); }
+    function validate() {
+      const okHost = /^[A-Za-z0-9.\-:]+$/.test(host.value.trim());
+      const okPort = /^\d{1,5}$/.test(port.value.trim());
+      btn.disabled = !(okHost && okPort && /^\d{6}$/.test(code.value));
+    }
+
+    async function scan() {
+      found.innerHTML = '<option value="">— searching… —</option>';
+      if (!invoke) { found.innerHTML = '<option value="">(discovery needs the desktop app)</option>'; return; }
+      try {
+        const list = await invoke('discover_main');
+        found.innerHTML = list.length ? '<option value="">— choose —</option>' : '<option value="">ไม่พบ · none found, type the IP below</option>';
+        for (const m of list) {
+          const o = document.createElement('option');
+          o.value = JSON.stringify({ host: m.host, port: m.port });
+          o.textContent = `${m.name} (${m.host}:${m.port})`;
+          found.append(o);
+        }
+      } catch (e) {
+        found.innerHTML = '<option value="">discovery failed</option>';
+        setStatus(String(e), true);
+      }
+    }
+
+    found.addEventListener('change', () => {
+      if (!found.value) return;
+      const m = JSON.parse(found.value);
+      host.value = m.host; port.value = String(m.port); validate(); code.focus();
+    });
+    for (const el of [host, port, code]) el.addEventListener('input', validate);
+    code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 6); validate(); });
+    $('rescan').addEventListener('click', scan);
+
+    btn.addEventListener('click', () => {
+      const h = host.value.trim(), p = port.value.trim();
+      const base = `https://${h.includes(':') ? `[${h}]` : h}:${p}`;
+      try { localStorage.setItem(LAST, JSON.stringify({ host: h, port: p })); } catch {}
+      setStatus(`กำลังเชื่อมต่อ ${base} …`);
+      // Server contract (apps/server, not implemented here): GET /pair?code=NNNNNN verifies the
+      // code shown on the main machine, sets a device cookie and redirects to the app.
+      window.location.href = `${base}/pair?code=${encodeURIComponent(code.value)}`;
+    });
+
+    try {
+      const last = JSON.parse(localStorage.getItem(LAST) || 'null');
+      if (last) { host.value = last.host; port.value = last.port; }
+    } catch {}
+    validate();
+    scan();
+  </script>
+</body>
+</html>

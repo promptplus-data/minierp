@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10.28.0"
+
+jobs:
+  verify:
+    name: Typecheck, test, build, on-prem guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U erp -d erp_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://erp:erp@localhost:5432/erp_test
+      JWT_SECRET: ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests (everything except the server)
+        run: pnpm -r --filter '!@erp/server' test
+
+      - name: Migrate test database
+        run: |
+          if [ -f packages/db/src/migrate.ts ]; then pnpm db:migrate; else echo "no migrate.ts yet, skipping"; fi
+
+      - name: Server tests (against PostgreSQL service)
+        run: pnpm --filter @erp/server test
+
+      - name: Build web (cloud)
+        run: VITE_EDITION=cloud pnpm --filter @erp/web build
+      - name: Build web (onprem)
+        run: VITE_EDITION=onprem pnpm --filter @erp/web exec vite build --outDir dist-onprem
+
+      - name: Bundle server (cloud)
+        run: node apps/server/build.cloud.mjs
+      - name: Bundle server (onprem)
+        run: node apps/server/build.onprem.mjs
+
+      - name: On-prem guard (source graph)
+        run: node scripts/check-onprem.mjs --source
+      - name: On-prem guard (built bundles)
+        run: node scripts/check-onprem.mjs apps/server/dist-onprem apps/web/dist-onprem
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundles
+          path: |
+            apps/server/dist-cloud
+            apps/server/dist-onprem
+            apps/web/dist
+            apps/web/dist-onprem
+          retention-days: 7
+
+  docker:
+    name: Docker image (cloud)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: scg-shop-erp:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  e2e:
+    name: End-to-end (placeholder)
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: erp
+          POSTGRES_PASSWORD: erp
+          POSTGRES_DB: erp_e2e
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U erp -d erp_e2e"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://erp:erp@localhost:5432/erp_e2e
+      JWT_SECRET: ci-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect e2e script
+        id: detect
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.e2e ? 0 : 1)"; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No root 'e2e' script yet; skipping end-to-end tests."
+          fi
+      - if: steps.detect.outputs.present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - if: steps.detect.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.detect.outputs.present == 'true'
+        run: pnpm e2e

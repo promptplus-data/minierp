@@ -1,0 +1,17 @@
+**/node_modules
+**/dist
+**/dist-cloud
+**/dist-onprem
+**/coverage
+**/*.log
+.env
+.env.*
+!.env.example
+.git
+.github
+apps/desktop
+apps/installer
+e2e
+playwright-report
+test-results
+docs

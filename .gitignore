@@ -6,3 +6,8 @@ coverage
 apps/desktop/src-tauri/target
 playwright-report
 test-results
+dist-cloud
+dist-onprem
+apps/installer/build
+apps/installer/Output
+apps/desktop/src-tauri/gen

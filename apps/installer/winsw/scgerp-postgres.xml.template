@@ -1,0 +1,28 @@
+<!--
+  WinSW v2.12 service definition for the bundled PostgreSQL.
+  install-main.ps1 copies this to services\scgerp-postgres.xml (next to the
+  renamed WinSW binary services\scgerp-postgres.exe), replacing {{...}} tokens.
+  The service is switched to NT AUTHORITY\LocalService with `sc.exe config` after
+  registration: postgres.exe refuses to run with administrator rights (LocalSystem).
+  UNTESTED on a real Windows machine.
+-->
+<service>
+  <id>scgerp-postgres</id>
+  <name>SCG Shop ERP Database</name>
+  <description>PostgreSQL {{PG_MAJOR}} for SCG Shop ERP (listens on 127.0.0.1:{{PG_PORT}} only).</description>
+  <executable>{{APP_DIR}}\pgsql\bin\postgres.exe</executable>
+  <arguments>-D "{{DATA_DIR}}\pgdata"</arguments>
+  <!-- Clean shutdown instead of TerminateProcess. -->
+  <stopexecutable>{{APP_DIR}}\pgsql\bin\pg_ctl.exe</stopexecutable>
+  <stoparguments>stop -D "{{DATA_DIR}}\pgdata" -m fast -w -t 60</stoparguments>
+  <stoptimeout>90 sec</stoptimeout>
+  <startmode>Automatic</startmode>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <logpath>{{DATA_DIR}}\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+</service>

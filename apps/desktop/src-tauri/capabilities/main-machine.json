@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-machine",
+  "description": "Lets the main machine's web UI (remote HTTPS origin on the LAN) reach IPC so it can call print_receipt. Any HTTPS origin is allowed because the main machine's address is only known at runtime; see apps/desktop/README.md (TODO: narrow to the paired origin at runtime).",
+  "windows": ["main"],
+  "remote": { "urls": ["https://*:*/*"] },
+  "permissions": ["core:default"]
+}

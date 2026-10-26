@@ -1,0 +1,44 @@
+<!--
+  WinSW v2.12 service definition for the SCG Shop ERP server (Node + dist-onprem/server.mjs).
+  install-main.ps1 renders this to services\scgerp-server.xml with secrets filled in and
+  restricts the file ACL to SYSTEM, Administrators and LocalService.
+  UNTESTED on a real Windows machine.
+
+  Environment contract with apps/server (the server code must honour these):
+    EDITION, HOST, PORT, DATABASE_URL, JWT_SECRET, WEB_DIST_DIR, MIGRATIONS_DIR,
+    TLS_PFX_FILE + TLS_PFX_PASSPHRASE (serve HTTPS when set), DATA_DIR, BACKUP_SCRIPT,
+    MDNS_SERVICE_TYPE (advertise for client discovery).
+-->
+<service>
+  <id>scgerp-server</id>
+  <name>SCG Shop ERP Server</name>
+  <description>SCG Shop ERP on-premise server (HTTPS on port {{HTTPS_PORT}}, LAN only).</description>
+  <depend>scgerp-postgres</depend>
+  <executable>{{APP_DIR}}\node\node.exe</executable>
+  <arguments>"{{APP_DIR}}\server\server.mjs"</arguments>
+  <workingdirectory>{{APP_DIR}}\server</workingdirectory>
+  <env name="NODE_ENV" value="production"/>
+  <env name="EDITION" value="onprem"/>
+  <env name="HOST" value="0.0.0.0"/>
+  <env name="PORT" value="{{HTTPS_PORT}}"/>
+  <env name="DATABASE_URL" value="postgres://erp:{{DB_PASSWORD}}@127.0.0.1:{{PG_PORT}}/erp"/>
+  <env name="JWT_SECRET" value="{{JWT_SECRET}}"/>
+  <env name="WEB_DIST_DIR" value="{{APP_DIR}}\web"/>
+  <env name="MIGRATIONS_DIR" value="{{APP_DIR}}\server\migrations"/>
+  <env name="TLS_PFX_FILE" value="{{DATA_DIR}}\certs\server.pfx"/>
+  <env name="TLS_PFX_PASSPHRASE" value="{{PFX_PASSWORD}}"/>
+  <env name="DATA_DIR" value="{{DATA_DIR}}"/>
+  <env name="BACKUP_SCRIPT" value="{{APP_DIR}}\scripts\backup.ps1"/>
+  <env name="MDNS_SERVICE_TYPE" value="_scgerp._tcp"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>20 sec</stoptimeout>
+  <logpath>{{DATA_DIR}}\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+</service>

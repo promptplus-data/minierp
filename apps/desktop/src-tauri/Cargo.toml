@@ -1,0 +1,29 @@
+[package]
+name = "scg-shop-erp-client"
+version = "0.1.0"
+description = "SCG Shop ERP client machine app (LAN shell + receipt printing)"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+mdns-sd = "0.21"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
