@@ -7,6 +7,8 @@ import { AuthProvider, useAuth } from './auth';
 import { Shell, useVisibleViews } from './Shell';
 import { ToastProvider } from './ui';
 import Login from './pages/Login';
+import Setup from './pages/Setup';
+import { useMeta } from './data';
 import Products from './pages/Products';
 import Stock from './stock/Stock';
 import Pos from './pos/Pos';
@@ -38,8 +40,9 @@ function Guard({ path, children }: { path: string; children: JSX.Element }) {
 
 function App() {
   const { user, restoring } = useAuth();
+  const meta = useMeta();
   if (restoring) return <div className="lg"><div className="card lgcard"><div className="sk" /><div className="sk" /></div></div>;
-  if (!user) return <Login />;
+  if (!user) return meta.data?.needsSetup ? <Setup /> : <Login />;
   return (
     <Shell>
       <Routes>

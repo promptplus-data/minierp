@@ -16,6 +16,7 @@ const MetaLite = z.object({
   capabilities: z.record(z.boolean()),
   shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
   version: z.string(),
+  needsSetup: z.boolean().default(false),
 });
 export type MetaLite = z.infer<typeof MetaLite>;
 
