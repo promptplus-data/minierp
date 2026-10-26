@@ -10,13 +10,15 @@
     "dev:web": "pnpm --filter @erp/web dev",
     "db:migrate": "pnpm --filter @erp/db migrate",
     "db:seed": "pnpm --filter @erp/db seed",
-    "check:onprem": "node scripts/check-onprem.mjs"
+    "check:onprem": "node scripts/check-onprem.mjs",
+    "e2e": "node e2e/run.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "vitest": "^2.1.8",
+    "@playwright/test": "1.56.0",
     "@types/node": "^22.9.0",
-    "tsx": "^4.19.2"
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
