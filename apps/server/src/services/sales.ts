@@ -252,6 +252,16 @@ export async function summaries(tx: Tx, where: string, params: unknown[], limit:
   }));
 }
 
+/**
+ * Extra BR-22 downstream checks registered by module groups: return the numbers of active documents that still
+ * depend on `doc` (e.g. AR receipts or billing notes on a B2B invoice). Registered once per process.
+ */
+export type VoidGuard = (tx: Tx, doc: { id: string; no: string; type: string }) => Promise<string[]>;
+export const voidGuards: VoidGuard[] = [];
+export function registerVoidGuard(g: VoidGuard): void {
+  if (!voidGuards.includes(g)) voidGuards.push(g);
+}
+
 /** BR-03/BR-22: void = status flag + stock back into the original lots; the number is kept. */
 export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { reason: string; approverUserId?: string; pin?: string }): Promise<SalesDoc> {
   const p = can(ctx, 'sales.voidDoc');
@@ -269,8 +279,10 @@ export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { 
   if (doc.type === 'CN') throw E.conflict('Credit notes cannot be voided');
   const downstream = await tx.query<{ no: string }>(`select no from docs where ref_doc_id = $1 and status = 'active' order by created_at`, [doc.id]);
   const returned = await tx.query(`select 1 from doc_lines where doc_id = $1 and returned_qty > 0 limit 1`, [doc.id]);
-  if (downstream.rowCount || returned.rowCount) {
-    throw E.downstreamFirst(`${no} has downstream documents; handle them first`, { docs: downstream.rows.map((r) => r.no) });
+  const guarded: string[] = [];
+  for (const g of voidGuards) guarded.push(...(await g(tx, doc)));
+  if (downstream.rowCount || returned.rowCount || guarded.length) {
+    throw E.downstreamFirst(`${no} has downstream documents; handle them first`, { docs: [...downstream.rows.map((r) => r.no), ...guarded] });
   }
   await reverseOuts(tx, ctx, doc.id, { docType: doc.type, docNo: doc.no, docId: doc.id, note: `คืนสต็อก · ยกเลิก ${doc.no}` });
   await tx.query(`update docs set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [doc.id, ctx.userId, body.reason]);
