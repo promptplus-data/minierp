@@ -113,14 +113,26 @@ export const PosSaleReq = z.object({
   shiftId: z.string(), warehouseId: z.string(),
   docKind: z.enum(['abb', 'full', 'receipt']), // receipt = non-VAT shop
   customerId: z.string().optional(),
-  lines: z.array(z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional() })).min(1),
+  // A bill needs at least one line or one bundle (checked by the server). promoId: the live promo the client
+  // priced the line with (module C, M15); the server re-derives the promo and rejects one that is no longer live.
+  lines: z.array(z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional(), promoId: z.string().optional() })).default([]),
+  /** M15 bundle sets sold at the promo's set price (BR-17: every component cut FIFO, revenue split pro-rata). */
+  bundles: z.array(z.object({ promoId: z.string(), sets: Dec })).optional(),
   billDiscount: DecNN.default('0'),
   payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).min(1),
   belowCostApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(), // BR-16 owner only
   discountApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),  // over role cap
 });
 export type PosSaleReq = z.infer<typeof PosSaleReq>;
-export const DocLine = z.object({ id: z.string(), productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, discount: Dec, net: Dec, returnedQty: Dec, cogs: Dec.nullable() });
+export const DocLine = z.object({
+  id: z.string(), productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, discount: Dec, net: Dec, returnedQty: Dec, cogs: Dec.nullable(),
+  // Module C (M15 / BR-05) snapshot, present on POS lines priced by a promo, a bundle or a price list.
+  listPrice: Dec.nullable().optional(),
+  priceSource: z.enum(['customer', 'group', 'promo', 'bundle']).nullable().optional(),
+  promo: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
+  /** Bundle component line: lines with the same `no` are one bundle sold as `sets` sets (returned whole sets only). */
+  bundle: z.object({ no: z.number().int(), promoId: z.string(), name: z.string(), sets: Dec, qtyPerSet: Dec, setPrice: Dec }).nullable().optional(),
+});
 export const SalesDoc = z.object({
   id: z.string(), no: z.string(), type: z.enum(['ABB', 'INV', 'RC', 'CN', 'QT', 'SO', 'DO']), date: z.string(),
   customer: z.object({ id: z.string().nullable(), name: z.string(), phone: z.string().nullable() }),
@@ -128,6 +140,8 @@ export const SalesDoc = z.object({
   totals: z.object({ gross: Dec, lineDisc: Dec, billDisc: Dec, base7: Dec, exempt: Dec, vat: Dec, total: Dec }),
   payments: z.array(z.object({ method: PaymentMethod, amount: Dec })), status: z.enum(['active', 'void']),
   voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(), createdBy: z.string(), ref: z.string().nullable(),
+  /** ABB only: POS ID of the machine (module C registry, REQ-M01-07 / REQ-M07-04). */
+  posId: z.string().nullable().optional(),
 });
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });
