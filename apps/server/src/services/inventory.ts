@@ -8,6 +8,7 @@ import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { addLot, applyOut, currentAvgCost, lockLots, planTakes, recordIn, type LockedLot } from '../lib/stock';
+import { billDiscountMode, onGoodsReceipt, type GrHookLine } from '../modules/purchasing/grhook';
 
 /** F9: unit costs in stock documents are shown only with data.cost. */
 export const maskStockDoc = (ctx: Ctx, doc: StockDoc): StockDoc =>
@@ -124,10 +125,13 @@ export async function receipt(
   const lines = await baseLines(tx, req.lines);
   const amounts = req.lines.map((l) => money(d(l.qty).times(d(l.unitCost))));
   if (d(req.billDiscount).lt(0) || d(req.billDiscount).gt(sum(amounts))) throw E.validation('Bill discount must be between 0 and the receipt total');
-  const disc = allocate(req.billDiscount, amounts);
+  // BR-19: the bill discount reduces lot cost only when the shop chose 'alloc'; by default it is a separate purchase discount.
+  const mode = await billDiscountMode(tx);
+  const disc = mode === 'alloc' ? allocate(req.billDiscount, amounts) : amounts.map(() => '0');
   const no = await nextDocNo(tx, ctx.tenantId, 'GR', deps.today());
   const docId = await newId(tx);
   const out: StockDoc['lines'] = [];
+  const grLines: GrHookLine[] = [];
   for (const [i, l] of lines.entries()) {
     const net = d(amounts[i]!).minus(disc[i]!);
     const unitCost = qty4(net.div(d(l.baseQty)));
@@ -139,13 +143,16 @@ export async function receipt(
     const lotId = await addLot(tx, ctx, { productId: l.p.id, warehouseId: wh.id, qty: l.baseQty, unitCost, ref: no });
     await recordIn(tx, ctx, wh.id, l.p.id, [{ lotId, qty: l.baseQty, unitCost }], { docType: 'GR', docNo: no, docId, note: `รับสินค้า · ${req.vendorInvoiceNo}` });
     out.push({ productId: l.p.id, qty: l.baseQty, unitCost });
+    const rl = req.lines[i]!;
+    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId });
   }
   const total = money(sum(amounts).minus(d(req.billDiscount)));
   const doc = await insertStockDocWithId(tx, ctx, docId, {
     no, type: 'GR', date: deps.today(), warehouseId: wh.id, vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, deliveryNo: req.deliveryNo, lines: out, total,
   });
+  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines }); // REQ-M18-01
   await deps.hooks.beforeCommit?.('receipt', tx);
-  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ · ฿${fmtTHB(total)}` }]);
+  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
   return doc;
 }
 

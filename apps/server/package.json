@@ -22,10 +22,14 @@
     "drizzle-orm": "^0.36.4",
     "fastify": "^5.1.0",
     "multicast-dns": "7.2.5",
+    "papaparse": "^5.7.0",
     "pg": "^8.13.1",
+    "read-excel-file": "^9.3.12",
+    "write-excel-file": "^4.1.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/papaparse": "^5.5.2",
     "@types/pg": "^8.11.10",
     "esbuild": "^0.28.2"
   }
