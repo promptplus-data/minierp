@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/promptplus/order.cancelled.schema.json",
+  "title": "Prompt Plus webhook: order.cancelled",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "order.cancelled"
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "order_no",
+        "cancelled_at",
+        "cancelled_by"
+      ],
+      "properties": {
+        "order_no": {
+          "type": "string"
+        },
+        "cancelled_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        },
+        "cancelled_by": {
+          "type": "string",
+          "enum": [
+            "dealer",
+            "shop",
+            "system"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "external_ref": {
+          "$ref": "defs.schema.json#/$defs/externalRef"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_01JBD0QZ3N8M6K4J2H1G9F7E5D",
+      "type": "order.cancelled",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-10-23T11:00:00+07:00",
+      "shop_id": "PP-SHOP-104552",
+      "data": {
+        "order_no": "PP-2610-00901",
+        "cancelled_at": "2026-10-23T10:58:00+07:00",
+        "cancelled_by": "dealer",
+        "reason": "สินค้าหมดสต็อกที่ผู้แทน",
+        "external_ref": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/common/webhook-envelope.schema.json",
+  "title": "Webhook envelope",
+  "description": "Common envelope for every webhook sent to SCG Shop ERP. Signed with X-Webhook-Signature (HMAC-SHA256 over `timestamp.raw_body`). Receivers must ignore unknown fields.",
+  "type": "object",
+  "required": [
+    "id",
+    "type",
+    "api_version",
+    "occurred_at",
+    "shop_id",
+    "data"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "Unique event id; equals X-Webhook-Id; dedupe key per source"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z_]+(\\.[a-z_]+)+$"
+    },
+    "api_version": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "occurred_at": {
+      "$ref": "defs.schema.json#/$defs/dateTime"
+    },
+    "shop_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Partner shop id, e.g. PP-SHOP-104552 or SFM-CM-00871"
+    },
+    "data": {
+      "type": "object"
+    }
+  }
+}

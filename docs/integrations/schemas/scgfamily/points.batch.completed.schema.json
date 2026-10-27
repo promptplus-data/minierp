@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/scgfamily/points.batch.completed.schema.json",
+  "title": "SCG Family webhook: points.batch.completed (BR-12)",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "points.batch.completed"
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "batch_id",
+        "status",
+        "accepted_bills",
+        "rejected_bills"
+      ],
+      "properties": {
+        "batch_id": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "completed_with_errors",
+            "failed"
+          ]
+        },
+        "accepted_bills": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected_bills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "bill_no",
+              "code"
+            ],
+            "properties": {
+              "bill_no": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "points_awarded_total": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_sf_01JBF0A2C4E6G8J0K2M4N6P8Q0",
+      "type": "points.batch.completed",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-10-27T03:12:00+07:00",
+      "shop_id": "SFM-CM-00871",
+      "data": {
+        "batch_id": "SFM-CM-00871-2026-10-26",
+        "status": "completed_with_errors",
+        "accepted_bills": 1,
+        "rejected_bills": [
+          {
+            "bill_no": "CN2610-0004",
+            "code": "REF_BILL_NOT_FOUND",
+            "message": "ไม่พบบิลอ้างอิง ABB2610-0198 ในระบบคะแนน"
+          }
+        ],
+        "points_awarded_total": 78
+      }
+    }
+  ]
+}

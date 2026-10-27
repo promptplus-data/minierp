@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/scgfamily/member.erased.schema.json",
+  "title": "SCG Family webhook: member.erased (proposed, PDPA)",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "member.erased"
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "member_id",
+        "pseudonym",
+        "erased_at"
+      ],
+      "properties": {
+        "member_id": {
+          "type": "string"
+        },
+        "pseudonym": {
+          "type": "string",
+          "description": "Value ERP stores in place of member_id where retention law allows"
+        },
+        "erased_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_sf_01JBG7C9E1G3J5K7M9P1R3T5V7",
+      "type": "member.erased",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-11-02T09:00:00+07:00",
+      "shop_id": "SFM-CM-00871",
+      "data": {
+        "member_id": "SF19872210",
+        "pseudonym": "SFX-7f3a9c",
+        "erased_at": "2026-11-02T08:55:00+07:00"
+      }
+    }
+  ]
+}

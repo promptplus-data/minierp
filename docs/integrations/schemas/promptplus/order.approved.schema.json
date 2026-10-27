@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/promptplus/order.approved.schema.json",
+  "title": "Prompt Plus webhook: order.approved (REQ-M05-01). order.status_changed uses the same data shape.",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "order.approved"
+    },
+    "data": {
+      "$ref": "defs.schema.json#/$defs/order"
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_01JBA4H6K8M0P2R4T6V8X0Z2B4",
+      "type": "order.approved",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-10-21T13:30:05+07:00",
+      "shop_id": "PP-SHOP-104552",
+      "data": {
+        "order_no": "PP-2610-00895",
+        "shop_id": "PP-SHOP-104552",
+        "dealer_id": "DLR-0017",
+        "dealer_name": "หจก. ทวีพัฒนาวัสดุ",
+        "status": "approved",
+        "status_label": "อนุมัติแล้ว",
+        "ordered_at": "2026-10-21T10:05:00+07:00",
+        "approved_at": "2026-10-21T13:30:00+07:00",
+        "eta_date": "2026-10-24",
+        "ship_to": {
+          "type": "shop",
+          "address": "ร้านวัสดุเจริญชัย 12 ถ.โชตนา อ.เมือง จ.เชียงใหม่"
+        },
+        "external_ref": {
+          "system": "scg-shop-erp",
+          "doc_type": "SO",
+          "doc_no": "SO2610-0009"
+        },
+        "lines": [
+          {
+            "line_no": 1,
+            "scg_code": "SCG-AAC-75",
+            "name": "อิฐมวลเบา 7.5 ซม.",
+            "unit_code": "PAL",
+            "unit_name": "พาเลท",
+            "base_factor": "100",
+            "qty_ordered": "4",
+            "qty_delivered": "0",
+            "unit_price": "2150.00",
+            "vat": "v7"
+          }
+        ],
+        "updated_at": "2026-10-21T13:30:00+07:00"
+      }
+    }
+  ]
+}

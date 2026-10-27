@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/promptplus/delivery.recorded_by_dealer.schema.json",
+  "title": "Prompt Plus webhook: delivery.recorded_by_dealer (OQ-09)",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "delivery.recorded_by_dealer"
+    },
+    "data": {
+      "allOf": [
+        {
+          "$ref": "defs.schema.json#/$defs/deliveryData"
+        },
+        {
+          "properties": {
+            "source": {
+              "const": "dealer"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_01JB8T2K7R5W3Y6Z9A1C4E7G0H",
+      "type": "delivery.recorded_by_dealer",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-10-19T16:05:00+07:00",
+      "shop_id": "PP-SHOP-104552",
+      "data": {
+        "delivery_no": "MAN-TW-1022",
+        "source": "dealer",
+        "order_no": "PP-2610-00880",
+        "dealer_id": "DLR-0017",
+        "dealer_name": "หจก. ทวีพัฒนาวัสดุ",
+        "delivered_at": "2026-10-19T15:30:00+07:00",
+        "recorded_by": "สมศักดิ์ (ทวีพัฒนา)",
+        "supersedes": null,
+        "lines": [
+          {
+            "line_no": 1,
+            "order_line_no": 1,
+            "scg_code": "SCG-ADH-20",
+            "name": "กาวซีเมนต์ปูกระเบื้อง 20 กก.",
+            "unit_code": "BAG",
+            "unit_name": "ถุง",
+            "base_factor": "1",
+            "qty": "60",
+            "unit_price": "175.00",
+            "vat": "v7"
+          }
+        ],
+        "bill_discount": "0.00",
+        "currency": "THB"
+      }
+    }
+  ]
+}

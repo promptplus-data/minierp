@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/promptplus/defs.schema.json",
+  "title": "Prompt Plus shared definitions",
+  "$defs": {
+    "deliveryLine": {
+      "type": "object",
+      "required": [
+        "line_no",
+        "scg_code",
+        "name",
+        "unit_code",
+        "unit_name",
+        "base_factor",
+        "qty",
+        "unit_price",
+        "vat"
+      ],
+      "properties": {
+        "line_no": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Stable line number within the delivery. BR-01 dedupe key = delivery_no + line_no"
+        },
+        "order_line_no": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "scg_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string"
+        },
+        "unit_code": {
+          "type": "string"
+        },
+        "unit_name": {
+          "type": "string"
+        },
+        "base_factor": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "qty": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "unit_price": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative",
+          "description": "Dealer net unit price excl. VAT for this unit (PP-Q06)"
+        },
+        "vat": {
+          "$ref": "../common/defs.schema.json#/$defs/vat"
+        }
+      }
+    },
+    "deliveryData": {
+      "type": "object",
+      "required": [
+        "delivery_no",
+        "source",
+        "order_no",
+        "dealer_id",
+        "delivered_at",
+        "lines",
+        "currency"
+      ],
+      "properties": {
+        "delivery_no": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "dm",
+            "dealer"
+          ]
+        },
+        "order_no": {
+          "type": "string"
+        },
+        "dealer_id": {
+          "type": "string"
+        },
+        "dealer_name": {
+          "type": "string"
+        },
+        "delivered_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        },
+        "proof": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "receiver_name": {
+              "type": "string"
+            },
+            "photo_url": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "recorded_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supersedes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "delivery_no values this delivery replaces (OQ-09)"
+        },
+        "lines": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/deliveryLine"
+          }
+        },
+        "bill_discount": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "currency": {
+          "$ref": "../common/defs.schema.json#/$defs/currency"
+        }
+      }
+    },
+    "orderLine": {
+      "type": "object",
+      "required": [
+        "line_no",
+        "scg_code",
+        "name",
+        "unit_code",
+        "base_factor",
+        "qty_ordered",
+        "qty_delivered"
+      ],
+      "properties": {
+        "line_no": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scg_code": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "unit_code": {
+          "type": "string"
+        },
+        "unit_name": {
+          "type": "string"
+        },
+        "base_factor": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "qty_ordered": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "qty_delivered": {
+          "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+        },
+        "unit_price": {
+          "oneOf": [
+            {
+              "$ref": "../common/defs.schema.json#/$defs/decimalNonNegative"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "vat": {
+          "$ref": "../common/defs.schema.json#/$defs/vat"
+        }
+      }
+    },
+    "order": {
+      "type": "object",
+      "required": [
+        "order_no",
+        "shop_id",
+        "dealer_id",
+        "status",
+        "lines",
+        "updated_at"
+      ],
+      "properties": {
+        "order_no": {
+          "type": "string"
+        },
+        "shop_id": {
+          "type": "string"
+        },
+        "dealer_id": {
+          "type": "string"
+        },
+        "dealer_name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "description": "Known: pending_dealer, approved, preparing, shipping, partially_delivered, delivered, cancelled, closed. Receivers must tolerate unknown values."
+        },
+        "status_label": {
+          "type": "string"
+        },
+        "ordered_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        },
+        "approved_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        },
+        "eta_date": {
+          "oneOf": [
+            {
+              "$ref": "../common/defs.schema.json#/$defs/date"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ship_to": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "shop",
+                "site"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "address": {
+              "type": "string"
+            },
+            "contact_name": {
+              "type": "string"
+            },
+            "contact_phone": {
+              "type": "string"
+            }
+          }
+        },
+        "external_ref": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "system",
+            "doc_type",
+            "doc_no"
+          ],
+          "properties": {
+            "system": {
+              "type": "string",
+              "const": "scg-shop-erp"
+            },
+            "doc_type": {
+              "type": "string",
+              "enum": [
+                "QT",
+                "SO"
+              ]
+            },
+            "doc_no": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/orderLine"
+          }
+        },
+        "updated_at": {
+          "$ref": "../common/defs.schema.json#/$defs/dateTime"
+        }
+      }
+    },
+    "externalRef": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "system",
+        "doc_type",
+        "doc_no"
+      ],
+      "properties": {
+        "system": {
+          "type": "string",
+          "const": "scg-shop-erp"
+        },
+        "doc_type": {
+          "type": "string",
+          "enum": [
+            "QT",
+            "SO"
+          ]
+        },
+        "doc_no": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    }
+  }
+}

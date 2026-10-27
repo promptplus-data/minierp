@@ -1,0 +1,653 @@
+openapi: 3.1.0
+info:
+  title: SCG Family API for SCG Shop ERP (proposed)
+  version: 0.1.0-draft
+  summary: Draft contract between SCG Family and SCG Shop ERP (M13, cloud edition only)
+  description: |
+    PROPOSED — not implemented by SCG Family yet. See docs/integrations/scgfamily.md for flows,
+    mapping, tax-invoice treatment and acceptance tests, and docs/integrations/README.md for auth,
+    idempotency, retries, webhook signatures, PDPA and the error format.
+
+    Realtime POS calls (lookup, evaluate, reserve, redeem) have a 3-second budget on the ERP side;
+    the POS continues without the coupon when SCG Family does not answer in time.
+    BR-11: redeem Idempotency-Key = `{shop_id}:{bill_no}:{coupon_code}`.
+servers:
+  - url: https://api-sandbox.scgfamily.example
+    description: Sandbox (TBD)
+  - url: https://api.scgfamily.example
+    description: Production (TBD)
+security:
+  - sfClientCredentials: []
+tags:
+  - name: members
+  - name: coupons
+  - name: points
+    description: BR-12 daily points batch
+  - name: reconciliation
+    description: REQ-M13-07
+  - name: erp-partner
+    description: Endpoints hosted by SCG Shop ERP for SCG Family
+
+paths:
+  /v1/members/lookup:
+    post:
+      tags: [members]
+      operationId: lookupMember
+      summary: Find a member by SCG Family ID, phone or app QR token
+      description: POST so phone numbers and QR tokens never appear in URLs or access logs.
+      security:
+        - sfClientCredentials: [sf.members.read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberLookupRequest' }
+            examples:
+              byId: { value: { shop_id: SFM-CM-00871, by: sf_id, value: SF22018834 } }
+              byPhone: { value: { shop_id: SFM-CM-00871, by: phone, value: '0812345678' } }
+      responses:
+        '200':
+          description: Member
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '404': { description: 'MEMBER_NOT_FOUND', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'PHONE_AMBIGUOUS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '410': { description: 'QR_EXPIRED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'MEMBER_INACTIVE', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '429': { $ref: '#/components/responses/RateLimited' }
+  /v1/members/{memberId}/coupons/evaluate:
+    post:
+      tags: [coupons]
+      operationId: evaluateCoupons
+      summary: List the member's coupons with eligibility and value computed by SCG Family for this cart
+      security:
+        - sfClientCredentials: [sf.coupons.evaluate]
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvaluateRequest' }
+      responses:
+        '200':
+          description: Coupons
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluateResponse' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/coupon-reservations:
+    post:
+      tags: [coupons]
+      operationId: reserveCoupon
+      summary: Reserve one coupon for a cart
+      security:
+        - sfClientCredentials: [sf.coupons.redeem]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReserveRequest' }
+      responses:
+        '201':
+          description: Reserved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '409': { description: 'COUPON_ALREADY_RESERVED, IDEMPOTENCY_KEY_REUSED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '410': { description: 'COUPON_ALREADY_USED, COUPON_EXPIRED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'COUPON_NOT_ELIGIBLE, ONE_COUPON_PER_BILL', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/coupon-reservations/{reservationId}/redeem:
+    post:
+      tags: [coupons]
+      operationId: redeemCoupon
+      summary: Redeem at bill close (BR-11). Idempotency-Key = {shop_id}:{bill_no}:{coupon_code}
+      security:
+        - sfClientCredentials: [sf.coupons.redeem]
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, example: 'SFM-CM-00871:ABB2610-0233:SFC-100-1K' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RedeemRequest' }
+      responses:
+        '200':
+          description: Redeemed (also returned on idempotent replay)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Redemption' }
+        '409': { description: 'COUPON_AMOUNT_CHANGED (details.discount_amount), IDEMPOTENCY_KEY_REUSED, IN_PROGRESS', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '410': { description: 'RESERVATION_EXPIRED, COUPON_ALREADY_USED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'COUPON_NOT_ELIGIBLE', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/coupon-reservations/{reservationId}/release:
+    post:
+      tags: [coupons]
+      operationId: releaseReservation
+      summary: Release a reservation (removed, member changed, held-bill timeout, redeem aborted …). Idempotent.
+      security:
+        - sfClientCredentials: [sf.coupons.redeem]
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shop_id, reason]
+              properties:
+                shop_id: { type: string }
+                reason: { type: string, enum: [removed, member_changed, cart_cleared, held_timeout, shift_closed, redeem_aborted, reserve_timeout] }
+      responses:
+        '200':
+          description: Released (also when already released or expired)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reservation_id, status]
+                properties:
+                  reservation_id: { type: string }
+                  status: { const: released }
+  /v1/redemptions/{redemptionId}/reverse:
+    post:
+      tags: [coupons]
+      operationId: reverseRedemption
+      summary: Give the coupon back after a bill void or an orphan redemption. Partial returns never call this (OQ-02).
+      security:
+        - sfClientCredentials: [sf.coupons.redeem]
+      parameters:
+        - name: redemptionId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shop_id, bill_no, reason]
+              properties:
+                shop_id: { type: string }
+                bill_no: { type: string }
+                reason: { type: string, enum: [bill_void, orphan_redemption] }
+                voided_at: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Reversed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [redemption_id, status]
+                properties:
+                  redemption_id: { type: string }
+                  status: { const: reversed }
+                  coupon_status: { type: string, enum: [available, expired] }
+        '422': { description: 'REDEMPTION_NOT_REVERSIBLE', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/redemptions:
+    get:
+      tags: [reconciliation]
+      operationId: listRedemptions
+      summary: Redemptions recorded by SCG Family (ERP nightly diff, timeout follow-up)
+      security:
+        - sfClientCredentials: [sf.reconciliation.read]
+      parameters:
+        - { name: shop_id, in: query, required: true, schema: { type: string } }
+        - { name: date, in: query, schema: { type: string, format: date } }
+        - { name: idempotency_key, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of redemptions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Redemption'
+                        - type: object
+                          properties:
+                            status: { type: string, enum: [redeemed, reversed] }
+                            idempotency_key: { type: string }
+                  next_cursor: { type: [string, 'null'] }
+  /v1/points/batches:
+    post:
+      tags: [points]
+      operationId: submitPointsBatch
+      summary: Daily bills with a member (BR-12). SCG Family decides eligible products and points.
+      security:
+        - sfClientCredentials: [sf.points.write]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, example: 'SFM-CM-00871:2026-10-26:1' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PointsBatch' }
+      responses:
+        '202':
+          description: Received; result arrives via the points.batch.completed webhook
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batch_id, status]
+                properties:
+                  batch_id: { type: string }
+                  status: { type: string, enum: [received, processing, completed, completed_with_errors, failed] }
+        '422': { description: 'BATCH_DATE_CLOSED', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  /v1/points/batches/{batchId}:
+    get:
+      tags: [points]
+      operationId: getPointsBatch
+      summary: Batch status (poll when the webhook did not arrive by 06:00)
+      security:
+        - sfClientCredentials: [sf.points.write]
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, example: SFM-CM-00871-2026-10-26 } }
+      responses:
+        '200':
+          description: Batch status (same shape as the webhook data)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id: { type: string }
+                  status: { type: string }
+                  accepted_bills: { type: integer }
+                  rejected_bills: { type: array, items: { type: object } }
+                  points_awarded_total: { type: integer }
+
+  # ---------- hosted by SCG Shop ERP ----------
+  /partner/scgfamily/v1/coupon-usages:
+    servers:
+      - url: https://app.scgshop-erp.example
+        description: SCG Shop ERP cloud (TBD)
+    get:
+      tags: [erp-partner]
+      operationId: erpListCouponUsages
+      summary: Coupon usage recorded in ERP for one shop and business date (REQ-M13-07)
+      security:
+        - erpPartnerClientCredentials: [erp.partner.reconciliation.read]
+      parameters:
+        - { name: shop_id, in: query, required: true, schema: { type: string, example: SFM-CM-00871 } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date, example: '2026-10-26' } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Usage page
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CouponUsagePage' }
+        '403': { $ref: '#/components/responses/Error' }
+  /hooks/scgfamily/v1/events:
+    servers:
+      - url: https://app.scgshop-erp.example
+    post:
+      tags: [erp-partner]
+      operationId: erpReceiveScgFamilyEvent
+      summary: Webhook receiver for SCG Family events
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '../schemas/scgfamily/points.batch.completed.schema.json'
+                - $ref: '../schemas/scgfamily/member.erased.schema.json'
+      responses:
+        '202': { description: Stored }
+        '200': { description: Duplicate event id }
+        '401': { description: INVALID_SIGNATURE or STALE_TIMESTAMP }
+
+webhooks:
+  points.batch.completed:
+    post:
+      summary: Result of a daily points batch
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/scgfamily/points.batch.completed.schema.json' }
+      responses:
+        '202': { description: Stored }
+  member.erased:
+    post:
+      summary: (Proposed) member exercised the PDPA right to erasure
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/scgfamily/member.erased.schema.json' }
+      responses:
+        '202': { description: Stored }
+
+components:
+  securitySchemes:
+    sfClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://api.scgfamily.example/oauth2/token
+          scopes:
+            sf.members.read: Member lookup
+            sf.coupons.evaluate: Evaluate coupons for a cart
+            sf.coupons.redeem: Reserve, redeem, release and reverse coupons
+            sf.points.write: Submit points batches
+            sf.reconciliation.read: List redemptions
+    erpPartnerClientCredentials:
+      type: oauth2
+      description: Issued by SCG Shop ERP to SCG Family
+      flows:
+        clientCredentials:
+          tokenUrl: https://app.scgshop-erp.example/oauth2/token
+          scopes:
+            erp.partner.reconciliation.read: Read coupon usage of shops linked to SCG Family
+
+  parameters:
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      schema: { type: string, example: SF22018834 }
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema: { type: string, example: rsv_01JBE2M4P6R8T0V2X4Z6B8D0F2 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    WebhookId:
+      name: X-Webhook-Id
+      in: header
+      required: true
+      schema: { type: string }
+    WebhookTimestamp:
+      name: X-Webhook-Timestamp
+      in: header
+      required: true
+      description: Unix seconds; 300-second replay window
+      schema: { type: integer }
+    WebhookSignature:
+      name: X-Webhook-Signature
+      in: header
+      required: true
+      description: 'v1=hex(HMAC_SHA256(secret, timestamp + "." + raw_body)); comma-separated during rotation'
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: RATE_LIMITED
+      headers:
+        Retry-After: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    DecimalNN:
+      type: string
+      pattern: '^\d+(\.\d+)?$'
+    Decimal:
+      type: string
+      pattern: '^-?\d+(\.\d+)?$'
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: COUPON_NOT_ELIGIBLE }
+        message: { type: string, example: ยอดสินค้า SCG ร่วมรายการไม่ถึง 1,000 บาท }
+        details: {}
+        trace_id: { type: string }
+    MemberLookupRequest:
+      type: object
+      required: [shop_id, by, value]
+      properties:
+        shop_id: { type: string, example: SFM-CM-00871 }
+        by: { type: string, enum: [sf_id, phone, qr] }
+        value: { type: string, maxLength: 512 }
+    Member:
+      type: object
+      required: [member_id, display_name, member_type, tier, status]
+      properties:
+        member_id: { type: string, example: SF22018834 }
+        display_name: { type: string, example: ช่างสมชาย ใ., description: Partially masked by SCG Family }
+        member_type: { type: string, enum: [contractor, homeowner], example: contractor }
+        member_type_label: { type: string, example: ช่าง }
+        tier: { type: string, example: Gold }
+        status: { type: string, enum: [active, inactive] }
+        phone_masked: { type: [string, 'null'], example: 081-xxx-5678 }
+        coupon_count: { type: integer, example: 3 }
+    CartLine:
+      type: object
+      required: [line_no, sku, is_scg, name, qty, base_qty, unit_price, line_discount, line_net, vat]
+      properties:
+        line_no: { type: integer, minimum: 1 }
+        sku: { type: string, example: SCG-CEM-T50 }
+        scg_code: { type: [string, 'null'], example: SCG-CEM-T50 }
+        is_scg: { type: boolean }
+        name: { type: string, example: ปูนซีเมนต์ตราเสือ 50 กก. }
+        category: { type: string, example: ปูนซีเมนต์ }
+        qty: { $ref: '#/components/schemas/DecimalNN' }
+        unit_name: { type: string, example: ถุง }
+        base_qty: { $ref: '#/components/schemas/DecimalNN' }
+        unit_price: { $ref: '#/components/schemas/DecimalNN' }
+        line_discount: { $ref: '#/components/schemas/DecimalNN' }
+        line_net: { $ref: '#/components/schemas/DecimalNN', description: 'After line discount, before shop bill discount and coupon (core.lineNet)' }
+        vat: { type: string, enum: [v7, exempt] }
+    CartTotals:
+      type: object
+      required: [sub]
+      properties:
+        gross: { $ref: '#/components/schemas/DecimalNN' }
+        line_discount: { $ref: '#/components/schemas/DecimalNN' }
+        sub: { $ref: '#/components/schemas/DecimalNN' }
+        shop_bill_discount: { $ref: '#/components/schemas/DecimalNN' }
+        coupon: { $ref: '#/components/schemas/DecimalNN' }
+        vat: { $ref: '#/components/schemas/DecimalNN' }
+        total: { $ref: '#/components/schemas/DecimalNN' }
+    Cart:
+      type: object
+      required: [lines, totals]
+      properties:
+        lines: { type: array, minItems: 1, items: { $ref: '#/components/schemas/CartLine' } }
+        totals: { $ref: '#/components/schemas/CartTotals' }
+    EvaluateRequest:
+      type: object
+      required: [shop_id, cart_id, currency, vat_mode, lines, totals]
+      properties:
+        shop_id: { type: string }
+        cart_id: { type: string, format: uuid }
+        currency: { const: THB }
+        vat_mode: { type: string, enum: [inc, exc, none] }
+        lines: { type: array, minItems: 1, items: { $ref: '#/components/schemas/CartLine' } }
+        totals: { $ref: '#/components/schemas/CartTotals' }
+    Coupon:
+      type: object
+      required: [coupon_code, title, expires_at, eligible, discount_amount]
+      properties:
+        coupon_code: { type: string, example: SFC-100-1K }
+        title: { type: string, example: ลด 100 บาท }
+        conditions_text: { type: string, example: ซื้อสินค้า SCG ร่วมรายการครบ 1,000 บาท }
+        expires_at: { type: string, format: date-time }
+        eligible: { type: boolean }
+        discount_amount: { $ref: '#/components/schemas/DecimalNN' }
+        applies_to_lines: { type: array, items: { type: integer } }
+        ineligible_code: { type: [string, 'null'], example: MIN_SPEND_NOT_MET }
+        ineligible_message: { type: [string, 'null'] }
+    EvaluateResponse:
+      type: object
+      required: [member_id, coupons]
+      properties:
+        member_id: { type: string }
+        max_coupons_per_bill: { type: integer, example: 1 }
+        coupons: { type: array, items: { $ref: '#/components/schemas/Coupon' } }
+    ReserveRequest:
+      type: object
+      required: [shop_id, member_id, coupon_code, cart_id, cart]
+      properties:
+        shop_id: { type: string }
+        member_id: { type: string }
+        coupon_code: { type: string }
+        cart_id: { type: string, format: uuid }
+        cart: { $ref: '#/components/schemas/Cart' }
+        terminal_id: { type: string, example: POS-01 }
+        cashier_ref: { type: string, description: Opaque ERP user reference (no personal data) }
+    Reservation:
+      type: object
+      required: [reservation_id, coupon_code, discount_amount, expires_at]
+      properties:
+        reservation_id: { type: string }
+        coupon_code: { type: string }
+        discount_amount: { $ref: '#/components/schemas/DecimalNN' }
+        expires_at: { type: string, format: date-time }
+    RedeemRequest:
+      type: object
+      required: [shop_id, member_id, coupon_code, bill_no, bill_type, bill_closed_at, expected_discount_amount, cart]
+      properties:
+        shop_id: { type: string }
+        member_id: { type: string }
+        coupon_code: { type: string }
+        bill_no: { type: string, example: ABB2610-0233 }
+        bill_type: { type: string, enum: [ABB, INV, RC] }
+        bill_closed_at: { type: string, format: date-time }
+        expected_discount_amount: { $ref: '#/components/schemas/DecimalNN' }
+        cart: { $ref: '#/components/schemas/Cart' }
+    Redemption:
+      type: object
+      required: [redemption_id, coupon_code, bill_no, discount_amount, redeemed_at]
+      properties:
+        redemption_id: { type: string, example: rdm_01JBE2Q8S0U2W4Y6A8C0E2G4J6 }
+        coupon_code: { type: string }
+        bill_no: { type: string }
+        member_id: { type: string }
+        discount_amount: { $ref: '#/components/schemas/DecimalNN' }
+        redeemed_at: { type: string, format: date-time }
+    PointsLine:
+      type: object
+      required: [line_no, sku, is_scg, base_qty, amount_incl_vat, amount_excl_vat]
+      properties:
+        line_no: { type: integer }
+        sku: { type: string }
+        scg_code: { type: [string, 'null'] }
+        is_scg: { type: boolean }
+        name: { type: string }
+        base_qty: { $ref: '#/components/schemas/Decimal' }
+        unit_name: { type: string }
+        amount_incl_vat: { $ref: '#/components/schemas/Decimal', description: 'After line discount, bill discount and coupon share (DocTotals.lines[].after); negative for returns' }
+        amount_excl_vat: { $ref: '#/components/schemas/Decimal' }
+    PointsBill:
+      type: object
+      required: [bill_no, kind, bill_type, closed_at, member_id, member_verified, total, lines]
+      properties:
+        bill_no: { type: string }
+        kind: { type: string, enum: [sale, return, void] }
+        bill_type: { type: string, enum: [ABB, INV, RC, CN] }
+        ref_bill_no: { type: [string, 'null'] }
+        closed_at: { type: string, format: date-time }
+        member_id: { type: string }
+        member_verified: { type: boolean, description: false when captured while SCG Family was unavailable }
+        coupon_code: { type: [string, 'null'] }
+        total: { $ref: '#/components/schemas/Decimal' }
+        lines: { type: array, items: { $ref: '#/components/schemas/PointsLine' } }
+    PointsBatch:
+      type: object
+      required: [batch_id, shop_id, business_date, chunk_no, chunk_count, bills, summary]
+      properties:
+        batch_id: { type: string, example: SFM-CM-00871-2026-10-26 }
+        shop_id: { type: string }
+        business_date: { type: string, format: date }
+        chunk_no: { type: integer, minimum: 1 }
+        chunk_count: { type: integer, minimum: 1 }
+        bills: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/PointsBill' } }
+        summary:
+          type: object
+          required: [bill_count, total]
+          properties:
+            bill_count: { type: integer }
+            total: { $ref: '#/components/schemas/Decimal' }
+    CouponUsage:
+      type: object
+      required: [bill_no, bill_type, bill_status, closed_at, member_id, coupon_code, redemption_id, discount_amount, status]
+      properties:
+        bill_no: { type: string }
+        bill_type: { type: string, enum: [ABB, INV, RC] }
+        bill_status: { type: string, enum: [active, void] }
+        closed_at: { type: string, format: date-time }
+        member_id: { type: string }
+        coupon_code: { type: string }
+        reservation_id: { type: [string, 'null'] }
+        redemption_id: { type: string }
+        discount_amount: { $ref: '#/components/schemas/DecimalNN' }
+        status: { type: string, enum: [redeemed, reversed, reverse_pending] }
+        reversed_at: { type: [string, 'null'], format: date-time }
+        returned: { type: string, enum: [none, partial, full], description: Returns never revoke the coupon (OQ-02) }
+    CouponUsagePage:
+      type: object
+      required: [shop_id, business_date, items, summary, next_cursor]
+      properties:
+        shop_id: { type: string }
+        business_date: { type: string, format: date }
+        items: { type: array, items: { $ref: '#/components/schemas/CouponUsage' } }
+        summary:
+          type: object
+          properties:
+            redeemed_count: { type: integer }
+            redeemed_amount: { $ref: '#/components/schemas/DecimalNN' }
+            reversed_count: { type: integer }
+            reversed_amount: { $ref: '#/components/schemas/DecimalNN' }
+        next_cursor: { type: [string, 'null'] }
+        generated_at: { type: string, format: date-time }

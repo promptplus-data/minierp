@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.scgshop-erp.example/integrations/promptplus/delivery.succeeded.schema.json",
+  "title": "Prompt Plus webhook: delivery.succeeded (REQ-M05-02)",
+  "allOf": [
+    {
+      "$ref": "../common/webhook-envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "properties": {
+    "type": {
+      "const": "delivery.succeeded"
+    },
+    "data": {
+      "allOf": [
+        {
+          "$ref": "defs.schema.json#/$defs/deliveryData"
+        },
+        {
+          "properties": {
+            "source": {
+              "const": "dm"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "examples": [
+    {
+      "id": "evt_01JBC6Z8Q4M2N7T5V9X3Y1K0AB",
+      "type": "delivery.succeeded",
+      "api_version": "2026-10-01",
+      "occurred_at": "2026-10-22T09:42:11+07:00",
+      "shop_id": "PP-SHOP-104552",
+      "data": {
+        "delivery_no": "8100234561",
+        "source": "dm",
+        "order_no": "PP-2610-00871",
+        "dealer_id": "DLR-0017",
+        "dealer_name": "หจก. ทวีพัฒนาวัสดุ",
+        "delivered_at": "2026-10-22T09:40:00+07:00",
+        "proof": {
+          "receiver_name": "ชัย",
+          "photo_url": "https://cdn.promptplus.example/pod/8100234561.jpg"
+        },
+        "supersedes": null,
+        "lines": [
+          {
+            "line_no": 10,
+            "order_line_no": 1,
+            "scg_code": "SCG-CEM-T50",
+            "name": "ปูนซีเมนต์ตราเสือ 50 กก.",
+            "unit_code": "BAG",
+            "unit_name": "ถุง",
+            "base_factor": "1",
+            "qty": "200",
+            "unit_price": "121.00",
+            "vat": "v7"
+          },
+          {
+            "line_no": 20,
+            "order_line_no": 2,
+            "scg_code": "SCG-ROOF-DL-GY",
+            "name": "กระเบื้องหลังคาลอนคู่ 50×120 ซม. สีเทา",
+            "unit_code": "SHT",
+            "unit_name": "แผ่น",
+            "base_factor": "1",
+            "qty": "300",
+            "unit_price": "43.50",
+            "vat": "v7"
+          },
+          {
+            "line_no": 30,
+            "order_line_no": 3,
+            "scg_code": "SCG-RIDGE-C",
+            "name": "ครอบสันโค้ง ลอนคู่ สีเทา",
+            "unit_code": "PCS",
+            "unit_name": "ชิ้น",
+            "base_factor": "1",
+            "qty": "40",
+            "unit_price": "38.00",
+            "vat": "v7"
+          }
+        ],
+        "bill_discount": "0.00",
+        "currency": "THB"
+      }
+    }
+  ]
+}

@@ -1,0 +1,666 @@
+openapi: 3.1.0
+info:
+  title: Prompt Plus API for SCG Shop ERP (proposed)
+  version: 0.1.0-draft
+  summary: Draft contract between Prompt Plus and SCG Shop ERP (cloud edition only)
+  description: |
+    PROPOSED — not implemented by Prompt Plus yet. See docs/integrations/promptplus.md for the
+    behaviour, mapping and acceptance tests, and docs/integrations/README.md for auth, idempotency,
+    retries, webhook signatures and the error format.
+
+    Conventions: money and quantities are decimal strings; timestamps are RFC 3339 with offset;
+    lists are cursor-paged (`limit`, `cursor` -> `next_cursor`); every state-changing POST requires
+    `Idempotency-Key`. Webhook payload schemas live in ../schemas/ (JSON Schema 2020-12) and are
+    the source of truth for event bodies.
+  contact:
+    name: SCG Shop ERP team
+servers:
+  - url: https://api-sandbox.promptplus.example
+    description: Sandbox (TBD)
+  - url: https://api.promptplus.example
+    description: Production (TBD)
+security:
+  - ppClientCredentials: []
+tags:
+  - name: catalog
+    description: REQ-M03-02 SCG product master
+  - name: shop
+    description: REQ-M03-02 dealers linked to the shop
+  - name: orders
+    description: REQ-M05-01 incoming, REQ-M08-11 create order, REQ-M05-05 receipts
+  - name: deliveries
+    description: REQ-M05-02 deliveries (polling fallback for webhooks)
+  - name: erp-sso
+    description: REQ-M01-01 endpoints hosted by SCG Shop ERP (OIDC relying party)
+  - name: erp-webhooks
+    description: Webhook receiver hosted by SCG Shop ERP
+
+paths:
+  /v1/catalog/products:
+    get:
+      tags: [catalog]
+      operationId: listCatalogProducts
+      summary: List SCG products (delta with updated_since)
+      security:
+        - ppClientCredentials: [pp.catalog.read]
+      parameters:
+        - $ref: '#/components/parameters/UpdatedSince'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of products
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductPage'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '5XX': { $ref: '#/components/responses/Error' }
+  /v1/catalog/products/{scgCode}:
+    get:
+      tags: [catalog]
+      operationId: getCatalogProduct
+      summary: Get one SCG product (used to map an unknown line in a delivery)
+      security:
+        - ppClientCredentials: [pp.catalog.read]
+      parameters:
+        - name: scgCode
+          in: path
+          required: true
+          schema: { type: string, example: SCG-CEM-T50 }
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  /v1/shops/{shopId}:
+    get:
+      tags: [shop]
+      operationId: getShop
+      summary: Shop profile (onboarding)
+      security:
+        - ppClientCredentials: [pp.dealers.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+      responses:
+        '200':
+          description: Shop
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Shop' }
+        '403': { $ref: '#/components/responses/Error' }
+  /v1/shops/{shopId}/dealers:
+    get:
+      tags: [shop]
+      operationId: listShopDealers
+      summary: Dealers linked to the shop (synced to ERP vendors)
+      security:
+        - ppClientCredentials: [pp.dealers.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - $ref: '#/components/parameters/UpdatedSince'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of dealers
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DealerPage' }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /v1/shops/{shopId}/orders:
+    get:
+      tags: [orders]
+      operationId: listShopOrders
+      summary: Orders of the shop (incoming goods, reconciliation)
+      security:
+        - ppClientCredentials: [pp.orders.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - name: status
+          in: query
+          description: Comma-separated statuses
+          schema: { type: string, example: 'approved,preparing,shipping' }
+        - name: external_ref
+          in: query
+          description: Find the order created from an ERP document (e.g. after a timeout)
+          schema: { type: string, example: SO2610-0009 }
+        - $ref: '#/components/parameters/UpdatedSince'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of orders
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderPage' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [orders]
+      operationId: createShopOrder
+      summary: Create an order from an ERP quotation / sales order (REQ-M08-11)
+      security:
+        - ppClientCredentials: [pp.orders.write]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderCreateRequest' }
+            examples:
+              toShop:
+                value:
+                  dealer_id: DLR-0017
+                  requested_date: '2026-10-29'
+                  ship_to: { type: shop }
+                  external_ref: { system: scg-shop-erp, doc_type: SO, doc_no: SO2610-0009, url: 'https://app.scgshop-erp.example/docs/SO2610-0009' }
+                  note: สั่งจาก SCG Shop ERP
+                  lines:
+                    - { scg_code: SCG-CEM-T50, unit_code: BAG, qty: '100' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderCreated' }
+        '200':
+          description: Idempotent replay of an earlier successful create
+          headers:
+            Idempotent-Replayed: { schema: { type: boolean } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrderCreated' }
+        '409':
+          description: IDEMPOTENCY_KEY_REUSED, IN_PROGRESS or DUPLICATE_EXTERNAL_REF (details.order_no)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: SKU_NOT_ORDERABLE (details.scg_codes), DEALER_NOT_LINKED, INVALID_UNIT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '5XX': { $ref: '#/components/responses/Error' }
+  /v1/shops/{shopId}/orders/{orderNo}:
+    get:
+      tags: [orders]
+      operationId: getShopOrder
+      summary: One order
+      security:
+        - ppClientCredentials: [pp.orders.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - $ref: '#/components/parameters/OrderNo'
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/shops/{shopId}/orders/{orderNo}/receipts:
+    post:
+      tags: [orders]
+      operationId: createOrderReceipt
+      summary: Tell Prompt Plus the shop received goods (REQ-M05-05; optional, PP-Q08)
+      security:
+        - ppClientCredentials: [pp.receipts.write]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - $ref: '#/components/parameters/OrderNo'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptRequest' }
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [receipt_id, order_status]
+                properties:
+                  receipt_id: { type: string, example: rcp_9f2c }
+                  order_status: { type: string, example: delivered }
+        '409': { $ref: '#/components/responses/Error' }
+        '422':
+          description: ORDER_NOT_RECEIVABLE
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /v1/shops/{shopId}/deliveries:
+    get:
+      tags: [deliveries]
+      operationId: listShopDeliveries
+      summary: Deliveries (DM and dealer-recorded) — polling fallback for webhooks
+      security:
+        - ppClientCredentials: [pp.deliveries.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - $ref: '#/components/parameters/UpdatedSince'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Page of deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '../schemas/promptplus/defs.schema.json#/$defs/deliveryData' }
+                  next_cursor: { type: [string, 'null'] }
+  /v1/shops/{shopId}/deliveries/{deliveryNo}:
+    get:
+      tags: [deliveries]
+      operationId: getShopDelivery
+      summary: One delivery
+      security:
+        - ppClientCredentials: [pp.deliveries.read]
+      parameters:
+        - $ref: '#/components/parameters/ShopId'
+        - name: deliveryNo
+          in: path
+          required: true
+          schema: { type: string, example: '8100234561' }
+      responses:
+        '200':
+          description: Delivery
+          content:
+            application/json:
+              schema: { $ref: '../schemas/promptplus/defs.schema.json#/$defs/deliveryData' }
+        '404': { $ref: '#/components/responses/Error' }
+
+  # ---------- hosted by SCG Shop ERP ----------
+  /api/auth/sso/promptplus/start:
+    servers:
+      - url: https://app.scgshop-erp.example
+        description: SCG Shop ERP cloud (TBD)
+    get:
+      tags: [erp-sso]
+      operationId: erpSsoStart
+      summary: OIDC third-party initiated login (initiate_login_uri) — REQ-M01-01
+      security: []
+      parameters:
+        - { name: iss, in: query, required: true, schema: { type: string, format: uri } }
+        - { name: login_hint, in: query, required: false, schema: { type: string, example: PP-SHOP-104552 } }
+        - { name: target_link_uri, in: query, required: false, schema: { type: string, example: /dash } }
+      responses:
+        '302':
+          description: Redirect to the Prompt Plus /oauth2/authorize endpoint (code + PKCE S256, state, nonce)
+        '400': { $ref: '#/components/responses/Error' }
+  /api/auth/sso/promptplus/callback:
+    servers:
+      - url: https://app.scgshop-erp.example
+    get:
+      tags: [erp-sso]
+      operationId: erpSsoCallback
+      summary: OIDC redirect_uri — exchanges the code, maps pp_shop_id + sub to the owner
+      security: []
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302': { description: Signed in; redirect to target_link_uri }
+        '401': { description: 'Invalid state, nonce or id_token' }
+        '403': { description: pp_role is not owner }
+  /hooks/promptplus/v1/events:
+    servers:
+      - url: https://app.scgshop-erp.example
+    post:
+      tags: [erp-webhooks]
+      operationId: erpReceivePromptPlusEvent
+      summary: Webhook receiver (all Prompt Plus event types)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '../schemas/promptplus/order.approved.schema.json'
+                - $ref: '../schemas/promptplus/order.cancelled.schema.json'
+                - $ref: '../schemas/promptplus/delivery.succeeded.schema.json'
+                - $ref: '../schemas/promptplus/delivery.recorded_by_dealer.schema.json'
+      responses:
+        '202': { $ref: '#/components/responses/WebhookAccepted' }
+        '200': { $ref: '#/components/responses/WebhookDuplicate' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401':
+          description: INVALID_SIGNATURE or STALE_TIMESTAMP (do not retry)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+
+webhooks:
+  order.approved:
+    post:
+      summary: Dealer approved an order (REQ-M05-01). order.status_changed uses the same body shape.
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/promptplus/order.approved.schema.json' }
+      responses:
+        '202': { $ref: '#/components/responses/WebhookAccepted' }
+        '200': { $ref: '#/components/responses/WebhookDuplicate' }
+  order.cancelled:
+    post:
+      summary: Order cancelled
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/promptplus/order.cancelled.schema.json' }
+      responses:
+        '202': { $ref: '#/components/responses/WebhookAccepted' }
+        '200': { $ref: '#/components/responses/WebhookDuplicate' }
+  delivery.succeeded:
+    post:
+      summary: DM delivered — ERP creates one draft goods receipt per delivery_no (REQ-M05-02, BR-01)
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/promptplus/delivery.succeeded.schema.json' }
+      responses:
+        '202': { $ref: '#/components/responses/WebhookAccepted' }
+        '200': { $ref: '#/components/responses/WebhookDuplicate' }
+  delivery.recorded_by_dealer:
+    post:
+      summary: Dealer recorded a delivery without DM (OQ-09 conflict rules apply)
+      parameters:
+        - $ref: '#/components/parameters/WebhookId'
+        - $ref: '#/components/parameters/WebhookTimestamp'
+        - $ref: '#/components/parameters/WebhookSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '../schemas/promptplus/delivery.recorded_by_dealer.schema.json' }
+      responses:
+        '202': { $ref: '#/components/responses/WebhookAccepted' }
+        '200': { $ref: '#/components/responses/WebhookDuplicate' }
+
+components:
+  securitySchemes:
+    ppClientCredentials:
+      type: oauth2
+      description: Server-to-server. Token is scoped to the shops that consented to SCG Shop ERP.
+      flows:
+        clientCredentials:
+          tokenUrl: https://id.promptplus.example/oauth2/token
+          scopes:
+            pp.catalog.read: Read the SCG product master
+            pp.dealers.read: Read the shop profile and linked dealers
+            pp.orders.read: Read orders of linked shops
+            pp.orders.write: Create orders for linked shops
+            pp.deliveries.read: Read deliveries of linked shops
+            pp.receipts.write: Report goods receipts
+    ppOidc:
+      type: openIdConnect
+      description: Owner SSO (REQ-M01-01). Authorization Code + PKCE; claims sub, pp_shop_id, pp_role.
+      openIdConnectUrl: https://id.promptplus.example/.well-known/openid-configuration
+
+  parameters:
+    ShopId:
+      name: shopId
+      in: path
+      required: true
+      schema: { type: string, example: PP-SHOP-104552 }
+    OrderNo:
+      name: orderNo
+      in: path
+      required: true
+      schema: { type: string, example: PP-2610-00871 }
+    UpdatedSince:
+      name: updated_since
+      in: query
+      schema: { type: string, format: date-time, example: '2026-10-26T02:00:00+07:00' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, maxLength: 128, example: 'erp:charoen:pporder:SO2610-0009:7c0e2f7a-5d1b-4e8a-9f61-0c3a5b7d2e44' }
+    WebhookId:
+      name: X-Webhook-Id
+      in: header
+      required: true
+      schema: { type: string, example: evt_01JBC6Z8Q4M2N7T5V9X3Y1K0AB }
+    WebhookTimestamp:
+      name: X-Webhook-Timestamp
+      in: header
+      required: true
+      description: Unix seconds; rejected when more than 300 s from the receiver clock
+      schema: { type: integer, example: 1761100931 }
+    WebhookSignature:
+      name: X-Webhook-Signature
+      in: header
+      required: true
+      description: 'Comma-separated `v1=<hex>`; hex(HMAC_SHA256(secret, timestamp + "." + raw_body)). Two values during secret rotation.'
+      schema: { type: string, example: 'v1=3b6f0a9d7c1e2f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d7e8f9a0c41d' }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: RATE_LIMITED
+      headers:
+        Retry-After: { schema: { type: integer } }
+        RateLimit-Limit: { schema: { type: integer } }
+        RateLimit-Remaining: { schema: { type: integer } }
+        RateLimit-Reset: { schema: { type: integer } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    WebhookAccepted:
+      description: Stored; processed asynchronously
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: { status: { const: accepted } }
+    WebhookDuplicate:
+      description: Event id already received
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: { status: { const: duplicate } }
+
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?\d+(\.\d+)?$'
+    DecimalNN:
+      type: string
+      pattern: '^\d+(\.\d+)?$'
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, example: SKU_NOT_ORDERABLE }
+        message: { type: string, description: Thai, safe to show to shop users }
+        details: {}
+        trace_id: { type: string }
+    Unit:
+      type: object
+      required: [unit_code, unit_name, base_factor]
+      properties:
+        unit_code: { type: string, example: BAG }
+        unit_name: { type: string, example: ถุง }
+        base_factor: { $ref: '#/components/schemas/DecimalNN' }
+        barcode: { type: [string, 'null'] }
+    Product:
+      type: object
+      required: [scg_code, name, category_name, vat, units, status, updated_at]
+      properties:
+        scg_code: { type: string, example: SCG-CEM-T50 }
+        name: { type: string, example: ปูนซีเมนต์ตราเสือ 50 กก. }
+        brand: { type: string, example: ตราเสือ }
+        category_code: { type: string, example: CEMENT }
+        category_name: { type: string, example: ปูนซีเมนต์ }
+        barcode: { type: [string, 'null'], example: '8850001000101' }
+        image_url: { type: [string, 'null'], format: uri }
+        vat: { type: string, enum: [v7, exempt] }
+        units:
+          type: array
+          minItems: 1
+          description: First unit has base_factor "1"
+          items: { $ref: '#/components/schemas/Unit' }
+        suggested_retail_price: { oneOf: [{ $ref: '#/components/schemas/DecimalNN' }, { type: 'null' }] }
+        status: { type: string, enum: [active, discontinued] }
+        updated_at: { type: string, format: date-time }
+    ProductPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        next_cursor: { type: [string, 'null'] }
+    Shop:
+      type: object
+      required: [shop_id, name]
+      properties:
+        shop_id: { type: string, example: PP-SHOP-104552 }
+        name: { type: string, example: ร้านวัสดุเจริญชัย }
+        tax_id: { type: string, example: '0505561001234' }
+        branch: { type: string, example: '00000' }
+        address: { type: string }
+        phone: { type: string }
+    Dealer:
+      type: object
+      required: [dealer_id, name, link_status, updated_at]
+      properties:
+        dealer_id: { type: string, example: DLR-0017 }
+        name: { type: string, example: หจก. ทวีพัฒนาวัสดุ }
+        tax_id: { type: [string, 'null'], example: '0503546001234' }
+        branch: { type: [string, 'null'], example: '00000' }
+        phone: { type: [string, 'null'] }
+        address: { type: [string, 'null'] }
+        link_status: { type: string, enum: [active, inactive] }
+        updated_at: { type: string, format: date-time }
+    DealerPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Dealer' } }
+        next_cursor: { type: [string, 'null'] }
+    Order:
+      $ref: '../schemas/promptplus/defs.schema.json#/$defs/order'
+    OrderPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Order' } }
+        next_cursor: { type: [string, 'null'] }
+    ShipTo:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [shop, site] }
+        name: { type: string }
+        address: { type: string }
+        contact_name: { type: string }
+        contact_phone: { type: string }
+    OrderCreateRequest:
+      type: object
+      required: [dealer_id, ship_to, external_ref, lines]
+      properties:
+        dealer_id: { type: string }
+        requested_date: { type: string, format: date }
+        ship_to: { $ref: '#/components/schemas/ShipTo' }
+        external_ref: { $ref: '../schemas/promptplus/defs.schema.json#/$defs/externalRef' }
+        note: { type: string, maxLength: 500 }
+        lines:
+          type: array
+          minItems: 1
+          description: SCG items only; ERP sends base-unit quantities > 0. No prices (dealer prices apply).
+          items:
+            type: object
+            required: [scg_code, unit_code, qty]
+            properties:
+              scg_code: { type: string }
+              unit_code: { type: string }
+              qty: { $ref: '#/components/schemas/DecimalNN' }
+    OrderCreated:
+      type: object
+      required: [order_no, status, created_at, lines]
+      properties:
+        order_no: { type: string, example: PP-2610-00910 }
+        status: { type: string, example: pending_dealer }
+        status_label: { type: string, example: รอผู้แทนยืนยัน }
+        created_at: { type: string, format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              line_no: { type: integer }
+              scg_code: { type: string }
+              qty: { $ref: '#/components/schemas/DecimalNN' }
+              unit_price: { oneOf: [{ $ref: '#/components/schemas/DecimalNN' }, { type: 'null' }] }
+        web_url: { type: string, format: uri }
+    ReceiptRequest:
+      type: object
+      required: [receipt_no, received_at, basis, lines]
+      properties:
+        receipt_no: { type: string, example: GR2610-0007 }
+        received_at: { type: string, format: date-time }
+        basis: { type: string, enum: [order, delivery] }
+        delivery_no: { type: [string, 'null'] }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [order_line_no, scg_code, qty_received, qty_damaged]
+            properties:
+              order_line_no: { type: integer }
+              scg_code: { type: string }
+              qty_received: { $ref: '#/components/schemas/DecimalNN' }
+              qty_damaged: { $ref: '#/components/schemas/DecimalNN' }
+              reason: { type: [string, 'null'] }
