@@ -26,6 +26,8 @@ export interface Deps {
   backupScript?: string;
   /** On-prem: API requests from other LAN machines must carry a paired erp_device cookie. */
   requireDevicePairing: boolean;
+  /** Whether module timers / schedulers may start (false in tests and on serverless hosts such as Vercel). */
+  backgroundJobs: boolean;
 }
 
 export const bangkokToday = (): string =>

@@ -15,6 +15,7 @@ import { coreRoutes } from './routes/core';
 import { opsRoutes } from './routes/ops';
 import { promptPlusRoutes } from './routes/promptplus';
 import { systemRoutes } from './routes/system';
+import { registerModules } from './modules';
 
 export interface BuildOptions {
   pool: Pool;
@@ -31,6 +32,8 @@ export interface BuildOptions {
   trustProxy?: boolean;
   /** Default: true on-prem. API calls from non-loopback clients need a paired device cookie. */
   requireDevicePairing?: boolean;
+  /** Timers / schedulers in modules may run. main.ts turns this on except on Vercel; tests leave it off. */
+  backgroundJobs?: boolean;
   logger?: FastifyServerOptions['logger'];
   hooks?: TestHooks;
   today?: () => string;
@@ -45,6 +48,7 @@ export async function buildApp(opts: BuildOptions): Promise<FastifyInstance> {
   const deps: Deps = {
     pool: opts.pool, edition, hooks: opts.hooks ?? {}, today: opts.today ?? bangkokToday, backupScript: opts.backupScript,
     requireDevicePairing: opts.requireDevicePairing ?? edition === 'onprem',
+    backgroundJobs: opts.backgroundJobs ?? false,
   };
 
   registerErrorHandler(app);
@@ -58,6 +62,7 @@ export async function buildApp(opts: BuildOptions): Promise<FastifyInstance> {
   if (process.env.EDITION === 'cloud') {
     if (edition === 'cloud') promptPlusRoutes(app, authed);
   }
+  await registerModules(app, { deps, authed });
 
   const web = opts.webDistDir && existsSync(path.join(opts.webDistDir, 'index.html')) ? path.resolve(opts.webDistDir) : null;
   if (web) await app.register(fastifyStatic, { root: web, wildcard: false, index: ['index.html'] });

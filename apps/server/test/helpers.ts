@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { createPool, resetData, seedDemo, type Pool, type SeedResult } from '@erp/db';
 import { buildApp, type BuildOptions } from '../src/app';
+import { TEST_DATABASE_URL } from './db-url';
 
-export const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://erp:erp@localhost:5432/erp_test';
+export { TEST_DATABASE_URL };
 export const TODAY = '2026-10-26';
 
 export interface Env { app: FastifyInstance; pool: Pool; seed: SeedResult; close: () => Promise<void> }
