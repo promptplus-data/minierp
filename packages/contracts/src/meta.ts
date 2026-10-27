@@ -14,6 +14,7 @@ export const Capabilities = z.object({
   promptPlusSso: z.boolean().default(false),    // REQ-M01-01 — false on onprem
   scgFamily: z.boolean(),        // M13 — cloud only; never offered on onprem (OQ-A2)
 });
+export type Capabilities = z.infer<typeof Capabilities>;
 export const Meta = z.object({
   edition: Edition,
   capabilities: Capabilities,

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Meta, routes } from '@erp/contracts';
+import { Meta, routeEditions, routes } from '@erp/contracts';
 import { seedMinimalTenant, withTenant, type SeedResult } from '@erp/db';
 import { buildApp } from '../src/app';
 import { client, login, openShift, saleBody, setupEnv, TODAY, type Env } from './helpers';
@@ -103,6 +103,7 @@ describe('BR-18 audit log', () => {
 });
 
 describe('editions (M19)', () => {
+  const onlyOn = (ed: 'cloud' | 'onprem') => Object.entries(routeEditions).filter(([, e]) => e === ed).map(([k]) => k).sort();
   const metaOf = async (edition: 'cloud' | 'onprem') => {
     const prev = process.env.EDITION;
     process.env.EDITION = edition; // what the bundler bakes in
@@ -127,14 +128,17 @@ describe('editions (M19)', () => {
     expect(Meta.parse(body).capabilities).toEqual({ promptPlusOrders: false, promptPlusSso: false, scgFamily: false }); // OQ-A2: no SCG Family on-prem
     expect(body.shop).toMatchObject({ name: 'ร้านวัสดุเจริญชัย', taxId: '0505561004321', vatRegistered: true, b2bVatMode: 'exc' });
     const missing = allRoutes.filter((r) => !r.registered).map((r) => r.k);
-    expect(missing.sort()).toEqual(['ppIncoming', 'ppOrderFromDoc']);
+    expect(missing).toEqual(expect.arrayContaining(['ppIncoming', 'ppOrderFromDoc']));
+    expect(missing.sort()).toEqual(onlyOn('cloud')); // module routes: declare edition-only ones in <module>RouteEditions
   });
 
   it('cloud: Prompt Plus capabilities true, every contract route registered except on-prem pairing', async () => {
     const { body, allRoutes } = await metaOf('cloud');
     expect(body.edition).toBe('cloud');
     expect(Meta.parse(body).capabilities).toEqual({ promptPlusOrders: true, promptPlusSso: true, scgFamily: true });
-    expect(allRoutes.filter((r) => !r.registered).map((r) => r.k).sort()).toEqual(['pair', 'pairingCode', 'setup']);
+    const missing = allRoutes.filter((r) => !r.registered).map((r) => r.k);
+    expect(missing).toEqual(expect.arrayContaining(['pair', 'pairingCode', 'setup']));
+    expect(missing.sort()).toEqual(onlyOn('onprem'));
   });
 });
 
