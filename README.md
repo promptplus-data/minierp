@@ -14,7 +14,7 @@ Design docs: BRD/FSD v0.2 and Solution Architecture v0.1 (Claude Docs), clickabl
 ```
 packages/core       pure business rules (VAT, FIFO, below-cost, doc numbers, baht text, payroll…) — 76 unit tests
 packages/contracts  zod API contract shared by server and web
-packages/db         drizzle schema, SQL migrations (RLS, no-delete triggers, audit hash chain), seed
+packages/db         drizzle schema per module, file-based SQL migrations (RLS, no-delete triggers, audit hash chain), seed
 apps/server         Fastify API — 91 integration tests on real PostgreSQL
 apps/web            React + Vite UI ported from the mockup
 apps/desktop        Tauri v2 client for on-prem client machines
@@ -38,12 +38,15 @@ pnpm dev:web                                         # http://localhost:5173 (pr
 ```bash
 pnpm -r typecheck
 pnpm --filter @erp/core test
-pnpm --filter @erp/server test        # needs postgres://erp:erp@localhost:5432/erp_test
-pnpm e2e                              # builds + runs both editions in Chromium
+pnpm --filter @erp/db test            # migrator + erp_secure_table (creates <test db>_migrate)
+pnpm --filter @erp/server test        # TEST_DATABASE_URL, default postgres://erp:erp@localhost:5432/erp_test (created if missing)
+pnpm e2e                              # builds + runs both editions in Chromium (E2E_DB, E2E_PORT override)
 node scripts/check-onprem.mjs --source
 ```
 
-Deploy and on-prem install: `docs/DEPLOY.md`. Server routes, env vars and rule-to-test map: `apps/server/README.md`.
+Deploy and on-prem install: `docs/DEPLOY.md`. Cloud on Vercel: `docs/VERCEL.md`. Server routes, env vars and
+rule-to-test map: `apps/server/README.md`. Where each module group's code goes (schema, migration range, contract,
+server plugin, web module, tests): `docs/MODULES.md` and `packages/db/MIGRATIONS.md`.
 
 ## Phase 1 scope
 

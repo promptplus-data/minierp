@@ -10,7 +10,7 @@ are defined in `@erp/contracts`.
 ```bash
 # PostgreSQL 16 on localhost:5432, user erp/erp, databases erp and erp_test
 export DATABASE_URL=postgres://erp:erp@localhost:5432/erp
-pnpm db:migrate                                        # packages/db/migrations
+pnpm db:migrate                                        # packages/db/migrations (see packages/db/MIGRATIONS.md)
 pnpm --filter @erp/db exec tsx src/seed.ts --reset     # demo shop ร้านวัสดุเจริญชัย (omit --reset to keep data)
 EDITION=onprem JWT_SECRET=dev pnpm --filter @erp/server start   # or EDITION=cloud
 ```
@@ -22,8 +22,8 @@ Demo users (password `1234`, approval PIN `1234`): `charoen` (owner), `suda` (ma
 | --- | --- |
 | `pnpm --filter @erp/server start` / `dev` | Run `src/main.ts` with tsx (`dev` watches) |
 | `pnpm --filter @erp/server typecheck` | `tsc --noEmit` over `src` and `test` |
-| `pnpm --filter @erp/server test` | vitest against `erp_test`. Migrates once, then truncates and re-seeds per file. Files run one at a time |
-| `node apps/server/build.cloud.mjs` / `build.onprem.mjs` | Single-file bundles in `dist-cloud/` and `dist-onprem/`, each with `migrate.mjs` and `migrations/` |
+| `pnpm --filter @erp/server test` | vitest against `TEST_DATABASE_URL` (default `erp_test`, created if missing). Migrates once from zero, then truncates and re-seeds per file. Files run one at a time. Module tests live in `test/<module>/` |
+| `node apps/server/build.cloud.mjs` / `build.onprem.mjs` | Single-file bundles in `dist-cloud/` and `dist-onprem/`, each with `migrate.mjs` and `migrations/*.sql` |
 | `node scripts/check-onprem.mjs --source` and `... apps/server/dist-onprem` | Prompt Plus guard. Passes on the source and the on-prem bundle. Fails on `dist-cloud`, which is expected |
 
 ## Environment
@@ -45,7 +45,15 @@ Demo users (password `1234`, approval PIN `1234`): `charoen` (owner), `suda` (ma
 | `MIGRATIONS_DIR` | next to `migrate.mjs` / `packages/db/migrations` | Used by the migrator |
 | `PROMPTPLUS_BASE_URL`, `PROMPTPLUS_CLIENT_ID` | unset | Cloud only, read only in `adapters/promptplus.ts` |
 | `SCGFAMILY_BASE_URL` | unset | When set, on-prem reports `scgFamily: true`. The adapter itself is a stub |
-| `TEST_DATABASE_URL` | `postgres://erp:erp@localhost:5432/erp_test` | Tests |
+| `TEST_DATABASE_URL` | `postgres://erp:erp@localhost:5432/erp_test` | Tests. One per worktree (`erp_test_a`, ...); created when missing |
+| `BACKGROUND_JOBS` | on | `0` stops module timers / schedulers (`deps.backgroundJobs`). Always off in tests and on Vercel |
+| `VERCEL` | unset | Set by Vercel. `main.ts` then skips mDNS, the backup hook and background jobs. The Vercel entry is `src/vercel.ts` (`docs/VERCEL.md`) |
+
+## Module groups
+
+Phase 2 modules are Fastify plugins in `src/modules/<group>/index.ts` (sales, purchasing, retail, admin, reports),
+registered by `src/modules/index.ts` after the core routes. Plugin conventions: `src/modules/types.ts`. File
+ownership per group: `docs/MODULES.md`.
 
 ## How it is built
 
