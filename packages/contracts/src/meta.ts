@@ -12,7 +12,7 @@ export const Capabilities = z.object({
   // The on-prem server omits the two cloud-only flags entirely; parsing fills in false.
   promptPlusOrders: z.boolean().default(false), // REQ-M05-01/02/05, M08-11 — false on onprem (REQ-M19-03)
   promptPlusSso: z.boolean().default(false),    // REQ-M01-01 — false on onprem
-  scgFamily: z.boolean(),        // M13 — onprem: true only while online
+  scgFamily: z.boolean(),        // M13 — cloud only; never offered on onprem (OQ-A2)
 });
 export const Meta = z.object({
   edition: Edition,

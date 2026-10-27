@@ -1,7 +1,6 @@
 /**
  * SCG Family (M13) adapter — interface only in this phase (member lookup / coupons are out of scope).
- * Cloud: reported as available. On-prem: available only while online; until the client exists it is false
- * unless SCGFAMILY_BASE_URL is configured.
+ * Cloud: required (OQ-A2). On-prem: never offered — SCG Family confirmed on-prem shops do not need coupons (OQ-A2).
  */
 import type { Edition } from '../lib/context';
 
@@ -17,7 +16,7 @@ export interface ScgFamilyAdapter {
 }
 
 export const scgFamily: ScgFamilyAdapter = {
-  available: (edition) => edition === 'cloud' || Boolean(process.env.SCGFAMILY_BASE_URL),
+  available: (edition) => edition === 'cloud',
   lookupMember: async () => null,
   coupons: async () => [],
 };
