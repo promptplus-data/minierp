@@ -74,6 +74,15 @@ jobs:
       - name: On-prem guard (built bundles)
         run: node scripts/check-onprem.mjs apps/server/dist-onprem apps/web/dist-onprem
 
+      - name: Vercel build output + local smoke (login, POS sale)
+        env:
+          DATABASE_URL: postgres://erp:erp@localhost:5432/erp_vercel
+          SEED_DEMO: "1"
+        run: |
+          psql postgres://erp:erp@localhost:5432/erp_test -c 'create database erp_vercel'
+          node scripts/vercel-build.mjs
+          node scripts/vercel-local.mjs --smoke
+
       - uses: actions/upload-artifact@v4
         with:
           name: bundles

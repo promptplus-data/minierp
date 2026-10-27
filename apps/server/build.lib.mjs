@@ -4,10 +4,10 @@
 // Output: apps/server/dist-<edition>/
 //   server.mjs        single-file ESM bundle of src/main.ts (workspace packages inlined)
 //   migrate.mjs       bundle of packages/db/src/migrate.ts, only if that file exists
-//   migrations/       copy of packages/db/{drizzle,migrations}, only if one exists
+//   migrations/       copy of packages/db/migrations (*.sql, applied in filename order by migrate.mjs)
 //   package.json      lists the native modules left external; run `npm install --omit=dev`
 //                     in this directory on the TARGET OS to fetch their prebuilt binaries
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,7 @@ export const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(SERVER_DIR, '../..');
 export const ENTRY = path.join(SERVER_DIR, 'src/main.ts');
 const MIGRATE_ENTRY = path.join(REPO_ROOT, 'packages/db/src/migrate.ts');
-const MIGRATION_DIRS = ['drizzle', 'migrations'].map((d) => path.join(REPO_ROOT, 'packages/db', d));
+const MIGRATIONS_DIR = path.join(REPO_ROOT, 'packages/db/migrations');
 
 export const EDITIONS = /** @type {const} */ (['cloud', 'onprem']);
 
@@ -24,7 +24,7 @@ export const EDITIONS = /** @type {const} */ (['cloud', 'onprem']);
 export const CLOUD_ONLY_MODULE = /promptplus/i;
 
 /** Native / optional modules that cannot be inlined. Installed next to the bundle instead. */
-const EXTERNAL_NATIVE = ['argon2', 'pg-native'];
+export const EXTERNAL_NATIVE = ['argon2', 'pg-native'];
 
 // ESM output + CJS dependencies (fastify, pg, ...) need require/__dirname in scope.
 const ESM_CJS_SHIM = [
@@ -146,12 +146,61 @@ export async function bundleServer({ edition, write = true }) {
     if (existsSync(MIGRATE_ENTRY)) {
       await esbuild.build(esbuildOptions(edition, MIGRATE_ENTRY, path.join(outDir, 'migrate.mjs'), true, excluded));
     }
-    const migrationsDir = MIGRATION_DIRS.find((d) => existsSync(d));
-    if (migrationsDir) cpSync(migrationsDir, path.join(outDir, 'migrations'), { recursive: true });
+    copyMigrations(path.join(outDir, 'migrations'));
     writeRuntimePackageJson(outDir, edition);
   }
 
   return { outDir, result, excluded };
+}
+
+/** Copies packages/db/migrations/*.sql (only the SQL files) to dest. */
+export function copyMigrations(dest) {
+  if (!existsSync(MIGRATIONS_DIR)) return;
+  mkdirSync(dest, { recursive: true });
+  for (const f of readdirSync(MIGRATIONS_DIR)) if (f.endsWith('.sql')) cpSync(path.join(MIGRATIONS_DIR, f), path.join(dest, f));
+}
+
+/**
+ * Bundles any server-side entry (e.g. src/vercel.ts) with the same rules as the edition bundles.
+ * @param {{ edition: 'cloud' | 'onprem', entry: string, outfile: string }} opts
+ */
+export async function bundleEntry({ edition, entry, outfile }) {
+  if (!EDITIONS.includes(edition)) throw new Error(`Unknown edition "${edition}"`);
+  const esbuild = await import('esbuild');
+  const excluded = [];
+  const result = await esbuild.build(esbuildOptions(edition, entry, outfile, true, excluded));
+  return { result, excluded };
+}
+
+/**
+ * Copies the installed native modules (EXTERNAL_NATIVE) and their runtime dependencies, symlinks resolved, into
+ * destNodeModules. The installed copy must match the target platform (argon2 ships prebuilt binaries per OS/arch).
+ * @returns {string[]} copied package names
+ */
+export function copyNativeModules(destNodeModules) {
+  const copied = new Set();
+  const visit = (name, fromDir) => {
+    if (copied.has(name)) return;
+    let pkgJson;
+    try {
+      pkgJson = createRequire(path.join(fromDir, 'noop.js')).resolve(`${name}/package.json`);
+    } catch {
+      return; // optional module not installed (pg-native)
+    }
+    const dir = realpathSync(path.dirname(pkgJson));
+    const nested = path.join(dir, 'node_modules');
+    copied.add(name);
+    // Dependencies are copied flat next to it, so skip the package's own node_modules.
+    cpSync(dir, path.join(destNodeModules, name), {
+      recursive: true,
+      dereference: true,
+      filter: (src) => src !== nested && !src.startsWith(nested + path.sep),
+    });
+    const deps = JSON.parse(readFileSync(pkgJson, 'utf8')).dependencies ?? {};
+    for (const dep of Object.keys(deps)) visit(dep, dir);
+  };
+  for (const name of EXTERNAL_NATIVE) visit(name, SERVER_DIR);
+  return [...copied];
 }
 
 function writeRuntimePackageJson(outDir, edition) {

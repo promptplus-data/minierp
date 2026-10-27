@@ -2,6 +2,9 @@
   "name": "scg-shop-erp",
   "private": true,
   "version": "0.1.0",
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
@@ -11,7 +14,9 @@
     "db:migrate": "pnpm --filter @erp/db migrate",
     "db:seed": "pnpm --filter @erp/db seed",
     "check:onprem": "node scripts/check-onprem.mjs",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "vercel-build": "node scripts/vercel-build.mjs",
+    "vercel:local": "node scripts/vercel-local.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.56.0",

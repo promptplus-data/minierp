@@ -26,6 +26,8 @@ if (!jwtSecret || jwtSecret === 'change-me') {
   console.warn('[server] JWT_SECRET not set; using an insecure development secret');
 }
 
+// Serverless hosts (Vercel sets VERCEL=1) use src/vercel.ts; if main.ts runs there anyway, skip long-lived extras.
+const serverless = !!env.VERCEL;
 const https = env.TLS_PFX_FILE ? { pfx: readFileSync(env.TLS_PFX_FILE), passphrase: env.TLS_PFX_PASSPHRASE } : undefined;
 const port = Number(env.PORT ?? (edition === 'onprem' ? 8443 : 3000));
 const pool = createPool(databaseUrl, Number(env.DB_POOL_MAX ?? 10));
@@ -35,11 +37,12 @@ const app = await buildApp({
   edition,
   jwtSecret,
   webDistDir: env.WEB_DIST_DIR,
-  backupScript: edition === 'onprem' ? env.BACKUP_SCRIPT : undefined,
+  backupScript: edition === 'onprem' && !serverless ? env.BACKUP_SCRIPT : undefined,
   corsOrigin: env.CORS_ORIGIN,
   https,
   trustProxy: /^(1|true)$/i.test(env.TRUST_PROXY ?? ''),
   requireDevicePairing: edition === 'onprem' && env.REQUIRE_DEVICE_PAIRING !== '0',
+  backgroundJobs: !serverless && env.BACKGROUND_JOBS !== '0',
   logger: { level: env.LOG_LEVEL ?? 'info' },
 });
 
@@ -47,7 +50,7 @@ await app.listen({ host: env.HOST ?? '0.0.0.0', port });
 app.log.info({ edition, https: !!https, version: APP_VERSION }, 'SCG Shop ERP server started');
 
 let stopMdns: (() => void) | undefined;
-if (edition === 'onprem' && env.MDNS_SERVICE_TYPE !== 'off') {
+if (edition === 'onprem' && !serverless && env.MDNS_SERVICE_TYPE !== 'off') {
   try {
     stopMdns = advertiseMdns({ serviceType: env.MDNS_SERVICE_TYPE ?? '_scgerp._tcp', port, version: APP_VERSION, https: !!https, log: app.log });
   } catch (err) {

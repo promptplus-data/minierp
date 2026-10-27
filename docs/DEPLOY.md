@@ -26,9 +26,11 @@ node scripts/check-onprem.mjs apps/server/dist-onprem apps/web/dist-onprem
 the workspace packages into one ESM file. Native modules (`argon2`) stay external.
 The script lists them in `dist-<edition>/package.json`. Run
 `npm install --omit=dev` in that directory **on the target OS** to get the right
-prebuilt binary. If `packages/db/src/migrate.ts` exists, it is bundled to
-`migrate.mjs`. If `packages/db/drizzle/` or `packages/db/migrations/` exists, it is
-copied to `migrations/`.
+prebuilt binary. `packages/db/src/migrate.ts` is bundled to `migrate.mjs`, and
+`packages/db/migrations/*.sql` is copied to `migrations/`. The migrator applies the
+files in filename order and records each one in `schema_migrations`
+(`packages/db/MIGRATIONS.md`). On its first run it adopts a database that the old
+drizzle-kit migrator set up.
 
 For the onprem bundle, an esbuild plugin replaces every import whose specifier
 **or** resolved file path matches `/promptplus/i` with an empty module.
@@ -53,6 +55,8 @@ Forbidden: `/promptplus/i`, `PROMPTPLUS_*`, `/prompt[\s_-]plus/i`. Add more with
 Exit codes: 0 clean, 1 violation, 2 usage or analysis error.
 
 ## 2. Cloud (Docker)
+
+To deploy the cloud edition on Vercel instead of Docker, see `docs/VERCEL.md`.
 
 ```bash
 docker build -t scg-shop-erp .
