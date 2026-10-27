@@ -421,7 +421,7 @@ export async function voidProject(tx: Tx, deps: Deps, ctx: Ctx, id: string, body
   if (p.status === 'void') throw E.conflict(`${p.no} is already void`);
   const down = await tx.query<{ no: string }>(
     `select x.no from docs x join sales_invoices si on si.doc_id = x.id where si.project_id = $1 and x.status = 'active'
-     union all select no from sales_deposits where project_id = $1 and status <> 'void'`, [id]);
+     union all select no from sales_deposits where project_id = $1 and status = 'active'`, [id]);
   if (down.rowCount) throw E.downstreamFirst(`${p.no} has invoices or deposits; void them first`, { docs: down.rows.map((r) => r.no) });
   await tx.query(`update sales_projects set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [id, ctx.userId, body.reason]);
   await tx.query(`update sales_deliveries set project_id = null where project_id = $1`, [id]);

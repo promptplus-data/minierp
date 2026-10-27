@@ -6,7 +6,7 @@ import { login, setupEnv, type Client, type Env } from '../helpers';
 export interface SalesEnv extends Env { owner: Client; suda: Client; boy: Client; prae: Client; chai: Client; seeded: Awaited<ReturnType<typeof seedSales>> }
 
 export async function setupSales(): Promise<SalesEnv> {
-  const env = await setupEnv();
+  const env = await setupEnv(process.env.DBG ? { logger: { level: "error" } } : {});
   const seeded = await withTenant(env.pool, env.seed.tenantId, (c) => seedSales(c, env.seed.tenantId));
   const [owner, suda, boy, prae, chai] = await Promise.all(['charoen', 'suda', 'boy', 'prae', 'chai'].map((u) => login(env.app, u)));
   return { ...env, owner: owner!, suda: suda!, boy: boy!, prae: prae!, chai: chai!, seeded };

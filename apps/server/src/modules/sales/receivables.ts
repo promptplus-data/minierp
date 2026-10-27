@@ -261,7 +261,7 @@ export async function defaultCreditLimit(tx: Tx): Promise<string> {
 export async function openInvoices(tx: Tx, deps: Deps, q: z.infer<typeof ArInvoicesQuery>) {
   const asOf = q.asOf ?? deps.today();
   const cur = decodeCursor(q.cursor, 3);
-  const params: unknown[] = [asOf];
+  const params: unknown[] = [];
   const where = [OPEN];
   if (q.customerId) {
     if (!isUuid(q.customerId)) throw E.validation('Unknown customer');
@@ -269,8 +269,8 @@ export async function openInvoices(tx: Tx, deps: Deps, q: z.infer<typeof ArInvoi
     where.push(`x.customer_id = $${params.length}`);
   }
   if (q.bucket) {
-    params.push(q.bucket);
-    where.push(`${BUCKET_SQL('$1::date')} = $${params.length}`);
+    params.push(asOf, q.bucket);
+    where.push(`${BUCKET_SQL(`$${params.length - 1}::date`)} = $${params.length}`);
   }
   const bnSub = `(select b.no from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = x.id and b.status = 'active' limit 1)`;
   if (q.unbilled) where.push(`${bnSub} is null`);

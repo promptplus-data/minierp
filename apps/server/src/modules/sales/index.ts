@@ -30,7 +30,7 @@ import { loadProducts } from '../../services/master';
 const param = (req: FastifyRequest, k: string) => (req.params as Record<string, string>)[k] ?? '';
 const readSales = (ctx: Ctx) => requireAny(ctx, ['sales.doc', 'fin.ar', 'pos.sell', 'sales.project'], { readOnly: true });
 const readAr = (ctx: Ctx) => requireAny(ctx, ['fin.ar', 'sales.doc'], { readOnly: true });
-const readProjects = (ctx: Ctx) => requireAny(ctx, ['sales.project', 'sales.doc', 'fin.ar'], { readOnly: true });
+const readProjects = (ctx: Ctx) => requireAny(ctx, ['sales.project', 'fin.ar'], { readOnly: true });
 const ProjectListQuery = SalesPageQuery.extend({ projectId: z.string().optional() });
 const BillReq = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), note: z.string().max(500).optional() });
 const ReasonReq = z.object({ reason: z.string().min(1).max(300) });

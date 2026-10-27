@@ -26,6 +26,11 @@ describe('installments (REQ-M09-04/05/07)', () => {
     // value grew by a variation order: the last installment bills the difference too
     expect(installmentAmount('1200', '100', rows, 2).gross).toBe('533.40');
   });
+  it('never deducts more than what is left of the deposit', () => {
+    // deposit pool shrank to 67,200 after a forfeit; 67,200 is already deducted
+    const rows = [{ pct: 30, billed: { gross: '144000', deduct: '28800' } }, { pct: 40, billed: { gross: '192000', deduct: '38400' } }, { pct: 10 }, { pct: 20 }];
+    expect(installmentAmount('480000', '67200', rows, 2)).toEqual({ gross: '48000.00', deduct: '0.00', net: '48000.00' });
+  });
   it('no deposit', () => {
     expect(installmentAmount('58590', '0', [{ pct: 100 }], 0)).toEqual({ gross: '58590.00', deduct: '0.00', net: '58590.00' });
   });

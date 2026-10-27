@@ -47,6 +47,9 @@ export function installmentAmount(value: Num, deposit: Num, rows: readonly Insta
     gross = d(value).minus(sum(rows.filter((r) => r.billed).map((r) => r.billed!.gross)));
     deduct = d(deposit).minus(sum(rows.filter((r) => r.billed).map((r) => r.billed!.deduct)));
   }
+  // never deduct more than is left of the deposit (it may have been forfeited or refunded in part)
+  const left = d(deposit).minus(sum(rows.filter((r) => r.billed).map((r) => r.billed!.deduct)));
+  if (deduct.gt(left)) deduct = left;
   if (deduct.gt(gross)) deduct = gross;
   if (deduct.lt(0)) deduct = d(0);
   return { gross: money(gross), deduct: money(deduct), net: money(gross.minus(deduct)) };
