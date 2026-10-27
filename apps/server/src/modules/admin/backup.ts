@@ -1,6 +1,7 @@
 /**
  * REQ-M19-09 optional cloud backup for on-prem shops (OQ-A10): off by default; the shop chooses a destination it owns
- * (S3 / S3-compatible bucket implemented; Google Drive and OneDrive are STUBS — see README "Cloud backup").
+ * (S3 / S3-compatible bucket implemented; Google Drive and OneDrive: account connection by OAuth device flow is wired,
+ * the upload adapters are STUBS — oauth.ts and README "Cloud backup").
  * Every backup is the whole-shop export (transfer.ts) encrypted on this machine with a key derived from the shop's
  * passphrase (box.ts, AES-256-GCM + scrypt) before upload. Only the derived key is kept here, never the passphrase;
  * restoring on a new machine needs the passphrase again. Last success / failure is shown in settings.
@@ -13,6 +14,7 @@ import type { Ctx } from '../../lib/context';
 import { E } from '../../lib/errors';
 import { decodeCursor, pageOf } from '../../lib/paging';
 import { deriveKey, openBox, sealBox } from './box';
+import { DriveAdapter, OneDriveAdapter, pollDeviceFlow, requireProvider, startDeviceFlow, type OauthProviderId } from './oauth';
 import { S3Client, type S3Object, type S3Settings } from './s3';
 import { exportShop, importShop, type ShopExport } from './transfer';
 
@@ -25,8 +27,9 @@ export type AdapterFactory = (provider: string, settings: Record<string, unknown
 
 export const defaultAdapters: AdapterFactory = (provider, settings) => {
   if (provider === 's3') return new S3Client(settings as unknown as S3Settings);
-  // OAuth providers: designed (device-code flow, README) but not wired until SCG registers the OAuth apps.
-  throw E.validation(`${provider} backup is not available yet`, { reason: 'OAUTH_NOT_CONFIGURED' });
+  if (provider === 'gdrive') return new DriveAdapter(requireProvider('gdrive'), settings);
+  if (provider === 'onedrive') return new OneDriveAdapter(requireProvider('onedrive'), settings);
+  throw E.validation(`Unknown backup destination ${provider}`);
 };
 
 interface CfgRow {
@@ -39,6 +42,45 @@ async function cfgRow(tx: Tx, lock = false): Promise<CfgRow | null> {
 }
 
 const oauthClients = (env: NodeJS.ProcessEnv = process.env) => ({ gdrive: !!env.BACKUP_GDRIVE_CLIENT_ID, onedrive: !!env.BACKUP_ONEDRIVE_CLIENT_ID });
+
+/**
+ * Google Drive / OneDrive account connection (device flow). Start keeps the device code server-side
+ * (settings.pending) and returns only the short code + URL the owner opens on any device.
+ */
+export async function oauthStart(tx: Tx, ctx: Ctx, provider: OauthProviderId, fetchImpl: typeof fetch = fetch) {
+  requireOwner(ctx, 'manage backups');
+  const p = requireProvider(provider);
+  const started = await startDeviceFlow(p, fetchImpl);
+  const old = await cfgRow(tx, true);
+  const settings = { ...(old?.provider === provider ? old.settings : {}), pending: { deviceCode: started.deviceCode, expiresAt: Date.now() + started.expiresIn * 1000 } };
+  await tx.query(
+    `insert into backup_config (tenant_id, enabled, provider, settings, schedule) values ($1,false,$2,$3,'daily')
+     on conflict (tenant_id) do update set provider = excluded.provider, settings = excluded.settings,
+       enabled = case when backup_config.provider = excluded.provider then backup_config.enabled else false end, updated_at = now()`,
+    [ctx.tenantId, provider, JSON.stringify(settings)]);
+  return { userCode: started.userCode, verificationUrl: started.verificationUrl, expiresIn: started.expiresIn, interval: started.interval };
+}
+
+export async function oauthPoll(tx: Tx, ctx: Ctx, provider: OauthProviderId, fetchImpl: typeof fetch = fetch): Promise<{ status: 'pending' | 'connected' | 'expired' | 'denied' }> {
+  requireOwner(ctx, 'manage backups');
+  const p = requireProvider(provider);
+  const c = await cfgRow(tx, true);
+  const pending = c?.provider === provider ? (c.settings.pending as { deviceCode: string; expiresAt: number } | undefined) : undefined;
+  if (!c || !pending) return { status: c?.provider === provider && c.settings.refreshToken ? 'connected' : 'expired' };
+  if (Date.now() > pending.expiresAt) {
+    await tx.query(`update backup_config set settings = settings - 'pending' where tenant_id = $1`, [ctx.tenantId]);
+    return { status: 'expired' };
+  }
+  const r = await pollDeviceFlow(p, pending.deviceCode, fetchImpl);
+  if (r.status === 'pending') return r;
+  const { pending: _done, ...rest } = c.settings;
+  const settings = r.status === 'connected' ? { ...rest, refreshToken: r.refreshToken, connectedAt: new Date().toISOString() } : rest;
+  await tx.query(`update backup_config set settings = $2, updated_at = now() where tenant_id = $1`, [ctx.tenantId, JSON.stringify(settings)]);
+  if (r.status === 'connected') {
+    await writeAudit(tx, ctx, [{ action: 'update', object: 'settings', ref: 'backup', detail: `เชื่อมบัญชี ${p.label} สำหรับสำรองข้อมูลแล้ว` }]);
+  }
+  return { status: r.status };
+}
 
 export function requireOwner(ctx: Ctx, what: string): void {
   if (ctx.role !== 'owner') throw E.forbidden(`Only the shop owner can ${what}`, { reason: 'OWNER_ONLY' });

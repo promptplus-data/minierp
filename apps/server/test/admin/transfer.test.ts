@@ -186,6 +186,55 @@ describe('M19-09 optional cloud backup (S3), encrypted before upload', () => {
     expect((await owner.get('/api/backup/runs')).body.items.map((x: { status: string }) => x.status)).toEqual(['failed', 'ok']);
     await owner.post('/api/backup/config', { enabled: true, provider: 's3', s3: s3Settings() });
   });
+
+  it('Google Drive: device-flow sign-in (RFC 8628) keeps the device code and refresh token server-side; uploads are stubs', async () => {
+    let polls = 0;
+    const seen: Record<string, string>[] = [];
+    const idp = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c: Buffer) => { body += c.toString(); });
+      req.on('end', () => {
+        const f = Object.fromEntries(new URLSearchParams(body));
+        seen.push(f);
+        res.setHeader('content-type', 'application/json');
+        if (req.url === '/device') {
+          res.end(JSON.stringify({ device_code: 'DEV-SECRET-123', user_code: 'ABCD-EFGH', verification_url: 'https://www.google.com/device', expires_in: 1800, interval: 5 }));
+          return;
+        }
+        polls++;
+        if (f.device_code !== 'DEV-SECRET-123' || f.grant_type !== 'urn:ietf:params:oauth:grant-type:device_code') { res.statusCode = 400; res.end(JSON.stringify({ error: 'invalid_grant' })); return; }
+        if (polls === 1) { res.statusCode = 428; res.end(JSON.stringify({ error: 'authorization_pending' })); return; }
+        res.end(JSON.stringify({ access_token: 'at-1', refresh_token: 'RT-SECRET-456', expires_in: 3600 }));
+      });
+    });
+    await new Promise<void>((r) => idp.listen(0, '127.0.0.1', () => r()));
+    const base = `http://127.0.0.1:${(idp.address() as AddressInfo).port}`;
+    Object.assign(process.env, { BACKUP_GDRIVE_CLIENT_ID: 'cid.apps', BACKUP_GDRIVE_CLIENT_SECRET: 'csecret', BACKUP_GDRIVE_DEVICE_URL: `${base}/device`, BACKUP_GDRIVE_TOKEN_URL: `${base}/token` });
+    try {
+      expect((await suda.post('/api/backup/oauth/start', { provider: 'gdrive' })).status).toBe(403);
+      expect((await owner.get('/api/backup/config')).body.oauthClientConfigured).toEqual({ gdrive: true, onedrive: false });
+      const st = await owner.post('/api/backup/oauth/start', { provider: 'gdrive' });
+      expect(st.body).toEqual({ userCode: 'ABCD-EFGH', verificationUrl: 'https://www.google.com/device', expiresIn: 1800, interval: 5 });
+      expect(seen[0]).toMatchObject({ client_id: 'cid.apps', scope: 'https://www.googleapis.com/auth/drive.file' });
+      expect((await owner.post('/api/backup/oauth/poll', { provider: 'gdrive' })).body).toEqual({ status: 'pending' });
+      expect((await owner.post('/api/backup/oauth/poll', { provider: 'gdrive' })).body).toEqual({ status: 'connected' });
+      expect(seen[2]).toMatchObject({ client_secret: 'csecret' });
+      const cfg = await owner.post('/api/backup/config', { enabled: true, provider: 'gdrive', passphrase: 'shop-secret-1' });
+      expect(cfg.body).toMatchObject({ enabled: true, provider: 'gdrive', oauth: { connected: true } });
+      const text = JSON.stringify(cfg.body);
+      expect(text).not.toContain('RT-SECRET-456');
+      expect(text).not.toContain('DEV-SECRET-123');
+      // the upload adapter is a stub: the run is recorded as failed with a clear message, nothing pretends to succeed
+      const run = await owner.post('/api/backup/run', {});
+      expect(run.body).toMatchObject({ status: 'failed', provider: 'gdrive', error: expect.stringContaining('not implemented yet') });
+      // OneDrive without a registered app stays "not configured"
+      expect((await owner.post('/api/backup/oauth/start', { provider: 'onedrive' })).body.details.reason).toBe('OAUTH_NOT_CONFIGURED');
+    } finally {
+      for (const k of ['BACKUP_GDRIVE_CLIENT_ID', 'BACKUP_GDRIVE_CLIENT_SECRET', 'BACKUP_GDRIVE_DEVICE_URL', 'BACKUP_GDRIVE_TOKEN_URL']) delete process.env[k];
+      idp.close();
+      await owner.post('/api/backup/config', { enabled: true, provider: 's3', s3: s3Settings(), passphrase: 'shop-secret-1' });
+    }
+  });
 });
 
 describe('M19-10 sales summary to SCG (manual, preview, audited, no customer data)', () => {

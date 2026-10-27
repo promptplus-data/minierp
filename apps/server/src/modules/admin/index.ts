@@ -18,7 +18,7 @@ import { isLoopback } from '../../lib/net';
 import { needsSetup } from '../../services/setup';
 import type { ErpModule } from '../types';
 import * as adm from './adm';
-import { getBackupConfig, listBackupFiles, listBackupRuns, requireOwner, restoreBackup, restoreFiles, runBackup, saveBackupConfig, startBackupScheduler } from './backup';
+import { getBackupConfig, listBackupFiles, listBackupRuns, oauthPoll, oauthStart, requireOwner, restoreBackup, restoreFiles, runBackup, saveBackupConfig, startBackupScheduler } from './backup';
 import { deriveKey, sealBox } from './box';
 import * as hr from './hr';
 import { installLicense, licenseGuard, licenseStatus } from './license';
@@ -111,14 +111,9 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
 
     app.get('/api/backup/config', authed(async (tx, ctx) => getBackupConfig(tx, ctx)));
     app.post('/api/backup/config', RO_OK, authed(async (tx, ctx, req) => saveBackupConfig(tx, ctx, BackupConfigSave.parse(req.body))));
-    // Google Drive / OneDrive: device-code OAuth designed (README), not wired until SCG registers the OAuth apps.
-    const oauthStub = authed(async (_tx, ctx, req) => {
-      requireOwner(ctx, 'manage backups');
-      const { provider } = BackupOauthStart.parse(req.body);
-      throw E.validation(`${provider === 'gdrive' ? 'Google Drive' : 'OneDrive'} backup is not available yet; use an S3 bucket`, { reason: 'OAUTH_NOT_CONFIGURED' });
-    });
-    app.post('/api/backup/oauth/start', RO_OK, oauthStub);
-    app.post('/api/backup/oauth/poll', RO_OK, oauthStub);
+    // Google Drive / OneDrive: device-code OAuth (oauth.ts). Not configured until SCG registers the OAuth apps.
+    app.post('/api/backup/oauth/start', RO_OK, authed(async (tx, ctx, req) => oauthStart(tx, ctx, BackupOauthStart.parse(req.body).provider)));
+    app.post('/api/backup/oauth/poll', RO_OK, authed(async (tx, ctx, req) => oauthPoll(tx, ctx, BackupOauthStart.parse(req.body).provider)));
     app.post('/api/backup/run', RO_OK, authed(async (tx, ctx) => {
       requireOwner(ctx, 'run a backup');
       return runBackup(tx, ctx, 'manual', transports.backup);
