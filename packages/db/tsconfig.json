@@ -1,1 +1,1 @@
-{ "extends": "../../tsconfig.base.json", "compilerOptions": { "outDir": "dist", "noEmit": true }, "include": ["src", "drizzle.config.ts"] }
+{ "extends": "../../tsconfig.base.json", "compilerOptions": { "outDir": "dist", "noEmit": true }, "include": ["src"] }

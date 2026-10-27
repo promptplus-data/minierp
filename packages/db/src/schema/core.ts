@@ -1,7 +1,7 @@
 /**
- * Drizzle schema. Source of truth for the generated migrations in ../migrations.
- * Hand-written SQL (RLS policies, triggers, pg_trgm, grants) lives in the custom
- * migration `0001_rls_triggers.sql`.
+ * Core tables (phase 1: M01, M03, M05-06, M06, M07, M08, platform). Drizzle table definitions used for typing;
+ * the database itself is defined by the hand-written SQL in ../../migrations (see ../../MIGRATIONS.md), so keep
+ * this file in sync with the migration that creates or alters each table.
  *
  * Conventions
  * - Every table has tenant_id (BR-14 / M19); RLS policies filter on app.tenant_id.
@@ -13,11 +13,7 @@ import {
   bigint, boolean, check, date, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid,
 } from 'drizzle-orm/pg-core';
 
-const id = () => uuid('id').primaryKey().defaultRandom();
-const tenantId = () => uuid('tenant_id').notNull();
-const money = (name: string) => numeric(name, { precision: 14, scale: 2 });
-const qty = (name: string) => numeric(name, { precision: 14, scale: 4 });
-const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow();
+import { createdAt, id, money, qty, tenantId } from './columns';
 
 export const tenants = pgTable('tenants', {
   id: id(),
@@ -358,7 +354,7 @@ export const auditLog = pgTable('audit_log', {
   hash: text('hash'),
 }, (t) => [index('audit_log_tenant_id').on(t.tenantId, t.id)]);
 
-/** Tables that carry tenant_id and get the RLS policy (kept in sync with 0001_rls_triggers.sql). */
+/** Core tables that carry tenant_id and get the RLS policy in 0001_rls_triggers.sql. Module tables are not listed here. */
 export const TENANT_TABLES = [
   'users', 'warehouses', 'products', 'customers', 'vendors', 'doc_counters', 'shifts', 'shift_moves', 'docs', 'doc_lines',
   'stock_docs', 'stock_lots', 'stock_moves', 'stock_move_lots', 'adjust_requests', 'pairing_codes', 'devices', 'audit_log',

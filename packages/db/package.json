@@ -7,7 +7,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate.ts",
     "seed": "tsx src/seed.ts"
   },
@@ -18,7 +17,6 @@
     "pg": "^8.13.1"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.10",
-    "drizzle-kit": "^0.28.1"
+    "@types/pg": "^8.11.10"
   }
 }

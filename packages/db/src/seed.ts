@@ -12,7 +12,6 @@ import { pathToFileURL } from 'node:url';
 import argon2 from 'argon2';
 import pg from 'pg';
 import { money, qty4, d, type Num } from '@erp/core';
-import { TENANT_TABLES } from './schema';
 import { withTenant } from './tx';
 
 export interface SeedResult {
@@ -184,9 +183,15 @@ export async function seedMinimalTenant(pool: pg.Pool, code: string, name: strin
   return out;
 }
 
-/** Dev / test only: empties every table (TRUNCATE needs the table owner; DELETE triggers do not fire). */
+/**
+ * Dev / test only: empties every table in the public schema except schema_migrations, including tables added by
+ * module migrations (TRUNCATE needs the table owner; DELETE triggers do not fire).
+ */
 export async function resetData(pool: pg.Pool): Promise<void> {
-  await pool.query(`TRUNCATE ${['tenants', ...TENANT_TABLES].join(', ')} RESTART IDENTITY CASCADE`);
+  const r = await pool.query<{ t: string }>(
+    `select format('%I', tablename) as t from pg_tables where schemaname = 'public' and tablename <> 'schema_migrations' order by tablename`,
+  );
+  if (r.rows.length) await pool.query(`TRUNCATE ${r.rows.map((x) => x.t).join(', ')} RESTART IDENTITY CASCADE`);
 }
 
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
