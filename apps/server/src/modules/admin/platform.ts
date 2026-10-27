@@ -66,7 +66,7 @@ export async function admLogin(app: FastifyInstance, pool: Pool, body: { usernam
     }
     if (!(await argon2.verify(u.password_hash, body.password))) {
       const n = u.failed_logins + 1;
-      await tx.query(`update platform_admins set failed_logins = $2, locked_at = case when $2 >= $3 then now() else locked_at end where id = $1`, [u.id, n, ADM_MAX_FAILED]);
+      await tx.query(`update platform_admins set failed_logins = $2::int, locked_at = case when $2::int >= $3::int then now() else locked_at end where id = $1`, [u.id, n, ADM_MAX_FAILED]);
       await admAudit(tx, who, 'login-failed', 'admin', u.username, `รหัสผ่านผิดครั้งที่ ${n}`);
       return { ok: false as const, reason: 'BAD_CREDENTIALS' };
     }

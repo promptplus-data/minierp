@@ -4,7 +4,7 @@
  * license issuing (REQ-M19-11), sales summaries received from on-prem shops (REQ-M19-10) and whole-shop import
  * (REQ-M19-07). Every action is written to platform_audit; effects inside a shop are also in that shop's audit_log.
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import argon2 from 'argon2';
 import type { z } from 'zod';
 import { withTenant, type Pool, type Tx } from '@erp/db';
@@ -418,10 +418,12 @@ export async function receiveShare(pool: Pool, body: { key?: unknown; payload?: 
     const reg = (await tx.query<{ revoked_at: Date | null }>(`select revoked_at from license_registry where license_id = $1`, [lic.licenseId])).rows[0];
     if (!reg) throw E.forbidden('This license key is not registered with SCG', { reason: 'LICENSE_UNKNOWN' });
     if (reg.revoked_at) throw E.forbidden('This license key was revoked', { reason: 'LICENSE_REVOKED' });
-    const r = await tx.query<{ id: string }>(
-      `insert into sales_share_inbox (license_id, shop_name, tax_id, from_date, to_date, payload, total) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
-      [lic.licenseId, payload.shop.name, lic.taxId, payload.from, payload.to, JSON.stringify(payload), payload.totals.total]);
-    return { receiptId: r.rows[0]!.id };
+    // No RETURNING: the receiver may insert into the inbox but not read it (RLS).
+    const receiptId = randomUUID();
+    await tx.query(
+      `insert into sales_share_inbox (id, license_id, shop_name, tax_id, from_date, to_date, payload, total) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [receiptId, lic.licenseId, payload.shop.name, lic.taxId, payload.from, payload.to, JSON.stringify(payload), payload.totals.total]);
+    return { receiptId };
   });
 }
 

@@ -79,7 +79,9 @@ export async function exportShop(tx: Tx, tenantId: string): Promise<ShopExport> 
   const tables: ShopExport['tables'] = {};
   for (const name of await tenantTables(tx)) {
     const order = name === 'audit_log' ? 'order by chain_seq' : '';
-    tables[name] = (await tx.query<Record<string, unknown>>(`select * from ${quoteIdent(name)} ${order}`)).rows.map(jsonSafe);
+    // Timestamps as text keep PostgreSQL's microseconds (a JS Date would round them to milliseconds).
+    const list = (await columnsOf(tx, name)).map((c) => (c.type.startsWith('timestamp') ? `${quoteIdent(c.name)}::text as ${quoteIdent(c.name)}` : quoteIdent(c.name))).join(', ');
+    tables[name] = (await tx.query<Record<string, unknown>>(`select ${list} from ${quoteIdent(name)} ${order}`)).rows.map(jsonSafe);
   }
   return {
     format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: new Date().toISOString(),
