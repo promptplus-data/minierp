@@ -11,3 +11,4 @@ export * from './bahttext';
 export * from './payroll';
 export * from './shift';
 export * from './perms';
+export * from './retail';
