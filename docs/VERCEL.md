@@ -26,7 +26,7 @@ that directory as is.
 | `config.json` | Routes: `/api/*` and `/healthz` go to the function. Other paths try static files, then fall back to `index.html` (SPA). `/assets/*` is cached as immutable |
 
 After writing the output, the script migrates the database (`packages/db/src/bootstrap.ts`) when a database URL
-is set. With `SEED_DEMO=1`, it also seeds the demo shop. Both steps are idempotent: applied migrations are skipped,
+is set. With `SEED_DEMO=1`, it also seeds the demo shop with every module's demo data (sales, purchasing, retail, reports, HR). Both steps are idempotent: applied migrations are skipped,
 and the seed is skipped once the shop `charoen` exists.
 
 `apps/server/src/vercel.ts` builds the Fastify app once per cold start and passes each request to
@@ -59,6 +59,7 @@ Node 22 comes from `"engines": { "node": "22.x" }` in the root `package.json`. V
    | `EDITION` | `cloud`. Informational: the bundle already has the cloud edition built in |
    | `TRUST_PROXY` | `1`, so `req.ip` is the client address from Vercel's `X-Forwarded-For`, not the proxy's |
    | `SEED_DEMO` | `1` for a demo deployment. Remove it for a real shop |
+   | `LICENSE_SIGNING_KEY` | Optional. The Ed25519 private key (PKCS#8 PEM) SCG Admin uses to issue on-prem license keys (REQ-M19-11). Without it, issuing is disabled. Generate your own pair with `node scripts/license-gen.mjs` and embed the public half in `apps/server/src/modules/admin/license-pubkey.ts` |
    | `DB_POOL_MAX` | Optional. Default `2` connections per function instance |
    | `LOG_LEVEL` | Optional. Default `warn` |
    | `PROMPTPLUS_BASE_URL`, `PROMPTPLUS_CLIENT_ID` | Optional. Cloud only |
