@@ -1,6 +1,6 @@
 /** Customer returns (REQ-M08-06): searchable bill picker + credit note with stock back at original cost. */
 import type { Tx } from '@erp/db';
-import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4 } from '@erp/core';
+import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4, sum } from '@erp/core';
 import { z } from 'zod';
 import type { EligibleQuery, ReturnReq, SalesDoc } from '@erp/contracts';
 import { verifyApproval } from '../lib/approval';
@@ -71,6 +71,20 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
     return { l, qty: r.qty, completes: d(r.qty).eq(max) };
   });
 
+  // Module C (M15, BR-17): bundle components come back as whole sets only — every item of the set, the same number of sets.
+  const bundles = new Map<number, typeof srcLines>();
+  for (const l of srcLines) if (l.retail_bundle_no != null) bundles.set(l.retail_bundle_no, [...(bundles.get(l.retail_bundle_no) ?? []), l]);
+  for (const [no, comps] of bundles) {
+    const chosen = comps.map((c) => picked.find((x) => x.l.id === c.id));
+    if (chosen.every((x) => !x)) continue;
+    const sets = chosen.map((x, k) => (x && d(comps[k]!.retail_bundle_qty ?? 0).gt(0) ? d(x.qty).div(d(comps[k]!.retail_bundle_qty!)) : d(0)));
+    if (!sets.every((s) => s.eq(sets[0]!)) || !sets[0]!.isInteger() || !sets[0]!.gt(0)) {
+      throw E.validation(`Bundle "${comps[0]!.retail_promo_name ?? ''}" is returned as whole sets: every item × the same number of sets`, {
+        bundleNo: no, lines: comps.map((c) => ({ lineId: c.id, qtyPerSet: qty4(c.retail_bundle_qty ?? 0) })),
+      });
+    }
+  }
+
   // Refund per line = its share of the line's net after bill discount; the last return of a line gets the remainder.
   const refunded = await tx.query<{ src_line_id: string; amt: string }>(
     `select cl.src_line_id, sum(cl.net)::text amt from doc_lines cl join docs c on c.id = cl.doc_id
@@ -81,6 +95,16 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
   const amounts = picked.map((x) =>
     x.completes ? money(d(x.l.net_after_bill).minus(d(already.get(x.l.id) ?? 0))) : money(d(x.l.net_after_bill).times(d(x.qty)).div(d(x.l.qty))),
   );
+  // Module C (BR-17): a partial bundle return refunds exactly its share of the set revenue (rounded once per bundle,
+  // the satang difference on the last component), so returning 1 of 2 sets gives back the set price.
+  for (const comps of bundles.values()) {
+    const idx = comps.map((c) => picked.findIndex((x) => x.l.id === c.id));
+    if (idx.some((i) => i < 0) || idx.every((i) => picked[i]!.completes)) continue;
+    const share = d(picked[idx[0]!]!.qty).div(d(picked[idx[0]!]!.l.qty));
+    const target = money(sum(idx.map((i) => d(picked[i]!.l.net_after_bill))).times(share));
+    const last = idx[idx.length - 1]!;
+    amounts[last] = money(d(amounts[last]!).plus(d(target).minus(sum(idx.map((i) => d(amounts[i]!))))));
+  }
   const totals = calcDoc(picked.map((x, i) => ({ qty: 1, unitPrice: amounts[i]!, vat: x.l.vat })), src.vat_mode);
 
   let shiftId: string | null = null;

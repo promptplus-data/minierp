@@ -16,3 +16,4 @@ export * from './project';
 export * from './pricelist';
 export * from './payables';
 export * from './importfmt';
+export * from './retail';

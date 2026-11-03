@@ -6,6 +6,7 @@ import { d, sum } from '@erp/core';
 import { api, errText } from '../api';
 import { useAuth } from '../auth';
 import { fmt, hm, Modal, Pill, useToast } from '../ui';
+import { useRegisteredDevices } from '../modules/retail/pos';
 import { METHOD_TH, ShiftSlip } from './Receipt';
 
 const DEVICE_KEY = 'erp-device-id';
@@ -25,6 +26,12 @@ export function deviceId(): string {
   }
 }
 
+/** Module C (REQ-M01-07): remember the registered machine this browser opens shifts on. */
+function rememberDevice(v: string): void {
+  memoDevice = v;
+  try { localStorage.setItem(DEVICE_KEY, v); } catch { /* storage blocked: memory only */ }
+}
+
 export function ShiftClosed() {
   const { user, can } = useAuth();
   const qc = useQueryClient();
@@ -33,8 +40,14 @@ export function ShiftClosed() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const ok = can('fin.shift') === 1 || can('pos.sell') === 1;
-  const dev = deviceId();
+  const registered = useRegisteredDevices();
+  const [picked, setPicked] = useState<string | null>(null);
+  const own = deviceId();
+  const regs = registered.data ?? [];
+  // With a POS machine registry, a shift opens on a registered machine (approved ones first) so its POS ID prints.
+  const dev = !regs.length ? own : picked ?? (regs.some((r) => r.code === own) ? own : (regs.find((r) => r.canIssueAbb) ?? regs[0]!).code);
   const open = async () => {
+    if (regs.length) rememberDevice(dev);
     if (!/^\d+(\.\d+)?$/.test(float.trim())) return setErr('ใส่เงินทอนตั้งต้นเป็นตัวเลข');
     setBusy(true);
     setErr('');
@@ -54,7 +67,9 @@ export function ShiftClosed() {
       <p className="small muted" style={{ marginTop: 0 }}>ขายหน้าร้าน (cash &amp; carry) ต้องเปิดกะก่อน ระบบผูกทุกบิล เงินทอนตั้งต้น และเงินเข้า/ออกลิ้นชักไว้กับกะ แล้วเทียบกับเงินที่นับได้ตอนปิดกะ</p>
       <div className="fgrid">
         <label className="f">ผู้เปิดกะ<input type="text" value={user?.name ?? ''} readOnly /></label>
-        <label className="f">เครื่อง POS<input type="text" value={dev} readOnly /></label>
+        {regs.length
+          ? <label className="f">เครื่อง POS<select value={dev} onChange={(e) => setPicked(e.target.value)} data-testid="shift-device">{regs.map((r) => <option key={r.code} value={r.code}>{r.code} · {r.name}{r.canIssueAbb ? '' : ' (รออนุมัติ ภ.พ.06)'}</option>)}</select></label>
+          : <label className="f">เครื่อง POS<input type="text" value={dev} readOnly /></label>}
         <label className="f">เงินทอนตั้งต้นในลิ้นชัก (บาท)<input type="text" inputMode="decimal" value={float} onChange={(e) => setFloat(e.target.value)} data-testid="shift-float" /></label>
       </div>
       {err && <div className="err" role="alert" style={{ marginTop: 8 }}>{err}</div>}

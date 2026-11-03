@@ -226,6 +226,15 @@ export const docLines = pgTable('doc_lines', {
   cogs: money('cogs'),
   /** Returns: the sold line this CN line refers to. */
   srcLineId: uuid('src_line_id'),
+  // Module C (retail, migration 0300): promo / bundle / price-list snapshot of POS lines.
+  retailPromoId: uuid('retail_promo_id'),
+  retailPromoName: text('retail_promo_name'),
+  retailListPrice: qty('retail_list_price'),
+  retailPriceSource: text('retail_price_source'),
+  retailBundleNo: integer('retail_bundle_no'),
+  retailBundleSets: qty('retail_bundle_sets'),
+  retailBundleQty: qty('retail_bundle_qty'),
+  retailBundlePrice: money('retail_bundle_price'),
 }, (t) => [
   index('doc_lines_doc').on(t.tenantId, t.docId),
   check('doc_lines_returned', sql`${t.returnedQty} >= 0 and ${t.returnedQty} <= ${t.qty}`),
