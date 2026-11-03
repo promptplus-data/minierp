@@ -76,7 +76,7 @@ describe('issue', () => {
 });
 
 describe('manual receipt (REQ-M05-06)', () => {
-  it('creates a lot at net cost after bill discount and rejects a duplicate vendor invoice', async () => {
+  it('creates a lot at purchase cost (BR-19 default: bill discount kept separate) and rejects a duplicate vendor invoice', async () => {
     const body = {
       vendorId: env.seed.vendors.v1, vendorInvoiceNo: 'IV-001', deliveryNo: 'DN-001', warehouseId: W('WH2'),
       lines: [{ productId: P('p1'), qty: '100', unitCost: '120.00' }, { productId: P('p6'), unitIdx: 1, qty: '1', unitCost: '1400.00' }], billDiscount: '134.00',
@@ -84,8 +84,9 @@ describe('manual receipt (REQ-M05-06)', () => {
     const r = await suda.post('/api/stock/receipts', body); // manager: sees costs (data.cost)
     expect(r.status).toBe(201);
     expect(r.body.no).toBe('GR2610-0001');
-    // 12000 + 1400 = 13400; discount 1% each → p1 118.80 / bag, p6 1386 / 20 = 69.30 per เส้น
-    expect(r.body.lines).toEqual([{ productId: P('p1'), qty: '100', unitCost: '118.8' }, { productId: P('p6'), qty: '20', unitCost: '69.3' }]);
+    // BR-19 default ('sep'): the 134.00 bill discount is a separate purchase discount, lot cost stays at the purchase price
+    // (p1 120 / bag, p6 1400 / 20 = 70 per เส้น). The 'alloc' setting is covered in test/purchasing/ap.test.ts.
+    expect(r.body.lines).toEqual([{ productId: P('p1'), qty: '100', unitCost: '120' }, { productId: P('p6'), qty: '20', unitCost: '70' }]);
     const dup = await chai.post('/api/stock/receipts', body);
     expect(dup.body.code).toBe('CONFLICT');
     expect(dup.status).toBe(409);
