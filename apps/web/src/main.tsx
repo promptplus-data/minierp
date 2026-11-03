@@ -28,8 +28,9 @@ function Home() {
 }
 
 const ROUTES = [
-  { path: '/', element: <Home /> },
+  // module routes first: the reports module owns '/' (home dashboard); Home below only redirects when none does
   ...MODULE_ROUTES,
+  { path: '/', element: <Home /> },
   { path: '*', element: <Navigate to="/" replace /> },
 ];
 

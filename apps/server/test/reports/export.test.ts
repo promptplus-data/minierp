@@ -115,7 +115,7 @@ describe('PEAK (REQ-M12-06)', () => {
     expect(vendor.slice(32, 36)).toEqual(['วันที่ X ของเดือนถัดไป', '5', '113101', '212101']);
   });
 
-  it('purchase: goods receipts at account 114102 with 7% input VAT', async () => {
+  it('purchase: AP bills of goods receipts at account 114102 with 7% input VAT', async () => {
     await env.owner.post('/api/stock/receipts', {
       vendorId: env.seed.vendors.v1, vendorInvoiceNo: 'TV-6610-118', deliveryNo: 'DN-118', warehouseId: env.seed.warehouses.WH2,
       lines: [{ productId: env.seed.products.p1, qty: '40', unitCost: '121.50' }, { productId: env.seed.products.p3, qty: '200', unitCost: '19.20' }], billDiscount: '0',
@@ -128,7 +128,7 @@ describe('PEAK (REQ-M12-06)', () => {
     expect(rows.map((x) => x[12])).toEqual(['114102', '114102']);
     expect(sum(rows.map((x) => x[17]!)).toFixed(2)).toBe('8700.00');
     expect(sum(rows.map((x) => x[18]!)).toFixed(2)).toBe('609.00');
-    expect(r.body.warnings.join(' ')).toContain('ภาษีซื้อ 7%');
+    expect(r.body.docs).toBe(1);
   });
 });
 

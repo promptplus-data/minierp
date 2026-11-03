@@ -9,11 +9,13 @@ import { seedSales } from './seedSales';
 import { seedPurchasing } from './seedPurchasing';
 import { seedRetail } from './seedRetail';
 import { seedAdmin } from './seedAdmin';
+import { seedReports } from './seedReports';
 
 export async function seedModules(pool: pg.Pool, tenantId: string): Promise<void> {
   await withTenant(pool, tenantId, (c) => seedRetail(c, tenantId));
   await withTenant(pool, tenantId, (c) => seedSales(c, tenantId));
   await withTenant(pool, tenantId, (c) => seedPurchasing(c, tenantId));
+  await withTenant(pool, tenantId, (c) => seedReports(c, tenantId));
   await seedAdmin(pool, tenantId);
 }
 

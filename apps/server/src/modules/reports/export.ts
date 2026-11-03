@@ -114,23 +114,34 @@ async function purchasePeak(tx: Tx, docs: PurchaseDocRow[]): Promise<PeakDocIn[]
     `select s.id doc_id, p.sku, p.name, (e->>'qty') qty, (e->>'unitCost') unit_cost
        from stock_docs s cross join lateral jsonb_array_elements(s.lines) with ordinality as x(e, i) join products p on p.id = (e->>'productId')::uuid
       where s.id = any($1::uuid[]) order by s.id, x.i`, [ids]) : { rows: [] };
+  // AP bills: the lines of the goods receipt behind the bill (M18 / group B gr_lines), amounts before the bill discount
+  const bills = docs.filter((x) => x.source === 'plugin' && x.grDocId);
+  const g = bills.length ? await tx.query<{ doc_id: string; sku: string; name: string; qty: string; amount: string }>(
+    `select b.id doc_id, p.sku, p.name, l.qty::text, l.amount::text
+       from ap_bills b join gr_lines l on l.gr_doc_id = b.gr_doc_id join products p on p.id = l.product_id
+      where b.id = any($1::uuid[]) order by b.id, l.line_no`, [bills.map((x) => x.id)]) : { rows: [] };
+  const grLines = new Map<string, typeof g.rows>();
+  for (const l of g.rows) grLines.set(l.doc_id, [...(grLines.get(l.doc_id) ?? []), l]);
   const byDoc = new Map<string, typeof r.rows>();
   for (const l of r.rows) byDoc.set(l.doc_id, [...(byDoc.get(l.doc_id) ?? []), l]);
   return docs.map((doc) => {
-    const raw = byDoc.get(doc.id) ?? [];
+    const raw: { sku: string; name: string; qty: string; unit_cost: string; amount?: string }[] = [
+      ...(byDoc.get(doc.id) ?? []), ...(grLines.get(doc.id) ?? []).map((l) => ({ sku: l.sku, name: l.name, qty: l.qty, unit_cost: '0', amount: l.amount })),
+    ];
     const exTotal = d(doc.base7).plus(d(doc.exempt));
-    const amounts = raw.map((l) => d(money(d(l.qty).times(d(l.unit_cost)))));
-    if (amounts.length) amounts[amounts.length - 1] = amounts[amounts.length - 1]!.plus(exTotal.minus(sum(amounts)));
+    const preDiscount = exTotal.plus(d(doc.discount));
+    const amounts = raw.map((l) => d(l.amount ?? money(d(l.qty).times(d(l.unit_cost)))));
+    if (amounts.length) amounts[amounts.length - 1] = amounts[amounts.length - 1]!.plus(preDiscount.minus(sum(amounts)));
     const vatOn = d(doc.vat).gt(0);
     const lines = raw.length
       ? raw.map((l, i) => ({ sku: l.sku, name: l.name, qty: l.qty, unitPrice: qty4(d(amounts[i]!).div(d(l.qty))), discount: '0', vat: (vatOn ? 'v7' : 'exempt') as 'v7' | 'exempt', exVat: money(amounts[i]!), lineVat: '0' }))
-      : [{ sku: '', name: 'ซื้อสินค้า', qty: '1', unitPrice: money(exTotal), discount: '0', vat: (vatOn ? 'v7' : 'exempt') as 'v7' | 'exempt', exVat: money(exTotal), lineVat: '0' }];
+      : [{ sku: '', name: 'ซื้อสินค้า', qty: '1', unitPrice: money(preDiscount), discount: '0', vat: (vatOn ? 'v7' : 'exempt') as 'v7' | 'exempt', exVat: money(preDiscount), lineVat: '0' }];
     const vats = lineVatShares(doc.vat, lines.map((l) => ({ exVat: l.exVat, vat: l.vat })));
     lines.forEach((l, i) => { l.lineVat = vats[i]!; });
     if (d(doc.discount).gt(0)) lines.push({ sku: '', name: 'ส่วนลดรับจากผู้ขาย', qty: '1', unitPrice: money(d(doc.discount).neg()), discount: '0', vat: 'exempt', exVat: money(d(doc.discount).neg()), lineVat: '0.00' });
     return {
       date: doc.date, no: doc.vendorInvoiceNo, ref: doc.no, contactCode: doc.vendorCode, contactName: doc.vendorName, taxId: doc.taxId, branch: doc.branch,
-      vatMode: vatOn ? 'exc' : 'none', billDiscount: '0', note: doc.source === 'stock_docs' ? `ใบรับสินค้า ${doc.no}` : '', lines,
+      vatMode: vatOn ? 'exc' : 'none', billDiscount: '0', note: doc.source === 'stock_docs' ? `ใบรับสินค้า ${doc.no}` : `ใบตั้งหนี้ ${doc.no}`, lines,
     } satisfies PeakDocIn;
   });
 }

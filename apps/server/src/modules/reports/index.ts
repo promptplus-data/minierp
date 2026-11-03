@@ -63,7 +63,7 @@ export const reportsModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/reports/promotions', authed(async (tx, ctx, req, reply) => {
     requirePerm(ctx, 'rep.view', { readOnly: true });
     const q = ReportRangeQuery.parse(req.query);
-    const r = await promotionsReport(tx, ctx, q.from, q.to);
+    const r = await promotionsReport(tx, deps, ctx, q.from, q.to);
     if (q.format === 'json') return r;
     return sendFile(reply, q.format, `promotions-${q.from}_${q.to}`, [
       ['โปรโมชั่น', 'จำนวนบิล', 'ชุดที่ขาย', 'ยอดขาย', 'ส่วนลดที่ให้', 'ต้นทุน FIFO', 'กำไรขั้นต้น', 'ยอดขายช่วงก่อนโปร', 'กำไรช่วงก่อนโปร'],

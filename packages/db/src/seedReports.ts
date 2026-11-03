@@ -5,8 +5,12 @@
  *
  *   await seedReports(client, tenantId)                     // inside withTenant(...) or as a superuser
  *   await seedReports(client, tenantId, { today: '2026-10-26' })
+ *
+ * CLI (browser tests): DATABASE_URL=... tsx src/seedReports.ts [tenant-code]   (default tenant code: charoen)
  */
-import type pg from 'pg';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import pg from 'pg';
 import {
   DEFAULT_DOC_PATTERN, addDays, calcDoc, d, docPeriodKey, formatDocNo, money, qty4, takeLots,
 } from '@erp/core';
@@ -50,7 +54,10 @@ export async function seedReports(c: Q, tenantId: string, opts: { today?: string
 
   await c.query(`insert into report_gl_map (tenant_id) values ($1) on conflict (tenant_id) do nothing`, [tenantId]);
 
+  // continue after whatever the shop already issued (any POS device), so the demo never collides with real documents
   const counters = new Map<string, number>();
+  const used = await c.query<{ type: string; period: string; seq: number }>(`select type, period, max(seq)::int seq from doc_counters where tenant_id = $1 group by 1, 2`, [tenantId]);
+  for (const u of used.rows) counters.set(`${u.type}|${u.period}`, u.seq);
   const nextNo = (type: string, date: string) => {
     const k = `${type}|${docPeriodKey(DEFAULT_DOC_PATTERN, date)}`;
     const n = (counters.get(k) ?? 0) + 1;
@@ -169,7 +176,25 @@ export async function seedReports(c: Q, tenantId: string, opts: { today?: string
        on conflict (tenant_id, type, period, device) do update set seq = greatest(doc_counters.seq, excluded.seq)`,
       [tenantId, type, period, seq],
     );
+    await c.query(`update doc_counters set seq = greatest(seq, $4) where tenant_id = $1 and type = $2 and period = $3`, [tenantId, type, period, seq]);
   }
+  // Two products whose shelf stock is below the reorder point after the sales above (home card, "low stock" report).
+  await c.query(
+    `update products p set reorder_point = greatest(10, ceil(coalesce((select sum(remaining) from stock_lots l where l.product_id = p.id), 0) * 1.5))
+      where p.tenant_id = $1 and p.sku = any($2::text[])`, [tenantId, ['PNT-PR9', 'SCG-TA-20']]);
   await c.query(`insert into audit_log (tenant_id, user_name, action, object, detail) values ($1,'system','seed','reports',$2)`, [tenantId, `demo sales ${BILLS.length} bills`]);
   return { docs: BILLS.length + 1 };
+}
+
+const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (/seedReports\.(ts|mjs|js)$/.test(entry) && import.meta.url === pathToFileURL(entry).href) {
+  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  (async () => {
+    const t = await pool.query<{ id: string }>(`select id from tenants where code = $1`, [process.argv[2] ?? 'charoen']);
+    if (!t.rows[0]) throw new Error('tenant not found');
+    const r = await seedReports(pool, t.rows[0].id);
+    console.log(r.docs ? `[seed] reports demo: ${r.docs} documents` : '[seed] reports demo already present');
+  })()
+    .catch((err) => { console.error('[seed] failed:', err); process.exitCode = 1; })
+    .finally(() => pool.end());
 }

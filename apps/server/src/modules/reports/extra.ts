@@ -1,13 +1,13 @@
 /**
  * REQ-M11-06 internal cost, REQ-M11-07 promotion P&L, REQ-M11-05 SCG Family coupons (cloud only).
- * Promotions, payroll and coupons come from plug-in views of their modules (./sources.ts); until those exist the
- * report says so instead of showing made-up numbers.
+ * Payroll comes from group D's hr_labour_cost_monthly view, promotions from group C's promoPnl; coupons (M13) have no source yet.
  */
 import type { Tx } from '@erp/db';
 import type { ReportCostLine, ReportCosts } from '@erp/contracts';
-import { addDays, d, money, round2, sum } from '@erp/core';
+import { d, money, sum } from '@erp/core';
 import type { z } from 'zod';
-import { can, type Ctx } from '../../lib/context';
+import { can, type Ctx, type Deps } from '../../lib/context';
+import { promoPnl } from '../retail/promos';
 import { E } from '../../lib/errors';
 import { SALE_LINES_CTE, Sources, checkRange, monthRange } from './sources';
 
@@ -50,16 +50,16 @@ export async function costsReport(tx: Tx, ctx: Ctx, month: string): Promise<Repo
     { key: 'adjOver', label: 'ปรับยอดสต็อก: เกิน (ลดต้นทุน)', amount: money(d(adjust?.inv ?? 0).neg()), count: null, note: '' },
     { key: 'badReturn', label: 'รับคืนสินค้าชำรุด (ไม่คืนเข้าสต็อก)', amount: money(bad.rows[0]?.v ?? 0), count: bad.rows[0]?.n ?? 0, note: '' },
   ];
-  const sources = [await src.status('payroll', 'ยังไม่มีข้อมูลเงินเดือน (M17): กำไรนี้ยังไม่หักค่าแรง')];
-  if (await src.has('payroll')) {
-    if (can(ctx, 'hr.salary') === 1) {
-      const p = await tx.query<{ gross: string | null; sso: string | null }>(
-        `select sum(gross)::text gross, sum(sso_employer)::text sso from rpt_payroll_monthly where tenant_id = erp_current_tenant() and month = $1`, [month]);
-      lines.push({ key: 'payroll', label: 'เงินเดือนและค่าจ้าง', amount: money(p.rows[0]?.gross ?? 0), count: null, note: '' });
-      lines.push({ key: 'sso', label: 'ประกันสังคมส่วนนายจ้าง', amount: money(p.rows[0]?.sso ?? 0), count: null, note: '' });
-    } else {
-      lines.push({ key: 'payroll', label: 'เงินเดือนและประกันสังคม', amount: null, count: null, note: 'แสดงเฉพาะผู้มีสิทธิ์ดูเงินเดือน' });
-    }
+  const sources: ReportCosts['sources'] = [{ key: 'payroll', label: 'เงินเดือนและประกันสังคม (M17)', available: true, note: '' }];
+  if (can(ctx, 'hr.salary') === 1) {
+    const p = await tx.query<{ gross: string | null; sso: string | null; n: number }>(
+      `select sum(gross)::text gross, sum(employer_sso)::text sso, count(*)::int n from hr_labour_cost_monthly where period = $1`, [month]);
+    const has = (p.rows[0]?.n ?? 0) > 0;
+    if (!has) sources[0] = { ...sources[0]!, available: false, note: `ยังไม่มีงวดเงินเดือน ${month} ที่อนุมัติแล้ว: กำไรนี้ยังไม่หักค่าแรง` };
+    lines.push({ key: 'payroll', label: 'เงินเดือนและค่าจ้าง', amount: money(p.rows[0]?.gross ?? 0), count: null, note: has ? '' : 'ยังไม่มีงวดเงินเดือนที่อนุมัติ' });
+    lines.push({ key: 'sso', label: 'ประกันสังคมส่วนนายจ้าง', amount: money(p.rows[0]?.sso ?? 0), count: null, note: '' });
+  } else {
+    lines.push({ key: 'payroll', label: 'เงินเดือนและประกันสังคม', amount: null, count: null, note: 'แสดงเฉพาะผู้มีสิทธิ์ดูเงินเดือน' });
   }
   const totalCost = sum(lines.map((l) => l.amount ?? 0));
   return { month, sales: s.net, cogs: s.cogs, gp: money(gp), lines, totalCost: money(totalCost), profitAfter: money(gp.minus(totalCost)), sources };
@@ -76,32 +76,16 @@ export function costsSheet(r: ReportCosts): (string | number)[][] {
 }
 
 // ---------- promotions (REQ-M11-07) ----------
-export async function promotionsReport(tx: Tx, ctx: Ctx, from: string, to: string) {
+/** Promotion P&L: the numbers come from the retail module (M15, one source of truth); the screen links to its report. */
+export async function promotionsReport(tx: Tx, deps: Deps, ctx: Ctx, from: string, to: string) {
   checkRange(from, to);
-  const src = new Sources(tx);
-  const sources = [await src.status('promoLines', 'ยังไม่มีโมดูลโปรโมชั่นของร้าน (M15): รายงานจะแสดงเมื่อมีโปรที่ขายแล้ว')];
-  if (!(await src.has('promoLines'))) return { from, to, rows: [], sources };
-  const seeCost = can(ctx, 'data.cost') === 1;
-  const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
-  const bFrom = addDays(from, -(days + 1));
-  const bTo = addDays(from, -1);
-  const agg = (a: string, b: string) => tx.query<{ promo_id: string; promo_name: string; bills: number; sets: string; sales: string; discount: string; cogs: string }>(
-    `select promo_id::text, max(promo_name) promo_name, count(distinct doc_id)::int bills, coalesce(sum(sets), 0)::text sets, coalesce(sum(sales), 0)::text sales,
-            coalesce(sum(discount), 0)::text discount, coalesce(sum(cogs), 0)::text cogs
-       from rpt_promo_lines where tenant_id = erp_current_tenant() and date between $1::date and $2::date group by promo_id order by 5 desc`,
-    [a, b],
-  );
-  const now = await agg(from, to);
-  const before = new Map((await agg(bFrom, bTo)).rows.map((r) => [r.promo_id, r]));
+  const { items } = await promoPnl(tx, deps, ctx, { from, to });
+  const sources = [{ key: 'promoLines', label: 'ยอดขายตามโปรโมชั่น (M15)', available: true, note: '' }];
   return {
     from, to, sources,
-    rows: now.rows.map((r) => {
-      const b = before.get(r.promo_id);
-      return {
-        key: r.promo_id, label: r.promo_name, bills: r.bills, sets: r.sets, sales: money(r.sales), discount: money(r.discount),
-        cogs: seeCost ? money(r.cogs) : null, gp: seeCost ? money(round2(r.sales).minus(round2(r.cogs))) : null,
-        before: b ? { sales: money(b.sales), gp: seeCost ? money(round2(b.sales).minus(round2(b.cogs))) : null } : null,
-      };
-    }),
+    rows: items.map((x) => ({
+      key: x.promoId, label: `${x.code} · ${x.name}`, bills: x.bills, sets: x.sets, sales: x.salesExVat, discount: x.discount,
+      cogs: x.cogs, gp: x.grossProfit, before: x.before.salesExVat !== '0.00' ? { sales: x.before.salesExVat, gp: x.before.grossProfit } : null,
+    })),
   };
 }

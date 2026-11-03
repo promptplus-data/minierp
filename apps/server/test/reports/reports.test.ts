@@ -192,7 +192,7 @@ describe('VAT reports (REQ-M11-03)', () => {
     expect(r.body.rows.find((x: { no: string }) => x.no === s.body.no)).toMatchObject({ base7: '0.00', vat: '0.00', total: '0.00', note: 'ยกเลิก: ออกผิดลูกค้า / ข้อมูลภาษีผิด' });
   });
 
-  it('input VAT from manual goods receipts: 7% per document with the vendor tax invoice number', async () => {
+  it('input VAT from AP bills of goods receipts: 7% of the amount after bill discount, vendor invoice number', async () => {
     const gr = await env.owner.post('/api/stock/receipts', {
       vendorId: env.seed.vendors.v2, vendorInvoiceNo: 'IV-6610-0042', deliveryNo: 'DN-1', warehouseId: env.seed.warehouses.WH2,
       lines: [{ productId: env.seed.products.p6, qty: '20', unitCost: '70.50' }], billDiscount: '10',
@@ -201,7 +201,7 @@ describe('VAT reports (REQ-M11-03)', () => {
     const r = await env.owner.get(`/api/reports/vat?${q({ month: MONTH, kind: 'purchase' })}`);
     expect(r.body.rows).toHaveLength(1);
     expect(r.body.rows[0]).toMatchObject({ no: 'IV-6610-0042', name: 'บจก. ท่อไทยค้าส่ง', taxId: '0105556012345', base7: '1400.00', vat: '98.00', total: '1498.00' });
-    expect(r.body.sources[0].available).toBe(false);
+    expect(r.body.sources[0].available).toBe(true); // AP bills (M18)
     const t = await token(env.app, 'charoen');
     const csv = await raw(env.app, t, `/api/reports/vat?${q({ month: MONTH, kind: 'purchase', format: 'csv' })}`);
     expect(csv.text).toContain('รายงานภาษีซื้อ');
@@ -225,16 +225,11 @@ describe('internal cost (REQ-M11-06)', () => {
     expect(line('adjShort').count).toBe(1);
     expect(d(line('adjShort').amount).gt(0)).toBe(true);
     expect(r.body.profitAfter).toBe(d(r.body.gp).minus(d(r.body.totalCost)).toFixed(2));
-    expect(r.body.sources[0]).toMatchObject({ key: 'payroll', available: false });
+    expect(r.body.sources[0]).toMatchObject({ key: 'payroll', available: false }); // no approved payroll run in this month
   });
   it('needs data.cost', async () => {
     const boy = await login(env.app, 'boy');
     expect((await boy.get(`/api/reports/costs?month=${MONTH}`)).status).toBe(403);
-  });
-  it('promotions report says the source is missing', async () => {
-    const r = await env.owner.get(`/api/reports/promotions?${q({ from: FROM, to: TODAY })}`);
-    expect(r.body.rows).toEqual([]);
-    expect(r.body.sources[0].available).toBe(false);
   });
 });
 

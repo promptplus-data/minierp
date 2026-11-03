@@ -15,9 +15,6 @@ export const PLUGIN_VIEWS = {
   purchaseDocs: { view: 'rpt_purchase_docs', label: 'ใบตั้งหนี้ / ใบซื้อ (M18 เจ้าหนี้)' },
   arOpen: { view: 'rpt_ar_open', label: 'ใบแจ้งหนี้ค้างชำระ (M10 ลูกหนี้)' },
   grPending: { view: 'rpt_gr_pending', label: 'ใบรับของรอยืนยัน (M05)' },
-  approvals: { view: 'rpt_pending_approvals', label: 'รายการรออนุมัติของโมดูลอื่น' },
-  payroll: { view: 'rpt_payroll_monthly', label: 'เงินเดือนและประกันสังคม (M17)' },
-  promoLines: { view: 'rpt_promo_lines', label: 'ยอดขายตามโปรโมชั่น (M15)' },
   coupons: { view: 'rpt_coupon_redemptions', label: 'คูปอง SCG Family ที่ตัดใช้ (M13)' },
 } as const;
 export type PluginKey = keyof typeof PLUGIN_VIEWS;

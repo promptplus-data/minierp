@@ -9,7 +9,7 @@ import { buildVatReport, d, money, purchaseVat, thaiDateBE, type AbbDayIn, type 
 import { Sources, monthRange, nextOffset, offsetOf } from './sources';
 
 export interface PurchaseDocRow {
-  source: 'stock_docs' | 'plugin'; id: string; date: string; no: string; vendorInvoiceNo: string; vendorCode: string; vendorName: string; taxId: string | null; branch: string | null;
+  source: 'stock_docs' | 'plugin'; id: string; grDocId?: string | null; date: string; no: string; vendorInvoiceNo: string; vendorCode: string; vendorName: string; taxId: string | null; branch: string | null;
   base7: string; exempt: string; vat: string; total: string; status: 'active' | 'void'; discount: string;
 }
 
@@ -20,7 +20,7 @@ export interface PurchaseDocRow {
 export async function purchaseDocs(tx: Tx, src: Sources, from: string, to: string): Promise<PurchaseDocRow[]> {
   if (await src.has('purchaseDocs')) {
     const r = await tx.query<PurchaseDocRow>(
-      `select 'plugin' source, id::text, date::text, no, coalesce(vendor_invoice_no, no) "vendorInvoiceNo", vendor_code "vendorCode", vendor_name "vendorName",
+      `select 'plugin' source, id::text, gr_doc_id::text "grDocId", date::text, no, coalesce(vendor_invoice_no, no) "vendorInvoiceNo", vendor_code "vendorCode", vendor_name "vendorName",
               tax_id "taxId", branch, base7::text, exempt::text, vat::text, total::text, status, coalesce(discount, 0)::text discount
          from rpt_purchase_docs where tenant_id = erp_current_tenant() and date between $1::date and $2::date order by date, no`,
       [from, to],
