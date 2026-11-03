@@ -61,6 +61,14 @@ const APPROVAL_REASON: Record<string, string> = {
   NOT_FOUND: 'ไม่พบผู้อนุมัติ หรือผู้อนุมัติไม่ได้ใช้งานแล้ว',
 };
 
+/** Refusals that are not about the role (shop-wide states set by the license, SCG Admin or the terms). */
+const FORBIDDEN_REASON: Record<string, string> = {
+  LICENSE_READ_ONLY: 'ไลเซนส์หมดอายุ (หรือยังไม่ได้ใส่คีย์) ร้านอยู่ในโหมดอ่านอย่างเดียว ดู พิมพ์ และส่งออกได้ แต่ทำรายการใหม่ไม่ได้',
+  SHOP_SUSPENDED: 'ร้านนี้ถูก SCG ระงับการใช้งานชั่วคราว ติดต่อ SCG',
+  TERMS_REQUIRED: 'เจ้าของร้านต้องลงนามสัญญาการใช้งานก่อนใช้ระบบ',
+  OWNER_ONLY: 'เฉพาะเจ้าของร้านเท่านั้นที่ทำรายการนี้ได้',
+};
+
 export class ApiFail extends Error {
   constructor(
     readonly status: number,
@@ -81,6 +89,7 @@ function thaiMessage(code: ErrorCode, details: unknown, serverMessage: string): 
   const d = details && typeof details === 'object' ? (details as Record<string, unknown>) : {};
   if (code === 'UNAUTHORIZED' && typeof d.reason === 'string' && LOGIN_REASON[d.reason]) return LOGIN_REASON[d.reason]!;
   if (typeof d.approvalError === 'string' && APPROVAL_REASON[d.approvalError]) return APPROVAL_REASON[d.approvalError]!;
+  if (code === 'FORBIDDEN' && typeof d.reason === 'string' && FORBIDDEN_REASON[d.reason]) return FORBIDDEN_REASON[d.reason]!;
   if (code === 'VALIDATION' || code === 'CONFLICT') return `${THAI[code]} (${serverMessage})`;
   return THAI[code];
 }
