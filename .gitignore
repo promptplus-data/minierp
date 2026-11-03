@@ -13,3 +13,6 @@ apps/installer/Output
 apps/desktop/src-tauri/gen
 test-results
 .vercel
+
+# local agent worktrees and session files
+.claude/
