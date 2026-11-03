@@ -21,7 +21,7 @@
   .rt-actions{flex-wrap:wrap}
 }
 .rt-span2{grid-column:span 2}
-.rt-who{white-space:nowrap}
+.rt-who{font-size:12px;max-width:150px}
 .rt-items{min-width:170px}
 .rt-comps select{width:100%;min-width:140px}
 .rt-comps th{white-space:normal}
