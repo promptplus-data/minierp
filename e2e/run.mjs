@@ -28,6 +28,13 @@ const FIRST_PORT = Number(process.env.E2E_PORT ?? 3310);
 const editions = process.env.EDITION ? [process.env.EDITION] : ['onprem', 'cloud'];
 const extraArgs = process.argv.slice(2).filter((a) => a !== '--');
 const env = { ...process.env, DATABASE_URL };
+// Throw-away license keypair per run (admin e2e signs and verifies keys with it). Never a real key.
+if (!env.LICENSE_SIGNING_KEY || !env.ERP_LICENSE_TEST_PUBKEY) {
+  const { generateKeyPairSync } = await import('node:crypto');
+  const k = generateKeyPairSync('ed25519');
+  env.LICENSE_SIGNING_KEY = k.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  env.ERP_LICENSE_TEST_PUBKEY = k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+}
 
 function run(cmd, args, opts = {}) {
   console.log(`\n$ ${cmd} ${args.join(' ')}`);

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import pg from 'pg';
 import { runMigrations } from './migrate';
-import { seedDemo } from './seed';
+import { seedFullDemo } from './seedFull';
 import { withTenant } from './tx';
 
 export async function bootstrap(opts: { url: string; seed: boolean; log?: (m: string) => void }): Promise<void> {
@@ -23,7 +23,7 @@ export async function bootstrap(opts: { url: string; seed: boolean; log?: (m: st
       log('demo shop "charoen" already exists; not seeding');
       return;
     }
-    const s = await seedDemo(pool);
+    const s = await seedFullDemo(pool);
     log(`seeded demo shop "charoen" (tenant ${s.tenantId})`);
   } finally {
     await pool.end();

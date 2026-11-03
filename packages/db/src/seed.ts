@@ -3,7 +3,7 @@
  * products p1..p12 (p9 = delivery service), opening FIFO lots built exactly like the mockup's initState(),
  * customers c0..c3, vendors v1..v3, users (password "1234", PIN "1234") and one resigned user.
  *
- * CLI: DATABASE_URL=... tsx src/seed.ts [--reset]
+ * CLI: DATABASE_URL=... tsx src/seed.ts [--reset] [--full]   (--full adds every module group's demo data)
  *   Skips when the demo tenant already exists; --reset truncates every table first (dev only).
  */
 import { randomUUID } from 'node:crypto';
@@ -211,6 +211,11 @@ if (/seed\.(ts|mjs|js)$/.test(entry) && import.meta.url === pathToFileURL(entry)
     }
     const r = await seedDemo(pool);
     console.log(`[seed] tenant ${r.tenantId} (code charoen) with ${Object.keys(r.products).length} products, ${Object.keys(r.users).length} users`);
+    if (process.argv.includes('--full')) {
+      const { seedModules } = await import('./seedFull');
+      await seedModules(pool, r.tenantId);
+      console.log('[seed] module demo data added (sales, purchasing, retail, admin)');
+    }
   })()
     .catch((err) => {
       console.error('[seed] failed:', err);
