@@ -1,8 +1,5 @@
 /** Shared helpers for the admin module tests. */
-import { readFileSync } from 'node:fs';
-import { createPrivateKey, randomBytes } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from '@erp/db';
 import type { LicensePayload } from '@erp/contracts';
@@ -10,10 +7,11 @@ import { buildApp } from '../../src/app';
 import { signLicense } from '../../src/modules/admin/license';
 import { client, TODAY, type Client } from '../helpers';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-/** Development keypair (its public half is embedded in license-pubkey.ts); never the production key. */
-export const DEV_PRIVATE_PEM = readFileSync(path.join(here, 'fixtures/license-dev-private.pem'), 'utf8');
-export const devKey = () => createPrivateKey(DEV_PRIVATE_PEM);
+/** Throw-away keypair for this test process; the verifier is pointed at its public half (never the production key). */
+const pair = generateKeyPairSync('ed25519');
+export const DEV_PRIVATE_PEM = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+export const devKey = () => pair.privateKey;
+process.env.ERP_LICENSE_TEST_PUBKEY = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
 
 export function makeKey(p: Partial<LicensePayload> & { shopName: string; taxId: string }): string {
   return signLicense({

@@ -15,9 +15,14 @@ import { LICENSE_PUBLIC_KEY_SPKI_B64 } from './license-pubkey';
 export const KEY_PREFIX = 'SCG1';
 export const WARN_DAYS = 30;
 
-let embedded: KeyObject | undefined;
-export const embeddedPublicKey = (): KeyObject =>
-  (embedded ??= createPublicKey({ key: Buffer.from(LICENSE_PUBLIC_KEY_SPKI_B64, 'base64'), format: 'der', type: 'spki' }));
+const pubCache = new Map<string, KeyObject>();
+export function embeddedPublicKey(): KeyObject {
+  const test = process.env.NODE_ENV !== 'production' ? process.env.ERP_LICENSE_TEST_PUBKEY : undefined;
+  const b64 = test || LICENSE_PUBLIC_KEY_SPKI_B64;
+  let k = pubCache.get(b64);
+  if (!k) pubCache.set(b64, (k = createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' })));
+  return k;
+}
 
 /** LICENSE_SIGNING_KEY: the Ed25519 private key as PKCS#8 PEM, or that PEM base64-encoded (cloud only). */
 export function signingKeyFromEnv(env: NodeJS.ProcessEnv = process.env): KeyObject | null {
