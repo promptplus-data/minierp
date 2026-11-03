@@ -19,11 +19,11 @@ beforeAll(async () => {
   C = env.seed.customers;
   WH2 = env.seed.warehouses.WH2!;
   // c1: 30-day term. a = 10,700 (10,000 + VAT), b = 5,350, old = 2,140 dated 70 days ago (due 40 days ago)
-  inv.a = await direct(C.c1, '500', '20');
-  inv.b = await direct(C.c1, '250', '20');
-  inv.old = await direct(C.c1, '100', '20', '2026-08-17');
+  inv.a = await direct(C.c1!, '500', '20');
+  inv.b = await direct(C.c1!, '250', '20');
+  inv.old = await direct(C.c1!, '100', '20', '2026-08-17');
   // c2: end of month term
-  inv.c2 = await direct(C.c2, '50', '20');
+  inv.c2 = await direct(C.c2!, '50', '20');
 });
 afterAll(async () => { await env.close(); });
 
@@ -53,8 +53,8 @@ describe('receipts (REQ-M10-02/03)', () => {
     expect(r.no).toMatch(/^RE2610-/);
     expect(r).toMatchObject({ settled: '13375.00', wht: '375.00', cash: '13000.00', whtRate: '3', whtCertNo: 'WHT-2569/0101' });
     expect(r.lines.map((l: { whtBase: string; wht: string }) => [l.whtBase, l.wht])).toEqual([['10000.00', '300.00'], ['2500.00', '75.00']]);
-    expect(await arOf(env, inv.a)).toBe('0.00');
-    expect(await arOf(env, inv.b)).toBe('2675.00');
+    expect(await arOf(env, inv.a!)).toBe('0.00');
+    expect(await arOf(env, inv.b!)).toBe('2675.00');
     const i = await ok(env.owner.get(`/api/sales/invoices/${inv.b}`));
     expect(i).toMatchObject({ arBalance: '2675.00', settled: '2675.00' });
   });
@@ -69,24 +69,24 @@ describe('receipts (REQ-M10-02/03)', () => {
   it('1 % rate and a typed WHT amount; WHT cannot exceed the pre-VAT base', async () => {
     const r1 = await ok(env.owner.post('/api/ar/receipts', { customerId: C.c2, method: 'transfer', lines: [{ invoiceNo: inv.c2, amount: '535' }], wht: { mode: 'rate', rate: '1' } }), 201);
     expect(r1).toMatchObject({ wht: '5.00', cash: '530.00' });
-    expect(await arOf(env, inv.c2)).toBe('535.00');
+    expect(await arOf(env, inv.c2!)).toBe('535.00');
     expect((await env.owner.post('/api/ar/receipts', { customerId: C.c2, method: 'cash', lines: [{ invoiceNo: inv.c2, amount: '535' }], wht: { mode: 'amount', amount: '501' } })).status).toBe(400);
     const r2 = await ok(env.owner.post('/api/ar/receipts', { customerId: C.c2, method: 'cash', lines: [{ invoiceNo: inv.c2, amount: '535' }], wht: { mode: 'amount', amount: '15' } }), 201);
     expect(r2).toMatchObject({ settled: '535.00', wht: '15.00', cash: '520.00', whtRate: null });
-    expect(await arOf(env, inv.c2)).toBe('0.00');
+    expect(await arOf(env, inv.c2!)).toBe('0.00');
     const whtList = await ok(env.owner.get('/api/ar/receipts?status=wht'));
     expect(whtList.items).toHaveLength(3);
   });
 
   it('voiding a receipt gives the invoices their balance back; the invoice can be voided only after', async () => {
     const r = await ok(env.owner.post('/api/ar/receipts', { customerId: C.c1, method: 'transfer', lines: [{ invoiceNo: inv.b, amount: '1000' }] }), 201);
-    expect(await arOf(env, inv.b)).toBe('1675.00');
+    expect(await arOf(env, inv.b!)).toBe('1675.00');
     const v = await env.owner.post(`/api/sales/docs/${inv.b}/void`, { reason: 'x' });
     expect(v.status).toBe(409);
     expect(v.body.details.docs).toEqual(expect.arrayContaining([r.no]));
     const vr = await ok(env.owner.post(`/api/ar/receipts/${r.no}/void`, { reason: 'โอนซ้ำ' }));
     expect(vr.status).toBe('void');
-    expect(await arOf(env, inv.b)).toBe('2675.00');
+    expect(await arOf(env, inv.b!)).toBe('2675.00');
   });
 
   it('only fin.ar may receive money; sales may read', async () => {
@@ -112,7 +112,7 @@ describe('aging, due soon, statement (REQ-M10-04/05/06)', () => {
   });
 
   it('home card: due within 7 days and overdue', async () => {
-    const extra = await direct(C.c2, '10', '20'); // due 2026-10-31
+    const extra = await direct(C.c2!, '10', '20'); // due 2026-10-31
     const due = await ok(env.owner.get('/api/ar/due-soon'));
     expect(due.dueSoon).toEqual({ customers: 1, invoices: 1, amount: '214.00' });
     expect(due.overdue).toEqual({ customers: 1, invoices: 1, amount: '2140.00' });

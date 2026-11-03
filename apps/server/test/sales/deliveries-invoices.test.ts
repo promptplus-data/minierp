@@ -24,18 +24,18 @@ describe('delivery orders from a sales order', () => {
   let so: any;
   let do1: any;
   beforeAll(async () => {
-    so = await order([{ productId: P.p1, qty: '200', unitPrice: '130' }, { productId: P.p9, qty: '2', unitPrice: '280.37' }]);
+    so = await order([{ productId: P.p1!, qty: '200', unitPrice: '130' }, { productId: P.p9!, qty: '2', unitPrice: '280.37' }]);
   });
 
   it('partial delivery cuts stock FIFO from the oldest lots and shows what is still to deliver', async () => {
-    const before = await stockQty(env.pool, P.p1, WH2);
+    const before = await stockQty(env.pool, P.p1!, WH2);
     do1 = await ok(deliver(so.no, [{ srcLineId: so.lines[0].id, qty: '150' }, { srcLineId: so.lines[1].id, qty: '1' }], { shipTo: 'หน้างานสันทราย', vehicle: 'กข-1234' }), 201);
     expect(do1.no).toMatch(/^DO2610-/);
     expect(do1.cutsStock).toBe(true);
     expect(do1.lines[0]).toMatchObject({ qty: '150', value: '19500.00' });
     expect(do1.lines[0].cogs).toBeNull(); // warehouse role cannot see cost
-    expect(await stockQty(env.pool, P.p1, WH2)).toBe(before - 150);
-    const lots = await lotsOf(env.pool, P.p1, WH2);
+    expect(await stockQty(env.pool, P.p1!, WH2)).toBe(before - 150);
+    const lots = await lotsOf(env.pool, P.p1!, WH2);
     expect(lots[0]!.remaining).toBe('0.0000'); // oldest lot (136) used up first
     const o = await ok(env.boy.get(`/api/sales/orders/${so.no}`));
     expect(o.dlvStatus).toBe('partial');
@@ -49,7 +49,7 @@ describe('delivery orders from a sales order', () => {
   });
 
   it('BR-07: a shortage in the warehouse stops the delivery with nothing written', async () => {
-    const big = await order([{ productId: P.p7, qty: '50', unitPrice: '1250' }], { term: { t: 'cash' } });
+    const big = await order([{ productId: P.p7!, qty: '50', unitPrice: '1250' }], { term: { t: 'cash' } });
     const r = await deliver(big.no, [{ srcLineId: big.lines[0].id, qty: '50' }]);
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('INSUFFICIENT_STOCK');
@@ -85,15 +85,15 @@ describe('delivery orders from a sales order', () => {
     expect(v.body.details.docs).toEqual([inv.doc.no]);
     // void the invoice (core void), then the delivery: stock back into the original lots
     await ok(env.owner.post(`/api/sales/docs/${inv.doc.no}/void`, { reason: 'ออกผิด' }));
-    const before = await stockQty(env.pool, P.p1, WH2);
+    const before = await stockQty(env.pool, P.p1!, WH2);
     const vd = await ok(env.owner.post(`/api/sales/deliveries/${do1.no}/void`, { reason: 'ส่งผิด' }));
     expect(vd.status).toBe('void');
-    expect(await stockQty(env.pool, P.p1, WH2)).toBe(before + 150);
+    expect(await stockQty(env.pool, P.p1!, WH2)).toBe(before + 150);
     expect((await ok(env.boy.get(`/api/sales/orders/${so.no}`))).dlvStatus).toBe('partial');
   });
 
   it('a delivery of a project order is billed by installment, not by delivery invoice', async () => {
-    const pso = await order([{ productId: P.p3, qty: '100', unitPrice: '22' }], { project: { mode: 'new', name: 'บ้านคุณสมชาย', template: '100%' } });
+    const pso = await order([{ productId: P.p3!, qty: '100', unitPrice: '22' }], { project: { mode: 'new', name: 'บ้านคุณสมชาย', template: '100%' } });
     const pdo = await ok(deliver(pso.no, [{ srcLineId: pso.lines[0].id, qty: '100' }]), 201);
     expect(pdo.project.name).toBe('บ้านคุณสมชาย');
     expect((await env.boy.post('/api/sales/invoices', { source: 'delivery', deliveryNos: [pdo.no] })).status).toBe(400);
@@ -102,20 +102,20 @@ describe('delivery orders from a sales order', () => {
 
 describe('direct invoices', () => {
   it('cuts stock now; goods left at the shop go out later on a delivery order without a second stock cut', async () => {
-    const before = await stockQty(env.pool, P.p4, WH2);
+    const before = await stockQty(env.pool, P.p4!, WH2);
     const inv = await ok(env.boy.post('/api/sales/invoices', {
-      source: 'direct', customerId: C.c2, warehouseId: WH2, goodsLeft: true, lines: [{ productId: P.p4, qty: '10', unitPrice: '196.26' }],
+      source: 'direct', customerId: C.c2, warehouseId: WH2, goodsLeft: true, lines: [{ productId: P.p4!, qty: '10', unitPrice: '196.26' }],
     }), 201);
     expect(inv.goodsLeft).toBe(true);
     expect(inv.dueDate).toBe('2026-10-31'); // end of month
-    expect(await stockQty(env.pool, P.p4, WH2)).toBe(before - 10);
+    expect(await stockQty(env.pool, P.p4!, WH2)).toBe(before - 10);
     const lineId = inv.doc.lines[0].id;
     expect(inv.undelivered[lineId]).toBe('10');
     const src = await ok(env.chai.get('/api/sales/delivery-sources'));
     expect(src.items.some((s: { kind: string; no: string }) => s.kind === 'INV' && s.no === inv.doc.no)).toBe(true);
     const dlv = await ok(env.chai.post('/api/sales/deliveries', { invoiceNo: inv.doc.no, lines: [{ srcLineId: lineId, qty: '4' }] }), 201);
     expect(dlv.cutsStock).toBe(false);
-    expect(await stockQty(env.pool, P.p4, WH2)).toBe(before - 10);
+    expect(await stockQty(env.pool, P.p4!, WH2)).toBe(before - 10);
     expect((await env.chai.post('/api/sales/deliveries', { invoiceNo: inv.doc.no, lines: [{ srcLineId: lineId, qty: '7' }] })).status).toBe(409);
     expect((await ok(env.boy.get(`/api/sales/invoices/${inv.doc.no}`))).undelivered[lineId]).toBe('6');
     // the invoice cannot be voided while its later delivery is active
@@ -126,18 +126,18 @@ describe('direct invoices', () => {
 
   it('a cash invoice is paid now (payments = total, no receivable); a customer without a tax ID gets no tax invoice', async () => {
     const inv = await ok(env.boy.post('/api/sales/invoices', {
-      source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p6, qty: '2', unitPrice: '83.18' }], payments: [{ method: 'transfer', amount: '178.01' }],
+      source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p6!, qty: '2', unitPrice: '83.18' }], payments: [{ method: 'transfer', amount: '178.01' }],
     }), 201);
     expect(inv.kind).toBe('cash');
     expect(inv.arBalance).toBe('0.00');
-    expect((await env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p6, qty: '2', unitPrice: '83.18' }], payments: [{ method: 'cash', amount: '100' }] })).status).toBe(400);
-    expect((await env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c3, warehouseId: WH2, lines: [{ productId: P.p6, qty: '1', unitPrice: '83.18' }] })).status).toBe(400);
+    expect((await env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p6!, qty: '2', unitPrice: '83.18' }], payments: [{ method: 'cash', amount: '100' }] })).status).toBe(400);
+    expect((await env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c3, warehouseId: WH2, lines: [{ productId: P.p6!, qty: '1', unitPrice: '83.18' }] })).status).toBe(400);
   });
 });
 
 describe('credit refunds on returns (REQ-M08-06 with receivables)', () => {
   it('a credit note with refund "credit" reduces the invoice balance; more than the balance is refused', async () => {
-    const inv = await ok(env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p5, qty: '10', unitPrice: '150' }] }), 201);
+    const inv = await ok(env.boy.post('/api/sales/invoices', { source: 'direct', customerId: C.c1, warehouseId: WH2, lines: [{ productId: P.p5!, qty: '10', unitPrice: '150' }] }), 201);
     expect(inv.arBalance).toBe('1605.00');
     const line = inv.doc.lines[0];
     const cn = await ok(env.suda.post('/api/returns', { sourceDocNo: inv.doc.no, lines: [{ lineId: line.id, qty: '2' }], condition: 'good', warehouseId: WH2, refund: 'credit', reason: 'ลูกค้าซื้อเกิน' }), 201);
@@ -158,7 +158,7 @@ describe('full tax invoice issued later from an ABB', () => {
   it('voids the ABB with a reason naming the new INV, keeps stock and the shift totals', async () => {
     const shift = await openShift(env.prae);
     const sale = await ok(env.prae.post('/api/sales/pos', saleBody(env.seed, shift, [{ p: 'p4', qty: '2', price: '210.00' }], '420.00')), 201);
-    const stockBefore = await stockQty(env.pool, P.p4, env.seed.warehouses.WH1!);
+    const stockBefore = await stockQty(env.pool, P.p4!, env.seed.warehouses.WH1!);
     const shiftBefore = await ok(env.prae.get('/api/shifts/current'));
     expect((await env.prae.post('/api/sales/invoices/from-abb', { abbNo: sale.no, customerId: C.c3 })).status).toBe(400); // no tax ID
     const inv = await ok(env.prae.post('/api/sales/invoices/from-abb', { abbNo: sale.no, customerId: C.c1 }), 201);
@@ -169,7 +169,7 @@ describe('full tax invoice issued later from an ABB', () => {
     const abb = await ok(env.prae.get(`/api/sales/docs/${sale.no}`));
     expect(abb.status).toBe('void');
     expect(abb.voided.reason).toContain(inv.doc.no);
-    expect(await stockQty(env.pool, P.p4, env.seed.warehouses.WH1!)).toBe(stockBefore);
+    expect(await stockQty(env.pool, P.p4!, env.seed.warehouses.WH1!)).toBe(stockBefore);
     const shiftAfter = await ok(env.prae.get('/api/shifts/current'));
     expect(shiftAfter.cashSales).toBe(shiftBefore.cashSales);
     expect((await env.prae.post('/api/sales/invoices/from-abb', { abbNo: sale.no, customerId: C.c1 })).status).toBe(409);
@@ -195,7 +195,7 @@ describe('lists and permissions', () => {
     expect((await env.chai.post('/api/sales/invoices', { source: 'delivery', deliveryNos: ['DO2610-0001'] })).status).toBe(403);
   });
   it('void with PIN for the sales role on a delivery', async () => {
-    const so = await order([{ productId: P.p2, qty: '10', unitPrice: '48' }]);
+    const so = await order([{ productId: P.p2!, qty: '10', unitPrice: '48' }]);
     const dl = await ok(deliver(so.no, [{ srcLineId: so.lines[0].id, qty: '10' }]), 201);
     expect((await env.boy.post(`/api/sales/deliveries/${dl.no}/void`, { reason: 'x' })).status).toBe(403);
     expect((await ok(env.boy.post(`/api/sales/deliveries/${dl.no}/void`, { reason: 'x', ...pin(env) }))).status).toBe('void');

@@ -15,7 +15,7 @@ afterAll(async () => { await env.close(); });
 const quoteBody = (extra: Record<string, unknown> = {}) => ({
   customerId: C.c2, attn: 'คุณวิชัย',
   lines: [
-    { productId: P.p1, qty: '50', unitPrice: '130' },
+    { productId: P.p1!, qty: '50', unitPrice: '130' },
     { name: 'ประตูไม้สักบานคู่', unitName: 'ชุด', qty: '1', unitPrice: '8500' },
   ],
   ...extra,
@@ -24,7 +24,7 @@ const quoteBody = (extra: Record<string, unknown> = {}) => ({
 describe('quotations', () => {
   it('saves free-text lines, a 15-day validity, exc VAT totals and no stock or cost check', async () => {
     const before = await env.pool.query(`select count(*)::int n from stock_moves`);
-    const q = await ok(env.boy.post('/api/sales/quotations', quoteBody({ lines: [{ productId: P.p1, qty: '50', unitPrice: '1' }, { name: 'ประตูไม้สักบานคู่', unitName: 'ชุด', qty: '1', unitPrice: '8500' }] })), 201);
+    const q = await ok(env.boy.post('/api/sales/quotations', quoteBody({ lines: [{ productId: P.p1!, qty: '50', unitPrice: '1' }, { name: 'ประตูไม้สักบานคู่', unitName: 'ชุด', qty: '1', unitPrice: '8500' }] })), 201);
     expect(q.no).toMatch(/^QT2610-/);
     expect(q.validUntil).toBe('2026-11-10');
     expect(q.vatMode).toBe('exc');
@@ -36,7 +36,7 @@ describe('quotations', () => {
 
   it('keeps every revision until converted and tracks the status', async () => {
     const q = await ok(env.boy.post('/api/sales/quotations', quoteBody()), 201);
-    const r2 = await ok(env.boy.patch(`/api/sales/quotations/${q.no}`, quoteBody({ lines: [{ productId: P.p1, qty: '60', unitPrice: '130' }] })));
+    const r2 = await ok(env.boy.patch(`/api/sales/quotations/${q.no}`, quoteBody({ lines: [{ productId: P.p1!, qty: '60', unitPrice: '130' }] })));
     expect(r2.revision).toBe(2);
     expect(r2.lines).toHaveLength(1);
     const revs = await env.pool.query(`select r.revision from sales_quote_revisions r join sales_quotes q on q.id = r.quote_id where q.no = $1 order by r.revision`, [q.no]);
@@ -62,25 +62,25 @@ describe('BR-05 price resolution', () => {
     ok(env.boy.get(`/api/sales/price?customerId=${customer}&productId=${product}&qty=${qty}&unitIdx=${unitIdx}&vatMode=inc`));
 
   it('customer list → group list by quantity → retail', async () => {
-    expect(await price(C.c1, P.p1, '10')).toEqual({ unitPrice: '138.00', source: 'customerList', ref: 'PL-C00001' });
-    expect(await price(C.c1, P.p1, '1', 1)).toMatchObject({ unitPrice: '5440.00', source: 'customerList' });
-    expect(await price(C.c2, P.p6, '10')).toEqual({ unitPrice: '84.00', source: 'groupList', ref: 'PL-WHOLE' });
-    expect(await price(C.c2, P.p6, '200')).toMatchObject({ unitPrice: '80.00', source: 'groupList' });
+    expect(await price(C.c1!, P.p1!, '10')).toEqual({ unitPrice: '138.00', source: 'customerList', ref: 'PL-C00001' });
+    expect(await price(C.c1!, P.p1!, '1', 1)).toMatchObject({ unitPrice: '5440.00', source: 'customerList' });
+    expect(await price(C.c2!, P.p6!, '10')).toEqual({ unitPrice: '84.00', source: 'groupList', ref: 'PL-WHOLE' });
+    expect(await price(C.c2!, P.p6!, '200')).toMatchObject({ unitPrice: '80.00', source: 'groupList' });
     // ร้านวัสดุบ้านนา has a sent quotation with กระเบื้องลอนคู่ at 45.79 before VAT: the quotation wins (step 1)
-    expect(await price(C.c2, P.p2, '10')).toMatchObject({ unitPrice: '49.00', source: 'quote', ref: env.seeded.quotes.bannaa });
-    expect(await price(C.c3, P.p2, '10')).toEqual({ unitPrice: '52.00', source: 'retail', ref: null });
-    expect(await price(C.c2, P.p4, '1')).toMatchObject({ unitPrice: '210.00', source: 'retail' });
+    expect(await price(C.c2!, P.p2!, '10')).toMatchObject({ unitPrice: '49.00', source: 'quote', ref: env.seeded.quotes.bannaa });
+    expect(await price(C.c3!, P.p2!, '10')).toEqual({ unitPrice: '52.00', source: 'retail', ref: null });
+    expect(await price(C.c2!, P.p4!, '1')).toMatchObject({ unitPrice: '210.00', source: 'retail' });
   });
 
   it('a valid sent quotation wins over the price lists; exc documents get the price before VAT', async () => {
-    const q = await ok(env.boy.post('/api/sales/quotations', { customerId: C.c1, vatMode: 'inc', status: 'sent', lines: [{ productId: P.p1, qty: '10', unitPrice: '133.75' }] }), 201);
-    expect(await price(C.c1, P.p1, '5')).toEqual({ unitPrice: '133.75', source: 'quote', ref: q.no });
+    const q = await ok(env.boy.post('/api/sales/quotations', { customerId: C.c1, vatMode: 'inc', status: 'sent', lines: [{ productId: P.p1!, qty: '10', unitPrice: '133.75' }] }), 201);
+    expect(await price(C.c1!, P.p1!, '5')).toEqual({ unitPrice: '133.75', source: 'quote', ref: q.no });
     const exc = await ok(env.boy.get(`/api/sales/price?customerId=${C.c3}&productId=${P.p1}&qty=1&vatMode=exc`));
     expect(exc.unitPrice).toBe('135.51'); // 145 / 1.07
   });
 
   it('price lists are maintained with data.master only and validated', async () => {
-    const body = { name: 'ผู้รับเหมา', kind: 'group', group: 'contr', items: [{ productId: P.p3, minQty: '0', price: '23' }, { productId: P.p3, minQty: '1000', price: '22' }] };
+    const body = { name: 'ผู้รับเหมา', kind: 'group', group: 'contr', items: [{ productId: P.p3!, minQty: '0', price: '23' }, { productId: P.p3!, minQty: '1000', price: '22' }] };
     expect((await env.boy.post('/api/sales/price-lists', body)).status).toBe(403);
     const pl = await ok(env.owner.post('/api/sales/price-lists', body), 201);
     expect(pl.code).toMatch(/^PL\d{3}$/);
@@ -100,12 +100,12 @@ describe('sales orders', () => {
     expect(free.free).toBe(true);
     const r = await env.boy.post('/api/sales/orders', {
       customerId: C.c2, quoteNo: qt,
-      lines: [{ productId: P.p1, qty: '100', unitPrice: l1.unitPrice, quoteLineId: l1.id }, { productId: P.p2, qty: '300', unitPrice: l2.unitPrice, quoteLineId: l2.id }, { qty: '1', unitPrice: '8500', quoteLineId: free.id }],
+      lines: [{ productId: P.p1!, qty: '100', unitPrice: l1.unitPrice, quoteLineId: l1.id }, { productId: P.p2!, qty: '300', unitPrice: l2.unitPrice, quoteLineId: l2.id }, { qty: '1', unitPrice: '8500', quoteLineId: free.id }],
     });
     expect(r.status).toBe(400);
     const so = await ok(env.boy.post('/api/sales/orders', {
       customerId: C.c2, quoteNo: qt,
-      lines: [{ productId: P.p1, qty: '100', unitPrice: l1.unitPrice, quoteLineId: l1.id }, { productId: P.p2, qty: '300', unitPrice: l2.unitPrice, quoteLineId: l2.id }, { productId: P.p7, qty: '1', unitPrice: '8500', quoteLineId: free.id }],
+      lines: [{ productId: P.p1!, qty: '100', unitPrice: l1.unitPrice, quoteLineId: l1.id }, { productId: P.p2!, qty: '300', unitPrice: l2.unitPrice, quoteLineId: l2.id }, { productId: P.p7!, qty: '1', unitPrice: '8500', quoteLineId: free.id }],
     }), 201);
     expect(so.quoteNo).toBe(qt);
     expect(so.vatMode).toBe('exc');
@@ -120,7 +120,7 @@ describe('sales orders', () => {
   });
 
   it('BR-16: below-cost lines need the owner, never the manager', async () => {
-    const body = { customerId: C.c1, term: { t: 'cash' }, lines: [{ productId: P.p1, qty: '10', unitPrice: '100' }] };
+    const body = { customerId: C.c1, term: { t: 'cash' }, lines: [{ productId: P.p1!, qty: '10', unitPrice: '100' }] };
     const r = await env.boy.post('/api/sales/orders', body);
     expect(r.status).toBe(409);
     expect(r.body.code).toBe('BELOW_COST');
@@ -132,7 +132,7 @@ describe('sales orders', () => {
 
   it('BR-08: over the credit limit stops for approval and records the approver', async () => {
     // c2 limit 80,000; an order of 100,000 is over
-    const body = { customerId: C.c2, lines: [{ productId: P.p7, qty: '80', unitPrice: '1250' }] };
+    const body = { customerId: C.c2, lines: [{ productId: P.p7!, qty: '80', unitPrice: '1250' }] };
     const r = await env.boy.post('/api/sales/orders', body);
     expect(r.status).toBe(403);
     expect(r.body.details).toMatchObject({ need: 'creditApproval', limit: '80000.00', over: true });
@@ -151,14 +151,14 @@ describe('sales orders', () => {
     await env.pool.query(`update customers set term = '{"t":"days","x":30}' where id = $1`, [C.c3]);
     const credit = await ok(env.boy.get(`/api/sales/customers/${C.c3}/credit`));
     expect(credit.limit).toBe('50000.00');
-    const r = await env.boy.post('/api/sales/orders', { customerId: C.c3, lines: [{ productId: P.p7, qty: '40', unitPrice: '1250' }] });
+    const r = await env.boy.post('/api/sales/orders', { customerId: C.c3, lines: [{ productId: P.p7!, qty: '40', unitPrice: '1250' }] });
     expect(r.status).toBe(403);
     expect(r.body.details.limit).toBe('50000.00');
   });
 
   it('a cashier cannot create sales orders; voiding an order with no delivery keeps its number', async () => {
-    expect((await env.prae.post('/api/sales/orders', { customerId: C.c1, lines: [{ productId: P.p1, qty: '1', unitPrice: '140' }] })).status).toBe(403);
-    const so = await ok(env.boy.post('/api/sales/orders', { customerId: C.c1, lines: [{ productId: P.p1, qty: '1', unitPrice: '140' }] }), 201);
+    expect((await env.prae.post('/api/sales/orders', { customerId: C.c1, lines: [{ productId: P.p1!, qty: '1', unitPrice: '140' }] })).status).toBe(403);
+    const so = await ok(env.boy.post('/api/sales/orders', { customerId: C.c1, lines: [{ productId: P.p1!, qty: '1', unitPrice: '140' }] }), 201);
     expect((await env.boy.post(`/api/sales/orders/${so.no}/void`, { reason: 'ลูกค้ายกเลิก' })).status).toBe(403); // 'apv' needs a PIN
     const v = await ok(env.boy.post(`/api/sales/orders/${so.no}/void`, { reason: 'ลูกค้ายกเลิก', ...pin(env) }));
     expect(v.status).toBe('void');
