@@ -137,7 +137,7 @@ describe('stock on hand (REQ-M11-02)', () => {
   });
 
   it('per warehouse, below reorder point and slow movers', async () => {
-    const wh2 = await env.owner.get(`/api/reports/stock?${q({ warehouseId: env.seed.warehouses.WH2, q: 'SCG-CEM-T50' })}`);
+    const wh2 = await env.owner.get(`/api/reports/stock?${q({ warehouseId: env.seed.warehouses.WH2!, q: 'SCG-CEM-T50' })}`);
     expect(wh2.body.rows[0].qty).toBe('340');
     await env.pool.query(`update products set reorder_point = 50 where id = $1`, [env.seed.products.p7]); // 10 left
     const low = await env.owner.get(`/api/reports/stock?${q({ only: 'low', limit: 100 })}`);

@@ -1,7 +1,7 @@
 /** M12 accounting export: PEAK templates, FlowAccount / Express / journal / generic, GL mapping, history, only-new, changed-after-export. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { d, sum } from '@erp/core';
-import { login } from '../helpers';
+import { login, saleBody } from '../helpers';
 import { MONTH, TODAY, docSums, raw, setupReports, token, type ReportsEnv } from './helpers';
 
 let env: ReportsEnv;
@@ -75,7 +75,7 @@ describe('PEAK (REQ-M12-06)', () => {
     expect(sum(data.map((x) => x[17]!)).toFixed(2)).toBe(want.rows[0]!.net);
     expect(sum(data.map((x) => x[18]!)).toFixed(2)).toBe(want.rows[0]!.vat);
     const inv = data.find((x) => x[2] === env.today.inv)!;
-    expect(inv.slice(4, 10)).toEqual(['C00001', 'หจก. รุ่งเรืองก่อสร้าง', '0503558001234', '00000', '', 'รวมภาษี']);
+    expect(inv.slice(4, 10)).toEqual(['C00001', 'หจก. รุ่งเรืองก่อสร้าง', '0503558001234', '00000', inv[1], 'รวมภาษี']);
     expect(data.some((x) => x[2] === env.today.voided)).toBe(false);
     const cn = parse((await file(r.body.id, 2)).text).slice(2);
     expect(cn[0]![3]).toMatch(/^ABB/); // อ้างอิงถึง
@@ -203,18 +203,22 @@ describe('history (REQ-M12-04)', () => {
   });
 
   it('"only not yet exported" skips documents of earlier runs of the same program; a void after export is flagged', async () => {
+    // a new bill after the earlier full runs: only it counts as not yet exported
+    const sale = await env.prae.post('/api/sales/pos', saleBody(env.seed, env.shift, [{ p: 'p6', qty: '1', price: '89.00' }], '89.00'));
+    expect(sale.status).toBe(201);
+    const newNo = sale.body.no as string;
     const first = await run({ template: 'express', dataset: 'sales', from: TODAY, to: TODAY, onlyNew: true });
-    expect(first.body.docs).toBeGreaterThan(0); // today's docs have not gone to Express with onlyNew... but the earlier full run had them
+    expect(first.body.docs).toBe(1);
     const again = await run({ template: 'express', dataset: 'sales', from: TODAY, to: TODAY, onlyNew: true });
     expect(again.body.docs).toBe(0);
     expect(again.body.rows).toBe(0);
     const peakAgain = await run({ template: 'flowaccount', dataset: 'sales', from: TODAY, to: TODAY, onlyNew: true });
-    expect(peakAgain.body.docs).toBe(0); // FlowAccount already had them (earlier xlsx run)
+    expect(peakAgain.body.docs).toBe(1); // FlowAccount has not seen the new bill yet; it had the older ones
 
-    await env.owner.post(`/api/sales/docs/${env.today.pvc}/void`, { reason: 'ลูกค้าเปลี่ยนใจก่อนรับของ' });
+    await env.owner.post(`/api/sales/docs/${newNo}/void`, { reason: 'ลูกค้าเปลี่ยนใจก่อนรับของ' });
     const old = await env.owner.get(`/api/acct-export/runs/${first.body.id}`);
-    expect(old.body.changedAfter.map((x: { no: string }) => x.no)).toContain(env.today.pvc);
-    const next = await run({ template: 'generic', dataset: 'sales', from: TODAY, to: TODAY });
-    expect(next.body.warnings.join(' ')).toContain(env.today.pvc);
+    expect(old.body.changedAfter.map((x: { no: string }) => x.no)).toContain(newNo);
+    const next = await run({ template: 'generic', dataset: 'sales', format: 'csv', from: TODAY, to: TODAY });
+    expect(next.body.warnings.join(' ')).toContain(newNo);
   });
 });

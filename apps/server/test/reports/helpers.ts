@@ -6,7 +6,7 @@ import { TODAY, login, openShift, saleBody, setupEnv, type Client, type Env } fr
 export { TODAY };
 export const MONTH = TODAY.slice(0, 7);
 
-export interface ReportsEnv extends Env { owner: Client; today: Record<string, string> }
+export interface ReportsEnv extends Env { owner: Client; today: Record<string, string>; prae: Client; shift: string }
 
 /** Superuser view of the documents: the numbers every report must match. */
 export async function docSums(env: Env, from: string, to: string) {
@@ -55,7 +55,7 @@ export async function setupReports(opts: Parameters<typeof setupEnv>[0] = {}): P
   await sell('voided', saleBody(env.seed, shift, [{ p: 'p2', qty: '5', price: '52.00' }], '260.00'));
   const v = await owner.post(`/api/sales/docs/${today.voided}/void`, { reason: 'บิลซ้ำ' });
   if (v.status !== 200) throw new Error(JSON.stringify(v.body));
-  return { ...env, owner, today };
+  return { ...env, owner, today, prae, shift };
 }
 
 /** Raw request (file downloads are not JSON). */
