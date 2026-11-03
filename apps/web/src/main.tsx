@@ -1,11 +1,11 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, useRoutes } from 'react-router-dom';
+import { BrowserRouter, Navigate, matchRoutes, useLocation, useRoutes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiFail } from './api';
 import { AuthProvider, useAuth } from './auth';
 import { Shell } from './Shell';
-import { MODULE_ROUTES, useVisibleNav } from './modules';
+import { MODULE_ROUTES, ModuleWraps, PUBLIC_ROUTES, useVisibleNav } from './modules';
 import { ToastProvider } from './ui';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
@@ -37,14 +37,22 @@ function AppRoutes() {
   return useRoutes(ROUTES);
 }
 
+function PublicRoutes() {
+  return useRoutes(PUBLIC_ROUTES);
+}
+
 function App() {
   const { user, restoring } = useAuth();
   const meta = useMeta();
+  const loc = useLocation();
+  if (matchRoutes(PUBLIC_ROUTES, loc)) return <PublicRoutes />;
   if (restoring) return <div className="lg"><div className="card lgcard"><div className="sk" /><div className="sk" /></div></div>;
   if (!user) return meta.data?.needsSetup ? <Setup /> : <Login />;
   return (
     <Shell>
-      <AppRoutes />
+      <ModuleWraps>
+        <AppRoutes />
+      </ModuleWraps>
     </Shell>
   );
 }

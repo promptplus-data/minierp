@@ -1,0 +1,41 @@
+/* Purchasing module (group B) styles. Tokens come from styles.css. */
+.pu-banner{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:12px}
+.pu-banner .btn{white-space:nowrap}
+tr.pu-ok td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+tr.pu-warn td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+tr.pu-error td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+tr.pu-error{background:color-mix(in srgb,var(--bad-soft) 45%,transparent)}
+tr.pu-exists td{color:var(--muted)}
+tr.pu-click{cursor:pointer}
+tr.pu-click:hover td{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.pu-msgs{font-size:12px;color:var(--muted);margin-top:2px}
+.pu-msgs.bad{color:var(--bad)}
+.pu-map{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.pu-map label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.pu-map select{width:100%}
+.pu-map .req{color:var(--bad)}
+.pu-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+.pu-group{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+.pu-group b{font-size:14px}
+.pu-file{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.pu-file .f{flex:1;min-width:200px}
+.pu-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pu-filters > *{flex:1 1 160px;min-width:0}
+.pu-filters input[type=search]{flex:3 1 220px}
+.pu-count-scan{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.pu-count-scan input{flex:1;min-width:180px}
+.pu-qty-in{width:96px;text-align:right}
+.pu-sel{min-width:180px;max-width:260px}
+.pu-cell-wrap{white-space:normal;min-width:160px}
+.grid.pu-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.pu-kpis .kpi{padding-right:16px}
+.pu-kpis .kpi .v{font-size:22px}
+@media (max-width:700px){
+  .pu-hide-sm{display:none}
+  .pu-cell-wrap{min-width:120px}
+  .pu-banner{flex-direction:column;align-items:stretch}
+  .pu-sel{min-width:140px}
+  .pu-qty-in{width:72px}
+  .grid.pu-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pu-kpis .kpi .v{font-size:19px}
+}

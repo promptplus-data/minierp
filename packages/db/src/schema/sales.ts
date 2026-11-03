@@ -1,10 +1,333 @@
 /**
- * Drizzle table definitions for the "sales" module group, owned by Agent A (sales): M08 quotation/SO/DO/invoice/credit approval, M10 AR (billing note, receipts, WHT, aging), M09 projects. Migrations 0100-0199.
- *
- * Every table here is created by a SQL migration in this module's range (packages/db/MIGRATIONS.md) and secured
- * there with `SELECT erp_secure_table('<table>', <is_document>);`. Use the column helpers from ./columns so the
- * conventions (tenant_id, money numeric(14,2), qty numeric(14,4), timestamptz) stay uniform. Example:
- *
- *   export const arReceipts = pgTable('ar_receipts', { id: id(), tenantId: tenantId(), no: text('no').notNull(), total: money('total').notNull(), createdAt: createdAt() });
+ * Drizzle table definitions for the "sales" module group (Agent A): M08 quotation / SO / DO / B2B invoice, price lists,
+ * M10 AR (billing notes, receipts, WHT), M09 projects (installments, deposits). Typing only: the tables are created by
+ * packages/db/migrations/0100_sales.sql (RLS + grants + no-delete triggers via erp_secure_table). Keep both in sync.
  */
-export {};
+import { boolean, date, integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { createdAt, id, money, qty, tenantId } from './columns';
+
+export const salesSettings = pgTable('sales_settings', {
+  tenantId: uuid('tenant_id').primaryKey(),
+  quoteValidDays: integer('quote_valid_days').notNull(),
+  defaultCreditLimit: money('default_credit_limit').notNull(),
+  bankAccounts: jsonb('bank_accounts').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+});
+
+export const salesPriceLists = pgTable('sales_price_lists', {
+  id: id(),
+  tenantId: tenantId(),
+  code: text('code').notNull(),
+  name: text('name').notNull(),
+  kind: text('kind').notNull(),
+  customerId: uuid('customer_id'),
+  grp: text('grp'),
+  vatIncluded: boolean('vat_included').notNull(),
+  validFrom: date('valid_from'),
+  validTo: date('valid_to'),
+  active: boolean('active').notNull(),
+  items: jsonb('items').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  searchText: text('search_text').notNull(),
+});
+
+export const salesProjects = pgTable('sales_projects', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  name: text('name').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  site: text('site').notNull(),
+  contact: text('contact').notNull(),
+  template: text('template').notNull(),
+  mainSoId: uuid('main_so_id'),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+});
+
+export const salesProjectInstallments = pgTable('sales_project_installments', {
+  id: id(),
+  tenantId: tenantId(),
+  projectId: uuid('project_id').notNull(),
+  n: integer('n').notNull(),
+  label: text('label').notNull(),
+  pct: numeric('pct', { precision: 7, scale: 4 }).notNull(),
+  dueDate: date('due_date').notNull(),
+  active: boolean('active').notNull(),
+  createdAt: createdAt(),
+});
+
+export const salesQuotes = pgTable('sales_quotes', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  validUntil: date('valid_until').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  attn: text('attn').notNull(),
+  vatMode: text('vat_mode').notNull(),
+  term: jsonb('term').notNull(),
+  salespersonId: uuid('salesperson_id'),
+  projectId: uuid('project_id'),
+  note: text('note').notNull(),
+  billDisc: money('bill_disc').notNull(),
+  gross: money('gross').notNull(),
+  lineDisc: money('line_disc').notNull(),
+  base7: money('base7').notNull(),
+  exempt: money('exempt').notNull(),
+  vat: money('vat').notNull(),
+  total: money('total').notNull(),
+  status: text('status').notNull(),
+  revision: integer('revision').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+  searchText: text('search_text').notNull(),
+});
+
+export const salesQuoteLines = pgTable('sales_quote_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  quoteId: uuid('quote_id').notNull(),
+  revision: integer('revision').notNull(),
+  lineNo: integer('line_no').notNull(),
+  productId: uuid('product_id'),
+  unitIdx: integer('unit_idx'),
+  name: text('name').notNull(),
+  unitName: text('unit_name').notNull(),
+  unitFactor: qty('unit_factor').notNull(),
+  qty: qty('qty').notNull(),
+  unitPrice: qty('unit_price').notNull(),
+  discount: jsonb('discount'),
+  discAmt: money('disc_amt').notNull(),
+  net: money('net').notNull(),
+  vat: text('vat').notNull(),
+});
+
+export const salesQuoteRevisions = pgTable('sales_quote_revisions', {
+  id: id(),
+  tenantId: tenantId(),
+  quoteId: uuid('quote_id').notNull(),
+  revision: integer('revision').notNull(),
+  snapshot: jsonb('snapshot').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+});
+
+export const salesOrders = pgTable('sales_orders', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  quoteId: uuid('quote_id'),
+  projectId: uuid('project_id'),
+  warehouseId: uuid('warehouse_id'),
+  vatMode: text('vat_mode').notNull(),
+  term: jsonb('term').notNull(),
+  salespersonId: uuid('salesperson_id'),
+  shipTo: text('ship_to').notNull(),
+  note: text('note').notNull(),
+  billDisc: money('bill_disc').notNull(),
+  gross: money('gross').notNull(),
+  lineDisc: money('line_disc').notNull(),
+  base7: money('base7').notNull(),
+  exempt: money('exempt').notNull(),
+  vat: money('vat').notNull(),
+  total: money('total').notNull(),
+  dlvStatus: text('dlv_status').notNull(),
+  creditApproval: jsonb('credit_approval'),
+  belowCostApproval: jsonb('below_cost_approval'),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  searchText: text('search_text').notNull(),
+});
+
+export const salesOrderLines = pgTable('sales_order_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  soId: uuid('so_id').notNull(),
+  lineNo: integer('line_no').notNull(),
+  productId: uuid('product_id').notNull(),
+  unitIdx: integer('unit_idx').notNull(),
+  name: text('name').notNull(),
+  unitName: text('unit_name').notNull(),
+  unitFactor: qty('unit_factor').notNull(),
+  qty: qty('qty').notNull(),
+  baseQty: qty('base_qty').notNull(),
+  unitPrice: qty('unit_price').notNull(),
+  discount: jsonb('discount'),
+  discAmt: money('disc_amt').notNull(),
+  net: money('net').notNull(),
+  netAfterBill: money('net_after_bill').notNull(),
+  vat: text('vat').notNull(),
+  quoteLineId: uuid('quote_line_id'),
+});
+
+export const salesDeliveries = pgTable('sales_deliveries', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  customerId: uuid('customer_id'),
+  customerName: text('customer_name').notNull(),
+  soId: uuid('so_id'),
+  invDocId: uuid('inv_doc_id'),
+  projectId: uuid('project_id'),
+  warehouseId: uuid('warehouse_id'),
+  shipTo: text('ship_to').notNull(),
+  vehicle: text('vehicle').notNull(),
+  note: text('note').notNull(),
+  total: money('total').notNull(),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  searchText: text('search_text').notNull(),
+});
+
+export const salesDeliveryLines = pgTable('sales_delivery_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  deliveryId: uuid('delivery_id').notNull(),
+  lineNo: integer('line_no').notNull(),
+  soLineId: uuid('so_line_id'),
+  invLineId: uuid('inv_line_id'),
+  productId: uuid('product_id').notNull(),
+  name: text('name').notNull(),
+  unitName: text('unit_name').notNull(),
+  unitFactor: qty('unit_factor').notNull(),
+  qty: qty('qty').notNull(),
+  baseQty: qty('base_qty').notNull(),
+  unitPrice: qty('unit_price').notNull(),
+  value: money('value').notNull(),
+  cogs: money('cogs'),
+});
+
+export const salesDeposits = pgTable('sales_deposits', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  projectId: uuid('project_id').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  type: text('type').notNull(),
+  amount: money('amount').notNull(),
+  method: text('method').notNull(),
+  invoiceDocId: uuid('invoice_doc_id'),
+  forfeitDocId: uuid('forfeit_doc_id'),
+  refund: jsonb('refund'),
+  closedAmount: money('closed_amount').notNull(),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+});
+
+export const salesInvoices = pgTable('sales_invoices', {
+  docId: uuid('doc_id').primaryKey(),
+  tenantId: tenantId(),
+  kind: text('kind').notNull(),
+  source: text('source').notNull(),
+  soId: uuid('so_id'),
+  projectId: uuid('project_id'),
+  installmentId: uuid('installment_id'),
+  depositId: uuid('deposit_id'),
+  term: jsonb('term').notNull(),
+  dueDate: date('due_date').notNull(),
+  goodsLeft: boolean('goods_left').notNull(),
+  grossAmount: money('gross_amount'),
+  depositDeduct: money('deposit_deduct').notNull(),
+  depositType: text('deposit_type'),
+  textLines: jsonb('text_lines').notNull(),
+  attn: text('attn').notNull(),
+  note: text('note').notNull(),
+  salespersonId: uuid('salesperson_id'),
+  createdAt: createdAt(),
+});
+
+export const salesInvoiceDeliveries = pgTable('sales_invoice_deliveries', {
+  id: id(),
+  tenantId: tenantId(),
+  invoiceDocId: uuid('invoice_doc_id').notNull(),
+  deliveryId: uuid('delivery_id').notNull(),
+});
+
+export const arBillingNotes = pgTable('ar_billing_notes', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  collectDate: date('collect_date'),
+  note: text('note').notNull(),
+  total: money('total').notNull(),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  searchText: text('search_text').notNull(),
+});
+
+export const arBillingNoteLines = pgTable('ar_billing_note_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  bnId: uuid('bn_id').notNull(),
+  lineNo: integer('line_no').notNull(),
+  invoiceDocId: uuid('invoice_doc_id').notNull(),
+  amount: money('amount').notNull(),
+  dueDate: date('due_date').notNull(),
+});
+
+export const arReceipts = pgTable('ar_receipts', {
+  id: id(),
+  tenantId: tenantId(),
+  no: text('no').notNull(),
+  date: date('date').notNull(),
+  customerId: uuid('customer_id').notNull(),
+  method: text('method').notNull(),
+  cheque: jsonb('cheque'),
+  settled: money('settled').notNull(),
+  whtRate: numeric('wht_rate', { precision: 5, scale: 2 }),
+  wht: money('wht').notNull(),
+  whtCertNo: text('wht_cert_no'),
+  cash: money('cash').notNull(),
+  note: text('note').notNull(),
+  status: text('status').notNull(),
+  voidBy: uuid('void_by'),
+  voidAt: timestamp('void_at', { withTimezone: true }),
+  voidReason: text('void_reason'),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
+  searchText: text('search_text').notNull(),
+});
+
+export const arReceiptLines = pgTable('ar_receipt_lines', {
+  id: id(),
+  tenantId: tenantId(),
+  receiptId: uuid('receipt_id').notNull(),
+  lineNo: integer('line_no').notNull(),
+  invoiceDocId: uuid('invoice_doc_id').notNull(),
+  settled: money('settled').notNull(),
+  whtBase: money('wht_base').notNull(),
+  wht: money('wht').notNull(),
+});

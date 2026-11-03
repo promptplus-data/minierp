@@ -4,8 +4,8 @@ import { withTenant, type Pool, type Tx } from '@erp/db';
 import type { SessionUser } from '@erp/contracts';
 import { PERM_KEYS, perm, type Role } from '@erp/core';
 import { writeAudit } from '../lib/audit';
-import type { Ctx } from '../lib/context';
-import { E, isUuid } from '../lib/errors';
+import type { Ctx, TenantGuard } from '../lib/context';
+import { AppError, E, isUuid } from '../lib/errors';
 
 export const MAX_FAILED_LOGINS = 5;
 
@@ -15,9 +15,10 @@ export const sessionUser = (u: { id: string; name: string; role: Role }): Sessio
 
 interface UserRow { id: string; tenant_id: string; name: string; role: Role; password_hash: string; status: string; failed_logins: number; locked_at: Date | null }
 
-type Outcome = { ok: true; user: UserRow } | { ok: false; reason: 'BAD_CREDENTIALS' | 'LOCKED' | 'RESIGNED' };
+type Outcome = { ok: true; user: UserRow } | { ok: false; reason: 'BAD_CREDENTIALS' | 'LOCKED' | 'RESIGNED' } | { ok: false; reason: 'GUARD'; error: AppError };
 
-export async function login(pool: Pool, body: { username: string; password: string; tenant?: string }): Promise<Ctx> {
+/** `guards`: module tenant guards (Deps.tenantGuards), e.g. a suspended shop; a refusal is audited as login-failed. */
+export async function login(pool: Pool, body: { username: string; password: string; tenant?: string }, guards: readonly TenantGuard[] = []): Promise<Ctx> {
   // 1. Find the user across tenants (the only cross-tenant read: app.auth_lookup, SELECT-only policy).
   const found = await withTenant(pool, null, (tx) =>
     tx.query<{ id: string; tenant_id: string }>(
@@ -38,6 +39,15 @@ export async function login(pool: Pool, body: { username: string; password: stri
       `select id, tenant_id, name, role, password_hash, status, failed_logins, locked_at from users where id = $1 for update`, [hit.id],
     )).rows[0]!;
     const who = { tenantId: u.tenant_id, userId: u.id, name: u.name };
+    for (const g of guards) {
+      try {
+        await g(tx, { tenantId: u.tenant_id, phase: 'login', method: 'POST', route: '/api/auth/login', config: {} });
+      } catch (err) {
+        if (!(err instanceof AppError)) throw err;
+        await writeAudit(tx, who, [{ action: 'login-failed', object: 'user', ref: body.username, detail: err.message }]);
+        return { ok: false, reason: 'GUARD', error: err };
+      }
+    }
     if (u.status !== 'active') {
       await writeAudit(tx, who, [{ action: 'login-failed', object: 'user', ref: body.username, detail: 'ผู้ใช้ลาออกแล้ว (resigned)' }]);
       return { ok: false, reason: 'RESIGNED' };
@@ -58,6 +68,7 @@ export async function login(pool: Pool, body: { username: string; password: stri
     await writeAudit(tx, who, [{ action: 'login', object: 'user', ref: body.username, detail: '' }]);
     return { ok: true, user: u };
   });
+  if (!outcome.ok && outcome.reason === 'GUARD') throw outcome.error;
   if (!outcome.ok) {
     const msg = { BAD_CREDENTIALS: 'Wrong username or password', LOCKED: 'Account locked after too many failed logins; ask the owner to unlock it', RESIGNED: 'This user has resigned' }[outcome.reason];
     throw E.unauthorized(msg, { reason: outcome.reason });

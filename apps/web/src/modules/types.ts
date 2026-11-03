@@ -2,6 +2,7 @@
  * Web module contract. Each module group exports `{ nav, routes }` from modules/<name>/index.tsx; the registry in
  * ./index.ts feeds the Shell (left nav) and the router. Module agents never edit Shell.tsx or main.tsx.
  */
+import type { ComponentType, ReactNode } from 'react';
 import type { RouteObject } from 'react-router-dom';
 import type { PermKey, PermValue } from '@erp/core';
 import type { Capabilities, Edition } from '@erp/contracts';
@@ -46,4 +47,9 @@ export interface WebModule {
   /** Absolute paths ('/ar', '/ar/:no'). Elements are wrapped in a guard that redirects to '/' when the nav item
    *  with the longest matching path prefix is hidden for this user. Lazy-load big screens with React.lazy. */
   routes: RouteObject[];
+  /** Routes rendered WITHOUT a shop sign-in and outside the Shell (e.g. the SCG Admin console, the restore wizard).
+   *  Matched before the login screen; each screen handles its own authentication. */
+  publicRoutes?: RouteObject[];
+  /** Wraps the signed-in content inside the Shell: banners and blocking gates (e.g. terms not yet accepted). */
+  Wrap?: ComponentType<{ children: ReactNode }>;
 }

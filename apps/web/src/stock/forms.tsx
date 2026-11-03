@@ -164,7 +164,7 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
 
 interface RLine { pid: string; u: number; q: string; cost: string }
 
-/** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount goes into lot cost. */
+/** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount per BR-19 (purchasing settings). */
 export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateStock();
@@ -256,7 +256,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
       <div className="grid g2" style={{ gap: 12 }}>
         <div>
           <label className="f">ส่วนลดท้ายบิลจากผู้ขาย (บาท{vat ? ' ก่อน VAT' : ''} · ไม่ได้ระบุรายสินค้า)<input type="text" inputMode="decimal" value={bd} placeholder="0" onChange={(e) => setBd(e.target.value)} data-testid="gr-bd" /></label>
-          <div className="small muted" style={{ marginTop: 4 }}>ระบบกระจายส่วนลดเข้าทุนของแต่ละล็อตตามสัดส่วนมูลค่า · ทุนต่อหน่วยลดลง {total.gt(0) ? fq(d(disc).div(total).times(100)) : '0'}%</div>
+          <div className="small muted" style={{ marginTop: 4 }}>ตั้งต้นบันทึกเป็นส่วนลดรับแยก ไม่ลดทุนรายสินค้า (BR-19) · ร้านเลือกให้กระจายเข้าทุนได้ในตั้งค่า · ยอดเจ้าหนี้คิดหลังหักส่วนลด</div>
         </div>
         <div className="tot">
           <span className="muted">ยอดสินค้า</span><span>{fmt(total)}</span>

@@ -2,8 +2,10 @@
 import type { Tx } from '@erp/db';
 import type { DocSummary, PageQuery, PosSaleReq, SalesDoc } from '@erp/contracts';
 import {
-  approverRoles, calcDoc, checkBelowCost, d, discountPct, exceedsCap, fmtTHB, lineDiscount, money, netUnitPricesExVat, qty4, sum, type DocLine as CoreLine,
+  approverRoles, calcDoc, checkBelowCost, d, discountPct, exceedsCap, fmtTHB, lineDiscount, money, netUnitPricesExVat, priceExVat, qty4, sum, type DocLine as CoreLine,
 } from '@erp/core';
+import { posIdOf, requireAbbDevice } from '../modules/retail/devices';
+import { retailPosPricing } from '../modules/retail/pricing';
 import { verifyApproval } from '../lib/approval';
 import { writeAudit, type AuditInput } from '../lib/audit';
 import { can, requirePerm, type Ctx, type Deps } from '../lib/context';
@@ -11,7 +13,7 @@ import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { applyOut, lockLots, planTakes, reverseOuts } from '../lib/stock';
-import { loadProducts, requireWarehouse, unitOf } from './master';
+import { loadProducts, requireWarehouse, unitOf, type ProductRow, type ProductUnitRow } from './master';
 
 export const SALE_TYPES = ['ABB', 'INV', 'RC'] as const;
 
@@ -19,16 +21,18 @@ interface DocRow {
   id: string; no: string; type: SalesDoc['type']; date: string; customer_id: string | null; customer_name: string; customer_phone: string | null;
   vat_mode: SalesDoc['vatMode']; warehouse_id: string | null; shift_id: string | null; gross: string; line_disc: string; bill_disc: string; base7: string;
   exempt: string; vat: string; total: string; ar_balance: string; payments: SalesDoc['payments']; status: SalesDoc['status']; void_by_name: string | null;
-  void_at: Date | null; void_reason: string | null; created_by_name: string; ref_no: string | null; ref_doc_id: string | null; created_at: Date;
+  void_at: Date | null; void_reason: string | null; created_by_name: string; ref_no: string | null; ref_doc_id: string | null; created_at: Date; device_id: string | null;
 }
 interface LineRow {
   id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; base_qty: string; unit_price: string;
   discount: string; net: string; net_after_bill: string; vat: 'v7' | 'exempt'; returned_qty: string; cogs: string | null; src_line_id: string | null;
+  retail_promo_id: string | null; retail_promo_name: string | null; retail_list_price: string | null; retail_price_source: 'customer' | 'group' | 'promo' | 'bundle' | null;
+  retail_bundle_no: number | null; retail_bundle_sets: string | null; retail_bundle_qty: string | null; retail_bundle_price: string | null;
 }
 
 const DOC_SELECT = `select d.id, d.no, d.type, d.date, d.customer_id, d.customer_name, d.customer_phone, d.vat_mode, d.warehouse_id, d.shift_id,
   d.gross::text, d.line_disc::text, d.bill_disc::text, d.base7::text, d.exempt::text, d.vat::text, d.total::text, d.ar_balance::text, d.payments,
-  d.status, vu.name as void_by_name, d.void_at, d.void_reason, cu.name as created_by_name, d.ref_no, d.ref_doc_id, d.created_at
+  d.status, vu.name as void_by_name, d.void_at, d.void_reason, cu.name as created_by_name, d.ref_no, d.ref_doc_id, d.created_at, d.device_id
   from docs d join users cu on cu.id = d.created_by left join users vu on vu.id = d.void_by`;
 
 export async function getDocRow(tx: Tx, no: string, opts: { forUpdate?: boolean } = {}): Promise<DocRow> {
@@ -41,7 +45,9 @@ export async function getDocRow(tx: Tx, no: string, opts: { forUpdate?: boolean 
 export async function getLines(tx: Tx, docId: string): Promise<LineRow[]> {
   const r = await tx.query<LineRow>(
     `select id, product_id, name, unit_name, unit_factor::text, qty::text, base_qty::text, unit_price::text, discount::text, net::text,
-            net_after_bill::text, vat, returned_qty::text, cogs::text, src_line_id
+            net_after_bill::text, vat, returned_qty::text, cogs::text, src_line_id,
+            retail_promo_id, retail_promo_name, retail_list_price::text, retail_price_source, retail_bundle_no, retail_bundle_sets::text, retail_bundle_qty::text,
+            retail_bundle_price::text
        from doc_lines where doc_id = $1 order by line_no`,
     [docId],
   );
@@ -59,11 +65,20 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
     lines: lines.map((l) => ({
       id: l.id, productId: l.product_id, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), unitPrice: qty4(l.unit_price), discount: money(l.discount),
       net: money(l.net), returnedQty: qty4(l.returned_qty), cogs: seeCost && l.cogs != null ? money(l.cogs) : null,
+      ...(l.retail_price_source ? {
+        listPrice: l.retail_list_price != null ? qty4(l.retail_list_price) : null, priceSource: l.retail_price_source,
+        promo: l.retail_promo_id ? { id: l.retail_promo_id, name: l.retail_promo_name ?? '' } : null,
+        bundle: l.retail_bundle_no != null && l.retail_promo_id ? {
+          no: l.retail_bundle_no, promoId: l.retail_promo_id, name: l.retail_promo_name ?? '', sets: qty4(l.retail_bundle_sets ?? 0),
+          qtyPerSet: qty4(l.retail_bundle_qty ?? 0), setPrice: money(l.retail_bundle_price ?? 0),
+        } : null,
+      } : {}),
     })),
     totals: { gross: row.gross, lineDisc: row.line_disc, billDisc: row.bill_disc, base7: row.base7, exempt: row.exempt, vat: row.vat, total: row.total },
     payments: row.payments, status: row.status,
     voided: row.status === 'void' ? { by: row.void_by_name ?? '', at: row.void_at!.toISOString(), reason: row.void_reason ?? '' } : null,
     createdBy: row.created_by_name, ref: row.ref_no,
+    ...(row.type === 'ABB' ? { posId: await posIdOf(tx, row.device_id) } : {}),
   };
 }
 
@@ -97,6 +112,13 @@ export async function requireOwnOpenShift(tx: Tx, ctx: Ctx, shiftId?: string): P
 
 export interface SaleResult { doc: SalesDoc; replay: boolean }
 
+/** One doc line of a POS sale being built: a cart line, or one component of a bundle (module C, M15). */
+interface PosLine {
+  p: ProductRow; u: ProductUnitRow; qty: string; unitPrice: string; core: CoreLine & { baseQty: string };
+  retail: { listPrice: string; source: 'customer' | 'group' | 'promo' | 'bundle'; promo: { id: string; name: string; belowCost: boolean } | null } | null;
+  bundle: { no: number; sets: string; qtyPerSet: string; setPrice: string; amount: string } | null;
+}
+
 export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Promise<SaleResult> {
   requirePerm(ctx, 'pos.sell');
   // Idempotency: a retried request returns the original bill, never a second one.
@@ -110,6 +132,8 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     throw E.validation(shop.vat_registered ? 'VAT-registered shop issues abb or full tax invoices' : 'Non-VAT shop issues receipts only');
   }
   const type = req.docKind === 'abb' ? 'ABB' : req.docKind === 'full' ? 'INV' : 'RC';
+  // Module C (REQ-M01-07): a machine without an approved POS ID issues full tax invoices only.
+  if (type === 'ABB') await requireAbbDevice(tx, shift.device_id);
   const vatMode = shop.vat_registered ? 'inc' : 'none';
 
   let customer: { id: string; name: string; code: string; phone: string | null; tax_id: string | null } | null = null;
@@ -120,23 +144,44 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
   }
   if (type === 'INV' && !customer?.tax_id) throw E.validation('A full tax invoice needs a customer with a tax ID');
 
+  const reqBundles = req.bundles ?? [];
+  if (!req.lines.length && !reqBundles.length) throw E.validation('A bill needs at least one line');
   const products = await loadProducts(tx, req.lines.map((l) => l.productId));
   const audits: AuditInput[] = [];
   let priceChanged = false;
-  const lines = req.lines.map((l, i) => {
+  for (const [i, l] of req.lines.entries()) if (!d(l.qty).gt(0)) throw E.validation(`Line ${i + 1}: qty must be > 0`);
+  // Module C (M15 / BR-05): promo and price-list prices, bundle expansion. Without promos / lists every line
+  // expects its retail price, exactly as before.
+  const retail = await retailPosPricing(tx, deps, { customerId: customer?.id ?? null, lines: req.lines, bundles: reqBundles }, products, vatMode);
+  const lines: PosLine[] = req.lines.map((l, i) => {
     const p = products.get(l.productId)!;
     if (!p.active) throw E.validation(`Product ${p.sku} is inactive`);
     const u = unitOf(p, l.unitIdx);
-    if (!d(l.qty).gt(0)) throw E.validation(`Line ${i + 1}: qty must be > 0`);
     if (d(l.unitPrice).lt(0)) throw E.validation(`Line ${i + 1}: unit price must not be negative`);
     if (l.discount && (d(l.discount.value).lt(0) || (l.discount.kind === 'pct' && d(l.discount.value).gt(100)))) {
       throw E.validation(`Line ${i + 1}: discount must be 0..100% or a non-negative amount`);
     }
-    const list = u.price != null ? d(u.price) : d(p.price).times(d(u.factor));
-    if (!d(l.unitPrice).eq(list)) priceChanged = true;
+    const rp = retail.lines[i]!;
+    const atExpected = d(l.unitPrice).eq(rp.expected);
+    // The expected (promo / list) price and the retail list price both sell without a price-change approval.
+    if (!atExpected && !d(l.unitPrice).eq(rp.retail)) priceChanged = true;
     const core: CoreLine & { baseQty: string } = { qty: l.qty, unitPrice: l.unitPrice, discount: l.discount ?? null, vat: p.vat, baseQty: qty4(d(l.qty).times(d(u.factor))) };
-    return { req: l, p, u, core };
+    return {
+      p, u, qty: l.qty, unitPrice: l.unitPrice, core,
+      retail: atExpected && rp.source !== 'retail' ? { listPrice: rp.retail, source: rp.source, promo: rp.promo } : null, bundle: null,
+    };
   });
+  // BR-17: one line per bundle component, net = its pro-rata share of the set revenue (qty 1 × amount keeps it exact).
+  for (const b of retail.bundles) {
+    for (const c of b.comps) {
+      lines.push({
+        p: c.p, u: c.p.units[0]!, qty: c.baseQty, unitPrice: d(c.baseQty).gt(0) ? qty4(d(c.amount).div(d(c.baseQty))) : '0',
+        core: { qty: 1, unitPrice: c.amount, discount: null, vat: c.p.vat, baseQty: c.baseQty },
+        retail: { listPrice: money(c.p.price), source: 'bundle', promo: { ...b.promo } },
+        bundle: { no: b.no, sets: b.sets, qtyPerSet: c.qtyPerSet, setPrice: b.setPrice, amount: c.amount },
+      });
+    }
+  }
   if (d(req.billDiscount).lt(0)) throw E.validation('Bill discount must not be negative');
   const totals = calcDoc(lines.map((l) => l.core), vatMode, req.billDiscount);
 
@@ -173,11 +218,29 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     const pl = planOf.get(l);
     return pl && d(pl.qty).gt(0) ? qty4(d(pl.cogs).div(d(pl.qty))) : null;
   });
-  const below = checkBelowCost(lines.map((_, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: unitCosts[i] })));
-  if (below.length) {
+  // M15: bundle components are checked per bundle (set revenue vs Σ component FIFO cost), not per line; a promo the
+  // owner confirmed below cost at creation (REQ-M15-03) is checked against its promo price instead of the cost.
+  const floorOf = (l: PosLine, cost: string | null): string | null => {
+    if (cost == null || !l.retail?.promo?.belowCost || l.bundle) return cost;
+    const promoExVat = priceExVat(d(l.unitPrice).div(d(l.u.factor)), vatMode, l.p.vat);
+    return d(promoExVat).lt(d(cost)) ? promoExVat : cost;
+  };
+  const items = lines.map((l, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: l.bundle ? null : floorOf(l, unitCosts[i] ?? null) }));
+  const belowRows: { productId: string; name: string; sell: string; cost: string }[] = checkBelowCost(items)
+    .map((i) => ({ productId: lines[i]!.p.id, name: lines[i]!.p.name, sell: sell[i]!, cost: items[i]!.unitCost! }));
+  for (const b of retail.bundles) {
+    const idx = lines.flatMap((l, i) => (l.bundle?.no === b.no ? [i] : []));
+    const sellSet = sum(idx.map((i) => d(sell[i] ?? '0').times(d(lines[i]!.core.baseQty)))).div(d(b.sets));
+    const costSet = sum(idx.map((i) => planOf.get(lines[i]!)?.cogs ?? '0')).div(d(b.sets));
+    const floor = b.promo.belowCost ? sum(idx.map((i) => priceExVat(lines[i]!.bundle!.amount, vatMode, lines[i]!.p.vat))).div(d(b.sets)) : null;
+    const eff = floor && floor.lt(costSet) ? floor : costSet;
+    if (checkBelowCost([{ netUnitExVat: sellSet, unitCost: eff }]).length) belowRows.push({ productId: b.promo.id, name: `ชุดโปร ${b.promo.name}`, sell: qty4(sellSet), cost: qty4(eff) });
+  }
+  if (belowRows.length) {
+    const below = belowRows;
     const seeCost = can(ctx, 'data.cost') === 1;
-    const detail = below.map((i) => ({ productId: lines[i]!.p.id, name: lines[i]!.p.name, ...(seeCost ? { sell: money(sell[i]!), cost: money(unitCosts[i]!) } : {}) }));
-    const text = below.map((i) => `${lines[i]!.p.name} (ขาย ${money(sell[i]!)} < ทุน ${money(unitCosts[i]!)})`).join(', ');
+    const detail = below.map((b) => ({ productId: b.productId, name: b.name, ...(seeCost ? { sell: money(b.sell), cost: money(b.cost) } : {}) }));
+    const text = below.map((b) => `${b.name} (ขาย ${money(b.sell)} < ทุน ${money(b.cost)})`).join(', ');
     if (ctx.role === 'owner') {
       audits.push({ action: 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · เจ้าของร้าน (ยืนยันเอง)` });
     } else if (req.belowCostApproval) {
@@ -202,17 +265,25 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
   for (const [i, l] of lines.entries()) {
     const pl = planOf.get(l);
     const lineId = (await tx.query<{ id: string }>(
-      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
-      [ctx.tenantId, docId, i + 1, l.p.id, l.p.name, l.u.name, l.u.factor, l.req.qty, l.core.baseQty, l.req.unitPrice,
+      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs,
+         retail_promo_id, retail_promo_name, retail_list_price, retail_price_source, retail_bundle_no, retail_bundle_sets, retail_bundle_qty, retail_bundle_price)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
+      [ctx.tenantId, docId, i + 1, l.p.id, l.p.name, l.u.name, l.u.factor, l.qty, l.core.baseQty, l.unitPrice,
         money(lineDiscount(l.core)),
-        totals.lines[i]!.net, totals.lines[i]!.after, l.p.vat, pl ? pl.cogs : null],
+        totals.lines[i]!.net, totals.lines[i]!.after, l.p.vat, pl ? pl.cogs : null,
+        l.retail?.promo?.id ?? null, l.retail?.promo?.name ?? null, l.retail?.listPrice ?? null, l.retail?.source ?? null,
+        l.bundle?.no ?? null, l.bundle?.sets ?? null, l.bundle?.qtyPerSet ?? null, l.bundle?.setPrice ?? null],
     )).rows[0]!.id;
-    if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: type, docNo: no, docId, docLineId: lineId, note: 'ขายหน้าร้าน' });
+    const note = l.bundle ? `ขายชุดโปร · ${l.retail!.promo!.name}` : l.retail?.promo ? `ขายหน้าร้าน · โปร ${l.retail.promo.name}` : 'ขายหน้าร้าน';
+    if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: type, docNo: no, docId, docLineId: lineId, note });
   }
 
   await deps.hooks.beforeCommit?.('posSale', tx);
-  audits.push({ action: 'create', object: type, ref: no, detail: `฿${fmtTHB(totals.total)} · ${lines.length} รายการ · ${req.payments.map((p) => p.method).join(' + ')} · กะ ${shift.no}` });
+  const promoNames = [...new Set(lines.flatMap((l) => (l.retail?.promo ? [l.retail.promo.name] : [])))];
+  audits.push({
+    action: 'create', object: type, ref: no,
+    detail: `฿${fmtTHB(totals.total)} · ${req.lines.length + retail.bundles.length} รายการ · ${req.payments.map((p) => p.method).join(' + ')} · กะ ${shift.no}${promoNames.length ? ` · โปร ${promoNames.join(', ')}` : ''}`,
+  });
   await writeAudit(tx, ctx, audits);
   return { doc: await getDoc(tx, ctx, no), replay: false };
 }
@@ -252,6 +323,16 @@ export async function summaries(tx: Tx, where: string, params: unknown[], limit:
   }));
 }
 
+/**
+ * Extra BR-22 downstream checks registered by module groups: return the numbers of active documents that still
+ * depend on `doc` (e.g. AR receipts or billing notes on a B2B invoice). Registered once per process.
+ */
+export type VoidGuard = (tx: Tx, doc: { id: string; no: string; type: string }) => Promise<string[]>;
+export const voidGuards: VoidGuard[] = [];
+export function registerVoidGuard(g: VoidGuard): void {
+  if (!voidGuards.includes(g)) voidGuards.push(g);
+}
+
 /** BR-03/BR-22: void = status flag + stock back into the original lots; the number is kept. */
 export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { reason: string; approverUserId?: string; pin?: string }): Promise<SalesDoc> {
   const p = can(ctx, 'sales.voidDoc');
@@ -269,8 +350,10 @@ export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { 
   if (doc.type === 'CN') throw E.conflict('Credit notes cannot be voided');
   const downstream = await tx.query<{ no: string }>(`select no from docs where ref_doc_id = $1 and status = 'active' order by created_at`, [doc.id]);
   const returned = await tx.query(`select 1 from doc_lines where doc_id = $1 and returned_qty > 0 limit 1`, [doc.id]);
-  if (downstream.rowCount || returned.rowCount) {
-    throw E.downstreamFirst(`${no} has downstream documents; handle them first`, { docs: downstream.rows.map((r) => r.no) });
+  const guarded: string[] = [];
+  for (const g of voidGuards) guarded.push(...(await g(tx, doc)));
+  if (downstream.rowCount || returned.rowCount || guarded.length) {
+    throw E.downstreamFirst(`${no} has downstream documents; handle them first`, { docs: [...downstream.rows.map((r) => r.no), ...guarded] });
   }
   await reverseOuts(tx, ctx, doc.id, { docType: doc.type, docNo: doc.no, docId: doc.id, note: `คืนสต็อก · ยกเลิก ${doc.no}` });
   await tx.query(`update docs set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [doc.id, ctx.userId, body.reason]);

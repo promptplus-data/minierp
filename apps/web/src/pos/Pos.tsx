@@ -1,5 +1,5 @@
 /** M07 POS: tiles by category + search/barcode, cart with unit / qty / line discount, bill discount, split payments. */
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DocSummary, SalesDoc, page, type PosSaleReq, type Product } from '@erp/contracts';
@@ -8,7 +8,9 @@ import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
 import { useCatalog, useCustomers, useMeta, useShift, useWarehouseStock, useWarehouses } from '../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, ShortageModal, th, useToast, type ApprovalInput, type Shortage } from '../ui';
-import { ProductImg } from './img';
+import {
+  BundleLine, BundleTiles, HeldBar, PosImg, PROMO_CAT, bundleCoreLines, holdCart, linePrice, tilePromo, useAbbAllowed, usePosPricing, type CartBundle, type HeldCartIn,
+} from '../modules/retail/pos';
 import { METHOD_TH, Slip } from './Receipt';
 import { ShiftClosed, ShiftStrip } from './Shift';
 
@@ -35,13 +37,13 @@ export default function Pos() {
   return (
     <>
       <ShiftStrip shift={shift.data} />
-      <PosMain shiftId={shift.data.id} />
+      <PosMain shiftId={shift.data.id} deviceId={shift.data.deviceId} />
       <TodayBills />
     </>
   );
 }
 
-function PosMain({ shiftId }: { shiftId: string }) {
+function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const { can } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -57,6 +59,12 @@ function PosMain({ shiftId }: { shiftId: string }) {
   const [catSel, setCatSel] = useState('ALL');
   const [cart, setCartRaw] = useState<CartLine[]>([]);
   const [billDisc, setBillDiscRaw] = useState('');
+  // Module C: bundle sets in the bill and the customer whose price list applies (BR-05 / M15).
+  const [bcart, setBcartRaw] = useState<CartBundle[]>([]);
+  const [cust, setCustRaw] = useState<string | null>(null);
+  const customers = useCustomers();
+  const pricing = usePosPricing(posWh?.id, cust).data;
+  const abb = useAbbAllowed(deviceId);
   const [stage, setStage] = useState<Stage>(null);
   const [payErr, setPayErr] = useState('');
   const idem = useRef<string | null>(null);
@@ -67,11 +75,15 @@ function PosMain({ shiftId }: { shiftId: string }) {
   const touch = () => { idem.current = null; approvals.current = {}; };
   const setCart = (f: (c: CartLine[]) => CartLine[]) => { touch(); setCartRaw(f); };
   const setBillDisc = (v: string) => { touch(); setBillDiscRaw(v); };
+  const setBcart = (f: (c: CartBundle[]) => CartBundle[]) => { touch(); setBcartRaw(f); };
+  const setCust = (v: string | null) => { touch(); setCustRaw(v); };
+  const addBundle = (id: string) => setBcart((c) => (c.some((b) => b.promoId === id) ? c.map((b) => (b.promoId === id ? { ...b, sets: String((Number(b.sets) || 0) + 1) } : b)) : [...c, { promoId: id, sets: '1' }]));
 
   const products = cat.data ?? [];
-  const cats = useMemo(() => [...new Set(products.map((p) => p.category))], [products]);
+  const hasPromo = !!pricing && (pricing.promos.length > 0 || pricing.bundles.length > 0);
+  const cats = useMemo(() => [...(hasPromo ? [PROMO_CAT] : []), ...new Set(products.map((p) => p.category))], [products, hasPromo]);
   const term = q.trim().toLowerCase();
-  const tiles = products.filter((p) => (catSel === 'ALL' || p.category === catSel) && (!term || p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term) || p.barcode === q.trim()));
+  const tiles = products.filter((p) => (catSel === 'ALL' || p.category === catSel || (catSel === PROMO_CAT && !!tilePromo(pricing, p))) && (!term || p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term) || p.barcode === q.trim()));
   const have = (pid: string) => d(stock.data?.get(pid) ?? '0');
 
   const add = (p: Product) => {
@@ -98,26 +110,44 @@ function PosMain({ shiftId }: { shiftId: string }) {
 
   const lineOf = (l: CartLine) => {
     const p = cat.byId.get(l.pid)!;
-    const price = unitListPrice(p, l.u);
+    const lp = linePrice(pricing, p, l.u, l.qty.trim());
+    const price = lp.price;
     const discount = isNum(l.dval) && d(l.dval).gt(0) ? { kind: l.dmode, value: l.dval.trim() } : null;
-    return { p, price, discount, core: { qty: isNum(l.qty) ? l.qty : '0', unitPrice: price, discount, vat: p.vat } };
+    return { p, price, lp, discount, core: { qty: isNum(l.qty) ? l.qty : '0', unitPrice: price, discount, vat: p.vat } };
   };
   const ready = cart.filter((l) => cat.byId.has(l.pid));
   const lines = ready.map(lineOf);
-  const totals = calcDoc(lines.map((x) => x.core), mode, isNum(billDisc) ? billDisc : 0);
+  const vatOf = (pid: string) => cat.byId.get(pid)?.vat ?? 'v7';
+  const bundleCores = bcart.map((b) => bundleCoreLines(pricing, b, vatOf));
+  const totals = calcDoc([...lines.map((x) => x.core), ...bundleCores.flat()], mode, isNum(billDisc) ? billDisc : 0);
+  const bundleNet = (i: number) => {
+    const start = lines.length + bundleCores.slice(0, i).reduce((a, c) => a + c.length, 0);
+    return sum(totals.lines.slice(start, start + bundleCores[i]!.length).map((x) => x.net)).toFixed(2);
+  };
   const baseNeed = new Map<string, ReturnType<typeof d>>();
   ready.forEach((l) => {
     const p = cat.byId.get(l.pid)!;
     if (p.kind === 'stock') baseNeed.set(l.pid, (baseNeed.get(l.pid) ?? d(0)).plus(d(isNum(l.qty) ? l.qty : '0').times(d(p.units[l.u]?.factor ?? '1'))));
   });
-  const validQty = ready.length > 0 && ready.every((l) => isNum(l.qty) && d(l.qty).gt(0));
+  bcart.forEach((b) => {
+    const x = pricing?.bundles.find((y) => y.id === b.promoId);
+    x?.components.forEach((c) => {
+      if (cat.byId.get(c.productId)?.kind === 'stock') baseNeed.set(c.productId, (baseNeed.get(c.productId) ?? d(0)).plus(d(c.qtyPerSet).times(d(/^\d+$/.test(b.sets) ? b.sets : '0'))));
+    });
+  });
+  const validQty = (ready.length > 0 || bcart.length > 0) && ready.every((l) => isNum(l.qty) && d(l.qty).gt(0))
+    && bcart.every((b) => /^\d+$/.test(b.sets) && Number(b.sets) > 0 && pricing?.bundles.some((y) => y.id === b.promoId));
+  const empty = !cart.length && !bcart.length;
 
   const buildReq = (pl: Payload): PosSaleReq => {
     idem.current ??= crypto.randomUUID();
     return {
       idempotencyKey: idem.current, shiftId, warehouseId: posWh!.id, docKind: pl.docKind,
-      ...(pl.customerId ? { customerId: pl.customerId } : {}),
-      lines: lines.map((x, i) => ({ productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.discount ? { discount: x.discount } : {}) })),
+      ...(pl.customerId ?? cust ? { customerId: pl.customerId ?? cust! } : {}),
+      lines: lines.map((x, i) => ({
+        productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.discount ? { discount: x.discount } : {}), ...(x.lp.promo ? { promoId: x.lp.promo.id } : {}),
+      })),
+      ...(bcart.length ? { bundles: bcart.map((b) => ({ promoId: b.promoId, sets: b.sets })) } : {}),
       billDiscount: totals.billDisc,
       payments: pl.payments,
       ...approvals.current,
@@ -131,9 +161,11 @@ function PosMain({ shiftId }: { shiftId: string }) {
       const doc = await api('POST', '/api/sales/pos', { body: buildReq(pl), schema: SalesDoc });
       setCartRaw([]);
       setBillDiscRaw('');
+      setBcartRaw([]);
+      setCustRaw(null);
       touch();
       setStage({ k: 'done', doc });
-      void Promise.all(['stock', 'shift', 'docs', 'today'].map((k) => qc.invalidateQueries({ queryKey: [k] })));
+      void Promise.all(['stock', 'shift', 'docs', 'today', 'pos-pricing'].map((k) => qc.invalidateQueries({ queryKey: [k] })));
       return null;
     } catch (e) {
       if (e instanceof ApiFail) return e;
@@ -146,6 +178,11 @@ function PosMain({ shiftId }: { shiftId: string }) {
     if (f.code === 'FORBIDDEN' && f.detail('need') === 'discountApproval') return setStage({ k: 'apvDisc', pct: f.detail<string>('pct'), cap: f.detail('cap') });
     if (f.code === 'BELOW_COST') return setStage({ k: 'apvBelow', lines: f.detail<BelowLine[]>('lines') ?? [] });
     if (f.code === 'INSUFFICIENT_STOCK') return setStage({ k: 'short', list: (f.details as Shortage[]) ?? [] });
+    if (f.code === 'CONFLICT' && f.detail('reason') === 'PROMO_ENDED') {
+      void qc.invalidateQueries({ queryKey: ['pos-pricing'] });
+      setStage(null);
+      return toast('โปรโมชั่นที่ใช้ในบิลหมดเวลาแล้ว ระบบโหลดราคาใหม่ ตรวจยอดแล้วกดชำระอีกครั้ง');
+    }
     if (f.code === 'SHIFT_REQUIRED') {
       void qc.invalidateQueries({ queryKey: ['shift'] });
       setStage(null);
@@ -181,8 +218,29 @@ function PosMain({ shiftId }: { shiftId: string }) {
     setStage({ k: 'pay' });
   };
   const clear = () => {
-    if (!cart.length) return;
-    if (window.confirm('ยกเลิกบิลนี้ทั้งใบ?')) setCart(() => []);
+    if (empty) return;
+    if (window.confirm('ยกเลิกบิลนี้ทั้งใบ?')) { setCart(() => []); setBcart(() => []); setCust(null); }
+  };
+  /** REQ-M07-08: park the bill (no stock cut) and start a new one. */
+  const hold = async () => {
+    const held: HeldCartIn = { lines: ready.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.qty, dval: l.dval, dmode: l.dmode })), bundles: bcart, billDiscount: billDisc, customerId: cust };
+    try {
+      const h = await holdCart(shiftId, held, totals.total);
+      setCartRaw([]); setBcartRaw([]); setBillDiscRaw(''); setCustRaw(null); touch();
+      void qc.invalidateQueries({ queryKey: ['held'] });
+      toast(`พักบิลแล้ว · ${h.label}`);
+    } catch (e) {
+      toast(errText(e));
+    }
+  };
+  const resume = (c: HeldCartIn) => {
+    if (!empty && !window.confirm('บิลที่กำลังขายอยู่จะถูกแทนที่ ต้องการเรียกบิลพักกลับมา?')) return;
+    touch();
+    setCartRaw(c.lines.filter((l) => cat.byId.has(l.productId)).map((l) => ({ pid: l.productId, u: l.unitIdx, qty: l.qty, dval: l.dval, dmode: l.dmode })));
+    setBcartRaw(c.bundles);
+    setBillDiscRaw(c.billDiscount);
+    setCustRaw(c.customerId);
+    toast('เรียกบิลพักกลับมาแล้ว');
   };
 
   return (
@@ -196,25 +254,36 @@ function PosMain({ shiftId }: { shiftId: string }) {
         </div>
         <div className="tiles" data-testid="tiles">
           {cat.isLoading && Array.from({ length: 8 }, (_, i) => <div key={i} className="tile"><div className="sk" style={{ height: 70 }} /><div className="sk" /></div>)}
-          {tiles.map((p) => (
+          {(catSel === 'ALL' || catSel === PROMO_CAT) && <BundleTiles pricing={pricing} q={q} onAdd={addBundle} />}
+          {tiles.map((p) => { const tp = tilePromo(pricing, p); return (
             <button key={p.id} className="tile" onClick={() => add(p)} data-testid={`tile-${p.sku}`}>
-              <span className="im"><ProductImg p={p} /></span>
+              <span className="im"><PosImg p={p} version={pricing?.images[p.id]} /></span>
               <span className="small muted mono">{p.sku} · {p.category}</span>
               <span className="nm">{p.name}</span>
               <span className="row" style={{ gap: 4 }}>
                 {p.isScg && <Pill k="acc">SCG</Pill>}
+                {tp && <Pill k="ok">โปร</Pill>}
                 <span className="small muted">{p.kind === 'stock' ? `คงเหลือ ${fq(have(p.id))} ${p.units[0]?.name}` : 'บริการ (ไม่นับสต็อก)'}</span>
               </span>
-              <span className="pr">{fmt(p.price)} / {p.units[0]?.name}</span>
+              {tp ? <span className="pr">{fmt(tp.price)} <s className="small muted">{fmt(p.price)}</s> / {p.units[0]?.name}</span> : <span className="pr">{fmt(p.price)} / {p.units[0]?.name}</span>}
             </button>
-          ))}
+          ); })}
           {!cat.isLoading && !tiles.length && <div className="empty">ไม่พบสินค้า "{q}" ลองค้นด้วยชื่ออื่น</div>}
         </div>
       </div>
 
       <div className="card cart" data-testid="cart">
-        <h2>บิลขาย <span className="small muted mono">{vat ? 'ใบกำกับภาษีอย่างย่อ / เต็มรูป' : 'ใบเสร็จรับเงิน (ไม่จด VAT)'}</span></h2>
-        {!cart.length && <div className="empty">ยังไม่มีสินค้าในบิล<br /><span className="small">แตะสินค้าทางซ้าย หรือสแกนบาร์โค้ด</span></div>}
+        <h2>บิลขาย <span className="small muted mono">{vat ? `${deviceId} · ${abb.posId ?? (abb.allowed ? 'ใบกำกับภาษีอย่างย่อ / เต็มรูป' : 'รออนุมัติ ภ.พ.06')}` : 'ใบเสร็จรับเงิน (ไม่จด VAT)'}</span></h2>
+        <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
+          <label className="row small" style={{ gap: 6 }}>ลูกค้า
+            <select value={cust ?? ''} onChange={(e) => setCust(e.target.value || null)} aria-label="ลูกค้าของบิล" data-testid="pos-cust" style={{ maxWidth: 200 }}>
+              <option value="">ลูกค้าทั่วไป (ราคาปลีก)</option>
+              {(customers.data ?? []).filter((c) => c.code !== 'C00000').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </label>
+          <HeldBar shiftId={shiftId} canHold={!empty} onHold={hold} onResume={resume} />
+        </div>
+        {empty && <div className="empty">ยังไม่มีสินค้าในบิล<br /><span className="small">แตะสินค้าทางซ้าย หรือสแกนบาร์โค้ด</span></div>}
         {ready.map((l, i) => {
           const x = lines[i]!;
           const p = x.p;
@@ -225,13 +294,14 @@ function PosMain({ shiftId }: { shiftId: string }) {
           return (
             <div className="cline" key={i} data-testid={`cline-${i}`}>
               <div style={{ minWidth: 0 }}>
-                <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}><span className="thumb"><ProductImg p={p} /></span><span className="nm">{p.name}</span></div>
+                <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}><span className="thumb"><PosImg p={p} version={pricing?.images[p.id]} /></span><span className="nm">{p.name}</span></div>
                 <div className="ctl">
                   <select value={l.u} aria-label="หน่วย" onChange={(e) => upd({ u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>
                   <button className="qbtn" aria-label="ลด" onClick={() => upd({ qty: d(isNum(l.qty) ? l.qty : '1').minus(1).lte(0) ? '1' : d(l.qty).minus(1).toString() })}>−</button>
                   <input className={`qty${over || !isNum(l.qty) ? ' bad' : ''}`} type="text" inputMode="decimal" value={l.qty} aria-label="จำนวน" onChange={(e) => upd({ qty: e.target.value })} data-testid={`qty-${i}`} />
                   <button className="qbtn" aria-label="เพิ่ม" onClick={() => upd({ qty: d(isNum(l.qty) ? l.qty : '0').plus(1).toString() })}>+</button>
                   <span className="small muted">@{fmt(x.price)}</span>
+                  {x.lp.source !== 'retail' && <span className="row small" style={{ gap: 4 }} title={x.lp.promo?.name}><Pill k="ok">{x.lp.promo ? 'โปร' : 'ราคาลูกค้า'}</Pill><s className="muted">{fmt(x.lp.retail)}</s></span>}
                   <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
                     <span className="small muted">ส่วนลด</span>
                     <input className="qty" type="text" inputMode="decimal" value={l.dval} placeholder="0" style={{ width: 70 }} aria-label={`ส่วนลดรายการ ${p.name}`} onChange={(e) => upd({ dval: e.target.value })} data-testid={`ldisc-${i}`} />
@@ -249,6 +319,10 @@ function PosMain({ shiftId }: { shiftId: string }) {
             </div>
           );
         })}
+        {bcart.map((b, i) => (
+          <BundleLine key={b.promoId} pricing={pricing} b={b} net={bundleNet(i)} testId={`bline-${i}`}
+            onSets={(v) => setBcart((c) => c.map((y, j) => (j === i ? { ...y, sets: v } : y)))} onRemove={() => setBcart((c) => c.filter((_, j) => j !== i))} />
+        ))}
         <div className="row" style={{ marginTop: 10 }}>
           <label className="f" style={{ flex: 1 }}>ส่วนลดท้ายบิล (บาท)<input type="text" inputMode="decimal" value={billDisc} placeholder="0" onChange={(e) => setBillDisc(e.target.value)} data-testid="bill-disc" /></label>
         </div>
@@ -259,13 +333,13 @@ function PosMain({ shiftId }: { shiftId: string }) {
           {mode === 'none' ? <><span className="small muted">ร้านไม่จด VAT</span><span className="small muted">ไม่มีภาษี</span></> : <><span className="small muted">ภาษีมูลค่าเพิ่ม 7% (รวมในราคา)</span><span className="small muted">{fmt(totals.vat)}</span></>}
         </div>
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn bad" onClick={clear} disabled={!cart.length}>ยกเลิกบิล</button>
-          <button className="btn pri" style={{ flex: 1, justifyContent: 'center' }} onClick={openPay} disabled={!cart.length || !d(totals.total).gt(0) || !posWh} data-testid="pay">ชำระเงิน ฿{fmt(totals.total)}</button>
+          <button className="btn bad" onClick={clear} disabled={empty}>ยกเลิกบิล</button>
+          <button className="btn pri" style={{ flex: 1, justifyContent: 'center' }} onClick={openPay} disabled={empty || !d(totals.total).gt(0) || !posWh} data-testid="pay">ชำระเงิน ฿{fmt(totals.total)}</button>
         </div>
         {(can('pos.discCap') === 0) && <p className="small muted" style={{ margin: '8px 0 0' }}>ส่วนลดเกินสิทธิ์ของบทบาทนี้ ระบบจะขอ PIN ผู้จัดการตอนชำระเงิน</p>}
       </div>
 
-      {stage?.k === 'pay' && <PayModal total={totals.total} vat={vat} err={payErr} onClose={() => setStage(null)} onPay={pay} />}
+      {stage?.k === 'pay' && <PayModal total={totals.total} vat={vat} err={payErr} onClose={() => setStage(null)} onPay={pay} defaultCustomer={cust} abbAllowed={abb.allowed} abbNote={abb.reason} />}
       {stage?.k === 'apvDisc' && (
         <ApprovalModal title="ส่วนลดเกินสิทธิ์" onClose={() => setStage(null)} onSubmit={approveWith('discountApproval')}
           label={<p style={{ margin: 0 }}>ให้ส่วนลดได้ไม่เกิน {String(stage.cap ?? 0)}% ของยอดบิล ครั้งนี้ {stage.pct ?? '-'}% · หรือมีการแก้ราคาขาย</p>} />
@@ -289,16 +363,18 @@ function PosMain({ shiftId }: { shiftId: string }) {
   );
 }
 
-function PayModal({ total, vat, err, onClose, onPay }: { total: string; vat: boolean; err: string; onClose: () => void; onPay: (p: Payload) => Promise<void> }) {
+function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed = true, abbNote }: {
+  total: string; vat: boolean; err: string; onClose: () => void; onPay: (p: Payload) => Promise<void>; defaultCustomer?: string | null; abbAllowed?: boolean; abbNote?: ReactNode;
+}) {
   const customers = useCustomers();
-  const [kind, setKind] = useState<PosSaleReq['docKind']>(vat ? 'abb' : 'receipt');
-  const [cust, setCust] = useState('');
+  const [kind, setKind] = useState<PosSaleReq['docKind']>(vat ? (abbAllowed ? 'abb' : 'full') : 'receipt');
+  const [cust, setCust] = useState(defaultCustomer ?? '');
   const [lines, setLines] = useState<PayLine[]>([{ method: 'cash', amount: total }]);
   const [recv, setRecv] = useState('');
   const [busy, setBusy] = useState(false);
   const withTax = (customers.data ?? []).filter((c) => c.taxId);
   const custList = kind === 'full' ? withTax : customers.data ?? [];
-  const custId = cust || (kind === 'full' ? withTax[0]?.id ?? '' : '');
+  const custId = kind === 'full' ? (withTax.some((c) => c.id === cust) ? cust : withTax[0]?.id ?? '') : cust;
   const paid = sum(lines.map((l) => (isNum(l.amount) ? l.amount : 0)));
   const exact = paid.eq(d(total));
   const cash = lines.find((l) => l.method === 'cash');
@@ -322,9 +398,10 @@ function PayModal({ total, vat, err, onClose, onPay }: { total: string; vat: boo
         <div>
           <div className="small muted" style={{ marginBottom: 6 }}>ประเภทเอกสาร</div>
           <div className="row">
-            <label className="row"><input type="radio" name="inv" checked={kind === 'abb'} onChange={() => setKind('abb')} /> ใบกำกับภาษีอย่างย่อ</label>
+            <label className="row"><input type="radio" name="inv" checked={kind === 'abb'} disabled={!abbAllowed} onChange={() => setKind('abb')} /> ใบกำกับภาษีอย่างย่อ</label>
             <label className="row"><input type="radio" name="inv" checked={kind === 'full'} onChange={() => setKind('full')} data-testid="kind-full" /> ใบกำกับภาษีเต็มรูป</label>
           </div>
+          {!abbAllowed && <div className="note warn small" style={{ marginTop: 6 }} data-testid="abb-off">{abbNote}</div>}
           {kind === 'full' && (
             <label className="f" style={{ marginTop: 8 }}>ลูกค้า (ต้องมีเลขผู้เสียภาษี)
               <select value={custId} onChange={(e) => setCust(e.target.value)}>{custList.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.taxId}</option>)}</select>

@@ -248,7 +248,7 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   const row = page.getByTestId('stock-table').locator('tr', { hasText: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
   await row.getByRole('button', { name: 'ล็อต' }).click();
   await expect(page.getByTestId('lots-table')).toContainText('ตัดก่อน');
-  await expect(page.getByTestId('lots-table')).toContainText('950.00'); // 1000 − 500/10 bill discount in lot cost
+  await expect(page.getByTestId('lots-table')).toContainText('1,000.00'); // BR-19 default: the 500 bill discount is a separate purchase discount, not lot cost
 });
 
 test('products: create, search and cursor pagination (20 per page)', async ({ page, request }) => {

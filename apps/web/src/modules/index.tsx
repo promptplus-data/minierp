@@ -58,6 +58,15 @@ function Guard({ owner, children }: { owner: NavItem; children: ReactNode }) {
 
 const routePending = <div className="card"><div className="sk" /><div className="sk" /></div>;
 
+/** Routes outside the shop sign-in and the Shell (WebModule.publicRoutes), each in Suspense. */
+export const PUBLIC_ROUTES: RouteObject[] = MODULES.flatMap((m) => m.publicRoutes ?? []).map((r) =>
+  (r.element ? { ...r, element: <Suspense fallback={routePending}>{r.element}</Suspense> } : r) as RouteObject);
+
+/** Every module's Wrap around the signed-in content, first module outermost. */
+export function ModuleWraps({ children }: { children: ReactNode }) {
+  return <>{MODULES.reduceRight<ReactNode>((inner, m) => (m.Wrap ? <m.Wrap>{inner}</m.Wrap> : inner), children)}</>;
+}
+
 /** Every module route, each element wrapped in Suspense (for lazy screens) and in its nav item's guard. */
 export const MODULE_ROUTES: RouteObject[] = MODULES.flatMap((m) => m.routes).map((r) => {
   const owner = r.path ? navFor(r.path) : undefined;
