@@ -289,3 +289,10 @@ export function share(total: string, qty: string, lineQty: string, alreadyQty: s
   if (d(alreadyQty).plus(d(qty)).gte(d(lineQty))) return money(d(total).minus(d(alreadyValue)));
   return money(d(total).times(d(qty)).div(d(lineQty)));
 }
+
+/** Runs queries one after another on the same transaction client (pg does not allow concurrent queries on one client). */
+export async function inSeq<T extends (() => Promise<unknown>)[]>(fns: [...T]): Promise<{ -readonly [K in keyof T]: Awaited<ReturnType<T[K]>> }> {
+  const out: unknown[] = [];
+  for (const f of fns) out.push(await f());
+  return out as { -readonly [K in keyof T]: Awaited<ReturnType<T[K]>> };
+}

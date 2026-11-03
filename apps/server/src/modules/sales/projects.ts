@@ -16,7 +16,7 @@ import { writeAudit } from '../../lib/audit';
 import { requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
 import { E, isUuid } from '../../lib/errors';
-import { authorizeVoid, loadCustomer, loadShop, lumpVatMode, pageNewest, partyCols, partyOf, requireOwner, voidedJson, type CustomerRow, type PartyCols, type VoidBody } from './common';
+import { authorizeVoid, inSeq, loadCustomer, loadShop, lumpVatMode, pageNewest, partyCols, partyOf, requireOwner, voidedJson, type CustomerRow, type PartyCols, type VoidBody } from './common';
 import { insertInvoice } from './invoices';
 
 type NewProject = z.infer<typeof SalesNewProject>;
@@ -179,15 +179,15 @@ export async function getProject(tx: Tx, _deps: Deps, id: string): Promise<Sales
   const applied = money(sum(inst.filter((i) => i.inv_no).map((i) => i.deduct ?? 0)));
   const pool = depositPool(dps, applied);
   const billedRows = inst.map((i) => ({ pct: i.pct, billed: i.inv_no ? { gross: i.gross ?? '0', deduct: i.deduct ?? '0' } : null }));
-  const [orders, dlv, invs] = await Promise.all([
-    tx.query<{ id: string; no: string; date: string; status: 'active' | 'void'; total: string; dlv_status: 'open' | 'partial' | 'delivered' }>(
+  const [orders, dlv, invs] = await inSeq([
+    () => tx.query<{ id: string; no: string; date: string; status: 'active' | 'void'; total: string; dlv_status: 'open' | 'partial' | 'delivered' }>(
       `select id, no, date::text, status, total::text, dlv_status from sales_orders where project_id = $1 order by created_at`, [id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void'; so_no: string | null; total: string; vehicle: string; preview: string | null }>(
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; so_no: string | null; total: string; vehicle: string; preview: string | null }>(
       `select x.no, x.date::text, x.status, so.no so_no, x.total::text, x.vehicle,
               (select string_agg(split_part(l.name, ' ', 1) || ' ×' || trim(trailing '.' from trim(trailing '0' from l.qty::text)) || ' ' || l.unit_name, ', ' order by l.line_no)
                  from sales_delivery_lines l where l.delivery_id = x.id) preview
          from sales_deliveries x left join sales_orders so on so.id = x.so_id where x.project_id = $1 order by x.created_at`, [id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; ar_balance: string; source: SalesProject['invoices'][number]['source'] }>(
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; ar_balance: string; source: SalesProject['invoices'][number]['source'] }>(
       `select x.no, x.date::text, x.status, x.total::text, x.ar_balance::text, si.source from docs x join sales_invoices si on si.doc_id = x.id where si.project_id = $1 order by x.created_at`, [id]),
   ]);
   const mainId = (await tx.query<{ main_so_id: string | null }>(`select main_so_id from sales_projects where id = $1`, [id])).rows[0]?.main_so_id;

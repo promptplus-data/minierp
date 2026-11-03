@@ -16,7 +16,7 @@ import { applyOut, lockLots, planTakes, type Planned } from '../../lib/stock';
 import { requireWarehouse } from '../../services/master';
 import { getDoc, getDocRow, getLines, registerVoidGuard } from '../../services/sales';
 import {
-  belowCostGate, buildLines, creditGate, discAmt, haystack, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
+  belowCostGate, buildLines, creditGate, discAmt, haystack, inSeq, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
   totalsOf, userRef, type BuiltLine, type CustomerRow, type PartyCols,
 } from './common';
 
@@ -234,13 +234,13 @@ export async function getInvoice(tx: Tx, _deps: Deps, ctx: Ctx, no: string): Pro
   const x = r.rows[0];
   if (!x) throw E.notFound(`Invoice ${no} not found`);
   const doc = await getDoc(tx, ctx, no);
-  const [dlv, later, bns, rcs, cns] = await Promise.all([
-    tx.query<{ no: string }>(`select dv.no from sales_invoice_deliveries sid join sales_deliveries dv on dv.id = sid.delivery_id where sid.invoice_doc_id = $1 order by dv.created_at`, [x.id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void' }>(`select no, date::text, status from sales_deliveries where inv_doc_id = $1 order by created_at`, [x.id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void' }>(`select distinct b.no, b.date::text, b.status, b.created_at from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = $1 order by b.created_at`, [x.id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void'; settled: string; wht: string }>(
+  const [dlv, later, bns, rcs, cns] = await inSeq([
+    () => tx.query<{ no: string }>(`select dv.no from sales_invoice_deliveries sid join sales_deliveries dv on dv.id = sid.delivery_id where sid.invoice_doc_id = $1 order by dv.created_at`, [x.id]),
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void' }>(`select no, date::text, status from sales_deliveries where inv_doc_id = $1 order by created_at`, [x.id]),
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void' }>(`select distinct b.no, b.date::text, b.status, b.created_at from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = $1 order by b.created_at`, [x.id]),
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; settled: string; wht: string }>(
       `select r.no, r.date::text, r.status, l.settled::text, l.wht::text from ar_receipt_lines l join ar_receipts r on r.id = l.receipt_id where l.invoice_doc_id = $1 order by r.created_at`, [x.id]),
-    tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; refund: string | null }>(`select no, date::text, status, total::text, refund from docs where ref_doc_id = $1 and type = 'CN' order by created_at`, [x.id]),
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; refund: string | null }>(`select no, date::text, status, total::text, refund from docs where ref_doc_id = $1 and type = 'CN' order by created_at`, [x.id]),
   ]);
   const undelivered: Record<string, string> = {};
   if (x.goods_left) {
