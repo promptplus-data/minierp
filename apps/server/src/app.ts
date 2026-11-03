@@ -49,6 +49,7 @@ export async function buildApp(opts: BuildOptions): Promise<FastifyInstance> {
     pool: opts.pool, edition, hooks: opts.hooks ?? {}, today: opts.today ?? bangkokToday, backupScript: opts.backupScript,
     requireDevicePairing: opts.requireDevicePairing ?? edition === 'onprem',
     backgroundJobs: opts.backgroundJobs ?? false,
+    tenantGuards: [],
   };
 
   registerErrorHandler(app);

@@ -17,3 +17,5 @@ export * from './pricelist';
 export * from './payables';
 export * from './importfmt';
 export * from './retail';
+export * from './hr';
+export * from './consent';

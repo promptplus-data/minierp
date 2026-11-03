@@ -12,7 +12,7 @@ import { createCustomer, createProduct, listCustomers, listProducts, listVendors
 
 export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): void {
   app.post('/api/auth/login', async (req) => {
-    const ctx = await login(deps.pool, LoginReq.parse(req.body));
+    const ctx = await login(deps.pool, LoginReq.parse(req.body), deps.tenantGuards);
     return { token: signToken(app, ctx), user: sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role }) };
   });
   app.get('/api/auth/me', authed(async (_tx, ctx) => sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role })));

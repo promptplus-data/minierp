@@ -52,6 +52,9 @@ export function makeAuthed(deps: Deps) {
         const ok = token && (await tx.query(`select 1 from devices where token_hash = $1 and revoked_at is null`, [sha256(token)])).rowCount;
         if (!ok) throw E.forbidden('This machine is not paired with the main machine; pair it with a code first', { reason: 'DEVICE_NOT_PAIRED' });
       }
+      // Module guards (license read-only mode, suspended shop): one central place for every authed route.
+      const config = (req.routeOptions?.config ?? {}) as unknown as Record<string, unknown>;
+      for (const g of deps.tenantGuards) await g(tx, { tenantId: claims.tid, phase: 'request', method: req.method, route: req.routeOptions?.url ?? req.url, config });
       return handler(tx, { tenantId: claims.tid, userId: u.id, name: u.name, role: u.role }, req, reply);
     });
   };

@@ -28,7 +28,23 @@ export interface Deps {
   requireDevicePairing: boolean;
   /** Whether module timers / schedulers may start (false in tests and on serverless hosts such as Vercel). */
   backgroundJobs: boolean;
+  /**
+   * Checks every module may add at registration (e.g. license read-only mode, suspended shop). Run inside the
+   * tenant transaction at login (phase 'login', before the password check) and for every authed request
+   * (phase 'request'). Throw an AppError to refuse.
+   */
+  tenantGuards: TenantGuard[];
 }
+
+export interface TenantGuardInfo {
+  tenantId: string;
+  phase: 'login' | 'request';
+  /** HTTP method and route pattern; route config lets a route opt out (e.g. `{ readOnlyOk: true }`). */
+  method: string;
+  route: string;
+  config: Record<string, unknown>;
+}
+export type TenantGuard = (tx: Tx, info: TenantGuardInfo) => Promise<void>;
 
 export const bangkokToday = (): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());

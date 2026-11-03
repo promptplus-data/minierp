@@ -53,6 +53,7 @@ export default function Setup() {
         <label className="f" style={{ marginTop: 8 }}>PIN อนุมัติ (4–6 หลัก)<input type="password" inputMode="numeric" maxLength={6} value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>
         <div className="err" role="alert" style={{ minHeight: 18, marginTop: 6 }} data-testid="setup-error">{err}</div>
         <button className="btn pri" style={{ width: '100%', justifyContent: 'center' }} type="submit" disabled={busy}>{busy ? 'กำลังสร้างร้าน…' : 'สร้างร้านและเข้าสู่ระบบ'}</button>
+        <p className="small muted" style={{ marginTop: 12, marginBottom: 0 }}>ย้ายเครื่องหรือเครื่องเดิมเสีย? <a href="/restore">กู้คืนข้อมูลร้านจากข้อมูลสำรองบน cloud</a></p>
       </form>
     </div>
   );

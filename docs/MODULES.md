@@ -114,6 +114,10 @@ export const salesModule: WebModule = {
 | `show?` | `(can, caps) => boolean` | Extra condition, combined with AND |
 | `order?` | `number` | Position within the section. Default 100. Core items use 10–90 |
 
+Two optional `WebModule` fields: `publicRoutes` are rendered without a shop sign-in and outside the Shell (each
+screen does its own authentication, e.g. the SCG Admin console at `/scg`), and `Wrap` wraps the signed-in content
+inside the Shell (banners and blocking gates, e.g. terms not yet accepted).
+
 Routes are react-router `RouteObject`s with absolute paths. The registry wraps each element in `Suspense` and in
 a guard. The guard redirects to `/` when the nav item with the longest matching path prefix is hidden for the
 user. A route that matches no nav item is not guarded, so it must check permissions itself.
