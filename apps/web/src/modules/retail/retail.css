@@ -1,0 +1,32 @@
+/* Module C (retail) screens: promotions, production, price lists, POS machines, product images. */
+.rt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.rt-head p{margin:4px 0 0;max-width:72ch}
+.rt-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0 10px}
+.rt-filters input[type=search]{flex:1;min-width:180px}
+.rt-pick{display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px}
+.rt-pick label{display:flex;gap:6px;align-items:center;padding:4px 10px;border:1px solid var(--line);border-radius:99px;font-size:13px;cursor:pointer;background:var(--surface)}
+.rt-pick label.on{background:var(--ok-soft);border-color:var(--ok)}
+.rt-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px}
+.rt-cards .card{margin:0}
+.rt-img{width:64px;height:44px;border-radius:6px;overflow:hidden;background:var(--surface2);display:block}
+.rt-img img,.rt-img svg{width:100%;height:100%;object-fit:cover;display:block}
+.rt-sum{display:grid;grid-template-columns:1fr auto;gap:4px 16px;font-variant-numeric:tabular-nums}
+.rt-sum .big{font-size:20px;font-weight:700}
+.rt-actions{display:flex;gap:6px;flex-wrap:nowrap}
+.rt-desc{font-size:12px;color:var(--muted)}
+.rt-mt input.qty{width:90px}
+@media (max-width:640px){
+  .rt-head .btn{width:100%;justify-content:center}
+  .rt-cards{grid-template-columns:1fr}
+  .rt-actions{flex-wrap:wrap}
+}
+.rt-span2{grid-column:span 2}
+.rt-who{white-space:nowrap}
+.rt-items{min-width:170px}
+.rt-comps select{width:100%;min-width:140px}
+.rt-comps th{white-space:normal}
+td .rt-actions{flex-direction:column;align-items:stretch}
+@media (max-width:640px){
+  .rt-span2{grid-column:auto}
+  .rt-comps input.qty{width:64px}
+}

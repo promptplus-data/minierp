@@ -25,19 +25,27 @@ export function Slip({ doc }: { doc: SalesDoc }) {
         <b>{shop?.name}</b><br />
         {!nv && <>เลขประจำตัวผู้เสียภาษี {shop?.taxId}<br />{shop?.branch}<br /></>}
         {title}
+        {doc.posId && <><br />POS ID: {doc.posId}</>}
       </div>
       <hr />
       <R l={doc.no} r={th(doc.date)} />
       {doc.type === 'INV' && <div>ลูกค้า: {doc.customer.name}</div>}
       {doc.type === 'CN' && doc.ref && <div>อ้างอิง: {doc.ref}</div>}
       <hr />
-      {doc.lines.map((l) => (
-        <div key={l.id}>
-          <div>{l.name}</div>
-          <R l={`${fq(l.qty)} ${l.unitName} × ${fmt(l.unitPrice)}`} r={fmt(d(l.qty).times(d(l.unitPrice)))} />
-          {d(l.discount).gt(0) && <R l="  ส่วนลด" r={`−${fmt(l.discount)}`} />}
-        </div>
-      ))}
+      {doc.lines.map((l, i) => {
+        // Module C (M15): a bundle prints its set once, then each component with its share of the set revenue.
+        const b = l.bundle;
+        const firstOfBundle = b && doc.lines.findIndex((x) => x.bundle?.no === b.no) === i;
+        return (
+          <div key={l.id}>
+            {firstOfBundle && <R l={`ชุดโปร ${b.name} × ${fq(b.sets)}`} r={fmt(d(b.setPrice).times(d(b.sets)))} />}
+            <div>{b ? `  · ${l.name}` : l.name}</div>
+            {b ? <R l={`    ${fq(l.qty)} ${l.unitName}`} r={fmt(l.net)} /> : <R l={`${fq(l.qty)} ${l.unitName} × ${fmt(l.unitPrice)}`} r={fmt(d(l.qty).times(d(l.unitPrice)))} />}
+            {!b && l.promo && l.listPrice && d(l.listPrice).gt(d(l.unitPrice)) && <R l={`  โปร ${l.promo.name}`} r={`(ปกติ ${fmt(l.listPrice)})`} />}
+            {d(l.discount).gt(0) && <R l="  ส่วนลด" r={`−${fmt(l.discount)}`} />}
+          </div>
+        );
+      })}
       <hr />
       <R l="รวม" r={fmt(d(t.gross).minus(d(t.lineDisc)))} />
       {d(t.billDisc).gt(0) && <R l="ส่วนลดท้ายบิล" r={`−${fmt(t.billDisc)}`} />}
