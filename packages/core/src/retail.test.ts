@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  bomSuggest, bundleNormalPrice, bundleSetsAvailable, listPriceForDoc, moUnitCost, pickListPrice, priceExVat, promoBelowCost, promoState,
+  bomSuggest, bundleNormalPrice, bundleSetsAvailable, listPriceForDoc, moUnitCost, pickRetailListPrice, priceExVat, promoBelowCost, promoState,
   promoUnitPrice, resolvePrice, yieldPct, type PriceListEntry,
 } from './retail';
 
@@ -62,11 +62,11 @@ describe('BR-05 price resolution', () => {
     { source: 'group', unitIdx: 1, minQty: 0, price: '5500.00' },
   ];
   it('customer list first, then the group list with the largest qty break', () => {
-    expect(pickListPrice(entries, 0, 20)).toEqual({ price: '138.00', source: 'customer' });
-    expect(pickListPrice(entries, 0, 5)).toEqual({ price: '140.00', source: 'group' });
-    expect(pickListPrice(entries.filter((e) => e.source === 'group'), 0, 60)).toEqual({ price: '136.00', source: 'group' });
-    expect(pickListPrice(entries, 1, 1)).toEqual({ price: '5500.00', source: 'group' });
-    expect(pickListPrice(entries, 2, 1)).toBeNull();
+    expect(pickRetailListPrice(entries, 0, 20)).toEqual({ price: '138.00', source: 'customer' });
+    expect(pickRetailListPrice(entries, 0, 5)).toEqual({ price: '140.00', source: 'group' });
+    expect(pickRetailListPrice(entries.filter((e) => e.source === 'group'), 0, 60)).toEqual({ price: '136.00', source: 'group' });
+    expect(pickRetailListPrice(entries, 1, 1)).toEqual({ price: '5500.00', source: 'group' });
+    expect(pickRetailListPrice(entries, 2, 1)).toBeNull();
   });
   it('quotation beats everything; promo only when lower than the list price', () => {
     expect(resolvePrice({ retail: 145, quotation: '139.50', list: { price: 138, source: 'customer' }, promo: { id: 'p', price: 100 } }))

@@ -38,18 +38,18 @@ export function whtAmount(paid: Num, rate: number, vatRegistered: boolean): Mone
 }
 
 /** Days from a due date to today (positive = overdue). */
-export function daysOverdue(due: string, today: string): number {
+export function apDaysOverdue(due: string, today: string): number {
   const a = parseISODate(due);
   const b = parseISODate(today);
   return Math.round((Date.UTC(b.y, b.m - 1, b.d) - Date.UTC(a.y, a.m - 1, a.d)) / 864e5);
 }
 
-export type AgingBucket = 'current' | 'd1_30' | 'd31_60' | 'over60';
-export const AGING_TH: Record<AgingBucket, string> = { current: 'ยังไม่ครบกำหนด', d1_30: 'เกิน 1–30 วัน', d31_60: 'เกิน 31–60 วัน', over60: 'เกิน 60 วัน' };
+export type ApAgingBucket = 'current' | 'd1_30' | 'd31_60' | 'over60';
+export const AGING_TH: Record<ApAgingBucket, string> = { current: 'ยังไม่ครบกำหนด', d1_30: 'เกิน 1–30 วัน', d31_60: 'เกิน 31–60 วัน', over60: 'เกิน 60 วัน' };
 
 /** REQ-M18-04 buckets: not yet due / 1–30 / 31–60 / > 60 days overdue. */
-export function agingBucket(due: string, today: string): AgingBucket {
-  const n = daysOverdue(due, today);
+export function apAgingBucket(due: string, today: string): ApAgingBucket {
+  const n = apDaysOverdue(due, today);
   if (n <= 0) return 'current';
   if (n <= 30) return 'd1_30';
   if (n <= 60) return 'd31_60';
@@ -57,11 +57,11 @@ export function agingBucket(due: string, today: string): AgingBucket {
 }
 
 /** Sums open balances per bucket. */
-export function agingSummary(bills: readonly { due: string; balance: Num }[], today: string): Record<AgingBucket, Money> {
-  const acc: Record<AgingBucket, ReturnType<typeof d>> = { current: d(0), d1_30: d(0), d31_60: d(0), over60: d(0) };
+export function agingSummary(bills: readonly { due: string; balance: Num }[], today: string): Record<ApAgingBucket, Money> {
+  const acc: Record<ApAgingBucket, ReturnType<typeof d>> = { current: d(0), d1_30: d(0), d31_60: d(0), over60: d(0) };
   for (const b of bills) {
     if (!d(b.balance).gt(0)) continue;
-    const k = agingBucket(b.due, today);
+    const k = apAgingBucket(b.due, today);
     acc[k] = acc[k].plus(d(b.balance));
   }
   return { current: money(acc.current), d1_30: money(acc.d1_30), d31_60: money(acc.d31_60), over60: money(acc.over60) };

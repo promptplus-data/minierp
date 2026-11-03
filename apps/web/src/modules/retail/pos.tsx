@@ -6,7 +6,7 @@
 import { useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HeldBill, PosDevice, PosPricing, ProductImage, page, type Product } from '@erp/contracts';
-import { bundleAlloc, d, money, pickListPrice, promoUnitPrice, resolvePrice, type DocLine as CoreLine } from '@erp/core';
+import { bundleAlloc, d, money, pickRetailListPrice, promoUnitPrice, resolvePrice, type DocLine as CoreLine } from '@erp/core';
 import { api, errText } from '../../api';
 import { fmt, fq, hm, Modal, Pill, SkeletonRows, useToast } from '../../ui';
 import { ProductImg } from '../../pos/img';
@@ -46,7 +46,7 @@ export function linePrice(pr: Pricing | undefined, p: Product, unitIdx: number, 
     const price = promoUnitPrice(x.mode, x.value, retail, factor);
     if (!best || d(price).lt(d(best.price))) best = { id: x.id, name: x.name, price };
   }
-  const list = pickListPrice(pr.prices.filter((e) => e.productId === p.id), unitIdx, /^\d+(\.\d+)?$/.test(qty) ? qty : '0');
+  const list = pickRetailListPrice(pr.prices.filter((e) => e.productId === p.id), unitIdx, /^\d+(\.\d+)?$/.test(qty) ? qty : '0');
   const r = resolvePrice({ retail, list, promo: best ? { id: best.id, price: best.price } : null });
   return { price: r.unitPrice, retail, promo: r.promoId && best ? { id: best.id, name: best.name } : null, source: r.source === 'quotation' ? 'retail' : r.source };
 }

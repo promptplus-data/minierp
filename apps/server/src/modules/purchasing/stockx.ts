@@ -5,7 +5,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { StockCount } from '@erp/contracts';
-import { addDays, d, daysOverdue, money, qty4, sum } from '@erp/core';
+import { addDays, d, apDaysOverdue, money, qty4, sum } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requireAny, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -250,7 +250,7 @@ export async function grAlerts(tx: Tx, deps: Deps) {
   const n = await tx.query<{ n: number }>(`select count(*)::int n from gr_drafts where status = 'draft' and received_on <= $1::date`, [addDays(today, -GR_ALERT_DAYS)]);
   return {
     days: GR_ALERT_DAYS, count: n.rows[0]!.n,
-    items: r.rows.map((x) => ({ id: x.id, dnNo: x.dn_no, dealer: x.dealer_name, receivedOn: x.received_on, ageDays: daysOverdue(x.received_on, today) })),
+    items: r.rows.map((x) => ({ id: x.id, dnNo: x.dn_no, dealer: x.dealer_name, receivedOn: x.received_on, ageDays: apDaysOverdue(x.received_on, today) })),
   };
 }
 

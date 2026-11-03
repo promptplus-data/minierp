@@ -82,7 +82,7 @@ export interface PriceListEntry { source: 'customer' | 'group'; unitIdx: number;
  * Price list step of BR-05: the customer's own list beats the customer-group list; inside one list the entry
  * with the largest qty break not above `qty` wins. Entries must already be filtered to valid dates.
  */
-export function pickListPrice(entries: readonly PriceListEntry[], unitIdx: number, qty: Num): { price: Money; source: 'customer' | 'group' } | null {
+export function pickRetailListPrice(entries: readonly PriceListEntry[], unitIdx: number, qty: Num): { price: Money; source: 'customer' | 'group' } | null {
   const q = d(qty);
   for (const source of ['customer', 'group'] as const) {
     let best: PriceListEntry | null = null;

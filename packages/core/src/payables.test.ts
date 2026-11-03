@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agingBucket, agingSummary, checkAllocations, daysOverdue, dueWithin, purchaseBill, vendorReturnAmounts, whtAmount } from './payables';
+import { apAgingBucket, agingSummary, checkAllocations, apDaysOverdue, dueWithin, purchaseBill, vendorReturnAmounts, whtAmount } from './payables';
 
 describe('purchaseBill (REQ-M05-08 / BR-19)', () => {
   it('AP and VAT come from the amount after the bill discount: 10,000 − 300 → 10,379', () => {
@@ -28,14 +28,14 @@ describe('whtAmount', () => {
 
 describe('aging (REQ-M18-04)', () => {
   it('buckets: not due / 1–30 / 31–60 / > 60', () => {
-    expect(agingBucket('2026-10-26', '2026-10-26')).toBe('current');
-    expect(agingBucket('2026-10-27', '2026-10-26')).toBe('current');
-    expect(agingBucket('2026-10-25', '2026-10-26')).toBe('d1_30');
-    expect(agingBucket('2026-09-26', '2026-10-26')).toBe('d1_30');
-    expect(agingBucket('2026-09-25', '2026-10-26')).toBe('d31_60');
-    expect(agingBucket('2026-08-27', '2026-10-26')).toBe('d31_60');
-    expect(agingBucket('2026-08-26', '2026-10-26')).toBe('over60');
-    expect(daysOverdue('2026-10-20', '2026-10-26')).toBe(6);
+    expect(apAgingBucket('2026-10-26', '2026-10-26')).toBe('current');
+    expect(apAgingBucket('2026-10-27', '2026-10-26')).toBe('current');
+    expect(apAgingBucket('2026-10-25', '2026-10-26')).toBe('d1_30');
+    expect(apAgingBucket('2026-09-26', '2026-10-26')).toBe('d1_30');
+    expect(apAgingBucket('2026-09-25', '2026-10-26')).toBe('d31_60');
+    expect(apAgingBucket('2026-08-27', '2026-10-26')).toBe('d31_60');
+    expect(apAgingBucket('2026-08-26', '2026-10-26')).toBe('over60');
+    expect(apDaysOverdue('2026-10-20', '2026-10-26')).toBe(6);
   });
   it('summary skips settled bills', () => {
     expect(agingSummary([{ due: '2026-11-01', balance: '100' }, { due: '2026-10-01', balance: '50.5' }, { due: '2026-01-01', balance: '0' }], '2026-10-26'))

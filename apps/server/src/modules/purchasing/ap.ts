@@ -6,7 +6,7 @@
 import type { Tx } from '@erp/db';
 import type { ApBill, ApPayment, GrDetail, GrSummary, VendorReturn } from '@erp/contracts';
 import {
-  addDays, agingSummary, checkAllocations, d, daysOverdue, fmtTHB, money, qty4, sum, termLabel, vendorReturnAmounts, whtAmount,
+  addDays, agingSummary, checkAllocations, d, apDaysOverdue, fmtTHB, money, qty4, sum, termLabel, vendorReturnAmounts, whtAmount,
   type BillDiscountMode, type PaymentTerm,
 } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
@@ -109,7 +109,7 @@ const toBill = (r: BillRow, today: string): ApBill => ({
   id: r.id, no: r.no, source: r.source, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, grNo: r.gr_no,
   date: r.date, dueDate: r.due_date, termLabel: r.source === 'opening' ? 'ยอดยกมา' : termLabel(r.term), base: money(r.base), discount: money(r.discount),
   discountMode: r.discount_mode, vat: money(r.vat), total: money(r.total), paid: money(r.paid), returned: money(r.returned), balance: balanceOf(r),
-  overdueDays: Math.max(0, daysOverdue(r.due_date, today)), createdBy: r.created_by,
+  overdueDays: Math.max(0, apDaysOverdue(r.due_date, today)), createdBy: r.created_by,
 });
 
 export async function listBills(tx: Tx, deps: Deps, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; vendorId?: string; status: 'open' | 'all' }) {

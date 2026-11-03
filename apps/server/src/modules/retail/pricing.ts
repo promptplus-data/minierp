@@ -8,7 +8,7 @@
 import type { Tx } from '@erp/db';
 import type { PosPricing } from '@erp/contracts';
 import {
-  bundleAlloc, bundleNormalPrice, bundleSetsAvailable, d, listPriceForDoc, money, pickListPrice, promoUnitPrice, qty4, resolvePrice,
+  bundleAlloc, bundleNormalPrice, bundleSetsAvailable, d, listPriceForDoc, money, pickRetailListPrice, promoUnitPrice, qty4, resolvePrice,
   type LineVat, type PriceListEntry, type PriceResolution, type VatMode,
 } from '@erp/core';
 import { can, type Ctx, type Deps } from '../../lib/context';
@@ -49,7 +49,7 @@ export async function priceFromLists(tx: Tx, customerId: string, productId: stri
   Promise<{ price: string; vatIncluded: boolean; source: 'customer' | 'group'; listId: string; listName: string } | null> {
   if (!isUuid(productId)) throw E.validation('Unknown product');
   const rows = await entryRows(tx, customerId, [productId], date);
-  const pick = pickListPrice(rows.map((r) => ({ source: r.source, unitIdx: r.unit_idx, minQty: r.min_qty, price: r.price })), unitIdx, qty);
+  const pick = pickRetailListPrice(rows.map((r) => ({ source: r.source, unitIdx: r.unit_idx, minQty: r.min_qty, price: r.price })), unitIdx, qty);
   if (!pick) return null;
   const row = rows.filter((r) => r.source === pick.source && r.unit_idx === unitIdx && d(r.min_qty).lte(d(qty)))
     .sort((a, b) => d(b.min_qty).comparedTo(d(a.min_qty)))[0]!;
@@ -170,7 +170,7 @@ export async function retailPosPricing(
       throw E.conflict(`Line ${i + 1}: the promotion is no longer running; reload prices`, { promoId: l.promoId, reason: 'PROMO_ENDED' });
     }
     const retail = unitRetailPrice(p, l.unitIdx);
-    const list = pickListPrice(entries.filter((e) => e.productId === p.id), l.unitIdx, l.qty);
+    const list = pickRetailListPrice(entries.filter((e) => e.productId === p.id), l.unitIdx, l.qty);
     const disc = discByProduct(promos, p, l.unitIdx);
     const r = resolvePrice({ retail, list, promo: disc ? { id: disc.promo.id, price: disc.price } : null });
     return {
