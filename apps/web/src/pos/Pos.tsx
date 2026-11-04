@@ -13,6 +13,7 @@ import {
 } from '../modules/retail/pos';
 import { METHOD_TH, Slip } from './Receipt';
 import { ShiftClosed, ShiftStrip } from './Shift';
+import { useTouch } from '../touch';
 
 interface CartLine { pid: string; u: number; qty: string; dval: string; dmode: 'amt' | 'pct' }
 type Method = PosSaleReq['payments'][number]['method'];
@@ -381,6 +382,14 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
   const change = cash && isNum(recv) ? d(recv).minus(d(isNum(cash.amount) ? cash.amount : 0)) : null;
   const ok = exact && lines.every((l) => isNum(l.amount) && d(l.amount).gt(0)) && (kind !== 'full' || !!custId);
   const upd = (i: number, patch: Partial<PayLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const { touchMode } = useTouch();
+  /** Touch quick-cash: exact amount, then the next 100 / 500 / 1,000 note. */
+  const quick = (() => {
+    if (!cash || !isNum(cash.amount)) return [];
+    const a = d(cash.amount);
+    const ups = [100, 500, 1000].map((n) => a.div(n).ceil().times(n));
+    return [a, ...ups].filter((v, i, all) => all.findIndex((x) => x.eq(v)) === i).slice(0, 4);
+  })();
 
   const confirm = async () => {
     setBusy(true);
@@ -435,7 +444,14 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
         {cash && (
           <div className="row" style={{ marginTop: 8 }}>
             <label className="f">รับเงินสดมา<input type="text" inputMode="decimal" value={recv} placeholder={cash.amount} onChange={(e) => setRecv(e.target.value)} /></label>
-            <div><div className="small muted">เงินทอน</div><b style={{ fontSize: 18 }}>{fmt(change && change.gt(0) ? change : 0)}</b></div>
+            <div><div className="small muted">เงินทอน</div><b style={{ fontSize: 18 }} data-testid="pay-change">{fmt(change && change.gt(0) ? change : 0)}</b></div>
+          </div>
+        )}
+        {touchMode && cash && quick.length > 0 && (
+          <div className="row" style={{ marginTop: 8 }} role="group" aria-label="รับเงินสดด่วน">
+            {quick.map((v, i) => (
+              <button type="button" key={v.toString()} className="btn" data-busy="off" data-testid={`quick-cash-${i}`} onClick={() => setRecv(v.toFixed(2).replace(/\.00$/, ''))}>{i === 0 ? 'พอดี ' : ''}฿{fmt(v)}</button>
+            ))}
           </div>
         )}
         {lines.some((l) => l.method === 'transfer' || l.method === 'promptpay') && <div className="note small" style={{ marginTop: 8 }}>ตรวจยอดเงินเข้าในแอปธนาคารของร้านก่อนกดยืนยัน</div>}

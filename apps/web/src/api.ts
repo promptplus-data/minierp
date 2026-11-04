@@ -7,6 +7,39 @@ import type { ZodType, ZodTypeDef } from 'zod';
 
 export type ErrorCode = ApiError['code'] | 'NETWORK';
 
+// ---------- request tracking (top progress bar, automatic busy buttons) ----------
+let inflight = 0;
+const inflightSubs = new Set<() => void>();
+export const getInflight = () => inflight;
+export function subscribeInflight(fn: () => void): () => void {
+  inflightSubs.add(fn);
+  return () => { inflightSubs.delete(fn); };
+}
+const bump = (n: number) => { inflight += n; inflightSubs.forEach((f) => f()); };
+
+/** Receives a promise (never rejects) for every non-GET request the moment it starts; touch/busy.ts attaches it to the clicked button. */
+type MutationTracker = (settled: Promise<void>) => void;
+let mutationTracker: MutationTracker | null = null;
+export const setMutationTracker = (fn: MutationTracker | null) => { mutationTracker = fn; };
+
+/**
+ * Every fetch of the app (api(), file exports, SCG admin client) goes through window.fetch, so tracking it there
+ * covers all screens without editing them. Installed once at import time.
+ */
+if (typeof window !== 'undefined' && !(window as { __erpFetchTracked?: boolean }).__erpFetchTracked) {
+  (window as { __erpFetchTracked?: boolean }).__erpFetchTracked = true;
+  const native = window.fetch.bind(window);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const p = native(input, init);
+    bump(1);
+    const settled = p.then(() => undefined, () => undefined);
+    void settled.then(() => bump(-1));
+    if (method !== 'GET' && method !== 'HEAD') mutationTracker?.(settled);
+    return p;
+  };
+}
+
 const TOKEN_KEY = 'erp-token';
 let token: string | null = readToken();
 

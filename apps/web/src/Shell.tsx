@@ -10,6 +10,7 @@ import { useMeta } from './data';
 import { navFor, useVisibleNav } from './modules';
 import { iconSvg } from './modules/icons';
 import { SECTIONS, type Section } from './modules/types';
+import { TouchToggle } from './touch';
 
 const I = (svg: string) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />
@@ -70,6 +71,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className="who">
             <span className={`ed ${IS_CLOUD ? 'cloud' : 'onprem'}`} data-testid="edition">{IS_CLOUD ? 'Cloud' : 'On-premise'}</span>
             <span className="uname">{user?.name}<small>{user ? ROLE_TH[user.role] : ''}</small></span>
+            <TouchToggle />
             <button className="btn sm" onClick={logout}>ออกจากระบบ</button>
           </div>
         </header>

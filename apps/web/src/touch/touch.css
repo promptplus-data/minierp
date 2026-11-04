@@ -1,0 +1,105 @@
+/* Touch mode: bigger targets, on-screen number pad / keyboard, loading indicators. Tokens come from styles.css (light + dark). */
+
+/* ===== loading: top progress bar, spinners (always on, not only in touch mode) ===== */
+.topbar{position:fixed;left:0;right:0;top:0;height:3px;z-index:100;overflow:hidden;background:color-mix(in srgb,var(--accent) 18%,transparent);pointer-events:none}
+.topbar i{display:block;height:100%;width:40%;background:var(--accent);border-radius:0 3px 3px 0;animation:tk-bar 1.1s ease-in-out infinite}
+@keyframes tk-bar{from{transform:translateX(-100%)}to{transform:translateX(260%)}}
+.spinner,:is(button,[role="button"],input)[aria-busy="true"]::before{width:1em;height:1em;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;flex:none;animation:tk-spin .7s linear infinite}
+button[aria-busy="true"]::before,[role="button"][aria-busy="true"]::before{content:"";margin-right:.45em}
+button[aria-busy="true"],[role="button"][aria-busy="true"]{cursor:progress;pointer-events:none}
+.btn[aria-busy="true"]:disabled,button[aria-busy="true"]:disabled{opacity:.8}
+.route-pending{display:flex;flex-direction:column;gap:6px}
+.route-pending .lbl{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+@keyframes tk-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  .topbar i{animation:none;width:100%;opacity:.7}
+  .spinner,:is(button,[role="button"],input)[aria-busy="true"]::before{animation:none;border-right-color:currentColor;border-style:dotted}
+}
+
+/* ===== header switch ===== */
+.touch-toggle .tt-state{font-size:11px;font-weight:700;border-radius:99px;padding:0 7px;background:var(--surface2);color:var(--muted)}
+.touch-toggle.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.touch-toggle.on .tt-state{background:var(--accent);color:var(--accent-fg)}
+
+/* ===== sheets ===== */
+.tk-sheet{position:fixed;left:0;right:0;bottom:0;z-index:70;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -10px 32px rgba(0,0,0,.22);padding:6px 8px calc(8px + env(safe-area-inset-bottom,0px));user-select:none;-webkit-user-select:none;touch-action:manipulation;animation:tk-up .14s ease-out;color:var(--fg)}
+@keyframes tk-up{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.tk-sheet{animation:none}}
+.tk-num{width:min(100%,380px);margin-inline:auto;border-radius:16px 16px 0 0;border:1px solid var(--line);border-bottom:0}
+.tk-kb{max-width:980px;margin-inline:auto;border-radius:16px 16px 0 0}
+.tk-head{display:flex;align-items:center;gap:6px;padding:2px 2px 6px}
+.tk-lbl{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2}
+.tk-lbl span{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk-lbl small{color:var(--muted);font-size:11.5px}
+.tk-mini{border:1px solid var(--line);background:var(--surface2);border-radius:8px;min-height:36px;padding:0 12px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.tk-mini.sq{min-width:44px;min-height:48px;font-size:20px}
+.tk-disp{display:flex;gap:8px;align-items:stretch;margin-bottom:8px}
+.tk-val{flex:1;min-width:0;display:block;text-align:right;font-size:32px;line-height:1.1;font-weight:700;font-variant-numeric:tabular-nums;padding:8px 12px;border-radius:10px;background:var(--surface2);border:2px solid var(--accent);min-height:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tk-val.fresh{background:var(--accent-soft)}
+.tk-ph{color:var(--muted);font-weight:400}
+.tk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.tk-key{border:1px solid var(--line);background:var(--surface);border-radius:10px;min-height:56px;font-size:22px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0 4px;touch-action:manipulation}
+.tk-key:active{background:var(--accent-soft)}
+.tk-key:disabled{opacity:.3}
+.tk-key.fn{background:var(--surface2);font-size:19px}
+.tk-key.fn.sm{font-size:15px}
+.tk-key.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.tk-key.pri:active{filter:brightness(.92)}
+.tk-key.ok{grid-column:4;grid-row:3 / span 2;font-size:20px}
+.tk-key:focus-visible,.tk-mini:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tk-row{display:flex;gap:5px;margin-bottom:5px;justify-content:center}
+.tk-key.kb{flex:1 1 0;min-width:0;min-height:46px;font-size:18px;font-weight:500}
+.tk-key.kb.wide{flex:1.5 1 0}
+.tk-key.kb.space{flex:5 1 0;font-size:14px;color:var(--muted)}
+.tk-key.kb.fn.on{background:var(--accent);color:var(--accent-fg)}
+.tk-key .cur{font-weight:800;color:var(--accent)}
+.tk-key.pri.kb{font-size:15px}
+@media (max-width:420px){.tk-row{gap:3px;margin-bottom:4px}.tk-key.kb{font-size:16px;border-radius:8px}}
+/* room for the open sheet: page and modals can scroll the focused field above it */
+html{scroll-padding-bottom:var(--sheet-h,0px)}
+html[data-sheet="open"] body{padding-bottom:var(--sheet-h)}
+html[data-sheet="open"] .ov{padding-bottom:calc(6vh + var(--sheet-h));scroll-padding-bottom:var(--sheet-h)}
+html[data-sheet="open"] .toast{bottom:calc(16px + var(--sheet-h))}
+
+/* ===== touch mode ===== */
+[data-touch="on"] :is(button,a,input,select,textarea,label,summary,[role="button"],tr.click){touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+[data-touch="on"] :is(.btn,.nav a,.nav button,.tabs button,.chips button,.tk-mini){min-height:44px}
+[data-touch="on"] .btn{padding:9px 16px}
+[data-touch="on"] .btn.sm{padding:8px 14px;font-size:14px}
+[data-touch="on"] :is(input[type=text],input[type=number],input[type=date],input[type=password],input[type=search],input[type=email],input[type=tel],select,textarea){min-height:44px;font-size:16px;padding:8px 12px}
+[data-touch="on"] input.qty{min-width:64px}
+[data-touch="on"] input[type=checkbox],[data-touch="on"] input[type=radio]{width:24px;height:24px;flex:none}
+[data-touch="on"] label.row{min-height:44px}
+[data-touch="on"] .nav :is(button,a){padding:10px 10px}
+[data-touch="on"] .tabs button{padding:10px 16px}
+[data-touch="on"] .chips button{padding:8px 16px;font-size:14px}
+[data-touch="on"] .qbtn{width:44px;height:44px;font-size:20px;border-radius:10px;flex:none}
+[data-touch="on"] .cline .ctl{gap:8px}
+[data-touch="on"] .tile{min-height:132px;padding:12px;gap:6px}
+[data-touch="on"] .tile .nm{font-size:14px}
+[data-touch="on"] .tile .pr{font-size:15px}
+[data-touch="on"] .tile:active{border-color:var(--accent);background:var(--accent-soft)}
+[data-touch="on"] td .btn,[data-touch="on"] td button.btn{margin:3px 4px 3px 0}
+[data-touch="on"] td:last-child .btn+.btn{margin-left:4px}
+[data-touch="on"] td{padding-block:10px}
+[data-touch="on"] .md .act{gap:12px;padding-top:4px}
+[data-touch="on"] .md .act .btn{min-width:104px;justify-content:center;min-height:48px}
+[data-touch="on"] .pager{gap:12px}
+[data-touch="on"] .pager .btn.sm{min-width:44px;justify-content:center}
+[data-touch="on"] .row{gap:10px}
+[data-touch="on"] :focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (min-width:701px){[data-touch="on"] .tiles{grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:12px}}
+@media (hover:none){.tile:hover{transform:none;box-shadow:none}}
+@media (max-width:700px){
+  /* keep the sticky header to two rows so a sheet never leaves the page with no room */
+  [data-touch="on"] .top .who{flex-wrap:nowrap;gap:6px}
+  [data-touch="on"] .top .who .ed{display:none}
+  [data-touch="on"] .top .who .uname{flex:1;min-width:0;text-align:left}
+  [data-touch="on"] .top .who .btn{padding:8px 10px;font-size:13px}
+  .touch-toggle .tt-state{display:none}
+  [data-touch="on"] .tile{min-height:116px}
+  [data-touch="on"] .cline .ctl{gap:6px}
+  [data-touch="on"] .cline .ctl select{max-width:84px}
+  [data-touch="on"] .cline input.qty{min-width:0;width:56px;padding-inline:6px}
+  [data-touch="on"] .cline .qbtn{width:40px}
+}

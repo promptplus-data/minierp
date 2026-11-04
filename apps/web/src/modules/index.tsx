@@ -56,7 +56,12 @@ function Guard({ owner, children }: { owner: NavItem; children: ReactNode }) {
   return visible.includes(owner) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
-const routePending = <div className="card"><div className="sk" /><div className="sk" /></div>;
+const routePending = (
+  <div className="card route-pending" role="status" aria-label="กำลังโหลดหน้า">
+    <div className="lbl"><span className="spinner" aria-hidden="true" />กำลังโหลดหน้า…</div>
+    <div className="sk" /><div className="sk" /><div className="sk" style={{ width: '60%' }} />
+  </div>
+);
 
 /** Routes outside the shop sign-in and the Shell (WebModule.publicRoutes), each in Suspense. */
 export const PUBLIC_ROUTES: RouteObject[] = MODULES.flatMap((m) => m.publicRoutes ?? []).map((r) =>

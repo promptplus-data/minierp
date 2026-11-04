@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './auth';
 import { Shell } from './Shell';
 import { MODULE_ROUTES, ModuleWraps, PUBLIC_ROUTES, useVisibleNav } from './modules';
 import { ToastProvider } from './ui';
+import { TouchProvider } from './touch';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { useMeta } from './data';
@@ -47,7 +48,7 @@ function App() {
   const meta = useMeta();
   const loc = useLocation();
   if (matchRoutes(PUBLIC_ROUTES, loc)) return <PublicRoutes />;
-  if (restoring) return <div className="lg"><div className="card lgcard"><div className="sk" /><div className="sk" /></div></div>;
+  if (restoring) return <div className="lg"><div className="card lgcard" role="status" aria-label="กำลังโหลด"><div className="sk" /><div className="sk" /></div></div>;
   if (!user) return meta.data?.needsSetup ? <Setup /> : <Login />;
   return (
     <Shell>
@@ -61,13 +62,15 @@ function App() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
-      <ToastProvider>
-        <BrowserRouter>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </BrowserRouter>
-      </ToastProvider>
+      <TouchProvider>
+        <ToastProvider>
+          <BrowserRouter>
+            <AuthProvider>
+              <App />
+            </AuthProvider>
+          </BrowserRouter>
+        </ToastProvider>
+      </TouchProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
