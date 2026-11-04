@@ -19,6 +19,7 @@ export async function logout(page: Page) {
 export async function approve(page: Page, approverName: string, pin = '1234') {
   const sel = page.getByTestId('apv-by');
   await expect(sel).toBeVisible();
+  await expect(sel.locator('option').first()).toBeAttached(); // approvers load after the modal opens
   await sel.selectOption({ label: await optionLabel(page, approverName) });
   await page.getByTestId('apv-pin').fill(pin);
   await page.getByTestId('apv-ok').click();

@@ -119,6 +119,7 @@ test('below-cost sale: manager approves the discount, owner approves below cost'
 test('full tax invoice for a customer with a tax ID', async ({ page }) => {
   await login(page, 'prae');
   await page.goto('/pos');
+  await expect(page.getByTestId('tile-SCG-AAC-75')).toBeVisible(); // catalog loaded before the barcode is typed
   await page.getByTestId('pos-search').fill('8850001000014'); // barcode of SCG-CEM-T50
   await page.getByTestId('pos-search').press('Enter');
   await page.getByTestId('tile-SCG-AAC-75').click();
