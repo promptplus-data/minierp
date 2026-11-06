@@ -24,7 +24,7 @@ interface Ctx { token: string; backWh: string; posWh: string; vendorId: string; 
 async function context(request: APIRequestContext): Promise<Ctx> {
   const token = await apiToken(request, 'charoen');
   const whs = (await call(request, token, 'get', '/api/warehouses')).items as { id: string; isPos: boolean; active: boolean }[];
-  const vendor = (await call(request, token, 'get', '/api/vendors?limit=1')).items[0];
+  const vendor = ((await call(request, token, 'get', '/api/vendors?limit=20')).items as { id: string; code: string }[]).find((v) => v.code === 'V00003')!; // purchasing.spec pays V00001
   const customers = (await call(request, token, 'get', '/api/customers?limit=20')).items as { id: string; code: string }[];
   const cement = (await call(request, token, 'get', '/api/products?q=SCG-CEM-T50&limit=1')).items[0];
   return {
@@ -219,5 +219,28 @@ test.describe.serial('document links', () => {
     await rows.first().getByRole('link').first().click();
     await expect(page).toHaveURL(new RegExp(`/scg/shops\\?q=${taxId}`));
     await expect(page.getByTestId('shops-table')).toBeVisible();
+    await page.goto('/scg/shops');
+    // and back: a shop row opens the licenses filtered by its tax id
+    await page.getByTestId('shops-table').locator('tbody tr').first().getByRole('link', { name: /license/ }).click();
+    await expect(page).toHaveURL(/\/scg\/licenses\?q=\d+/);
+    await expect(page.getByTestId('license-table')).toBeVisible();
+  });
+
+  test('AR: both customer-row actions (billing note, statement) open their dialog at desktop and phone width', async ({ page, request }) => {
+    // an open invoice so the customer has a balance and shows in the aging list
+    await call(request, c.token, 'post', '/api/sales/invoices', { source: 'direct', customerId: c.customerId, warehouseId: c.backWh, lines: [{ productId: c.cementId, unitIdx: 0, qty: '1', unitPrice: '150' }] });
+    await login(page, 'charoen');
+    await page.goto('/ar');
+    await page.getByTestId('ar-search').fill('C00001');
+    const row = page.getByTestId('ar-cust').locator('tbody tr').first();
+    await row.getByRole('button', { name: 'ออกใบวางบิล' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await row.getByRole('button', { name: 'รายการเดินบัญชี' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 390, height: 800 });
+    await row.getByRole('button', { name: 'เดินบัญชี', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
   });
 });

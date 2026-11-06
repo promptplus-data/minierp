@@ -90,7 +90,7 @@ test.describe.serial('purchasing', () => {
     await page.getByTestId('pay-wht').selectOption('3');
     await page.getByTestId('pay-save').click();
     await expect(page.getByText(/บันทึกจ่าย PV\d{4}-\d{4}/)).toBeVisible();
-    await expect(page.getByTestId('ap-payments').locator('tbody tr')).toHaveCount(1);
+    await expect(page.getByTestId('ap-payments').locator('tbody tr', { hasText: 'หจก. ทวีพัฒนาวัสดุ' })).toHaveCount(1); // other specs may have paid other vendors
     await page.getByTestId('btn-new-return').click();
     await page.getByTestId('ret-grs').getByRole('button', { name: 'เลือก' }).first().click();
     await page.getByLabel('คืน ปูนซีเมนต์ตราเสือ 50 กก.').fill('2');
