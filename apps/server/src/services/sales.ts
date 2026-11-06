@@ -79,7 +79,21 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
     voided: row.status === 'void' ? { by: row.void_by_name ?? '', at: row.void_at!.toISOString(), reason: row.void_reason ?? '' } : null,
     createdBy: row.created_by_name, ref: row.ref_no,
     ...(row.type === 'ABB' ? { posId: await posIdOf(tx, row.device_id) } : {}),
+    related: await relatedDocs(tx, row.id),
   };
+}
+
+/** Documents made from this one: CN / full tax invoice (docs.ref_doc_id), billing notes, receipts and delivery orders of a tax invoice. */
+async function relatedDocs(tx: Tx, docId: string): Promise<NonNullable<SalesDoc['related']>> {
+  const r = await tx.query<{ no: string; kind: 'CN' | 'INV' | 'BN' | 'RE' | 'DO'; status: 'active' | 'void' }>(
+    `select no, type kind, status from docs where ref_doc_id = $1 and type in ('CN','INV')
+     union all select bn.no, 'BN', bn.status from ar_billing_note_lines l join ar_billing_notes bn on bn.id = l.bn_id where l.invoice_doc_id = $1
+     union all select r.no, 'RE', r.status from ar_receipt_lines l join ar_receipts r on r.id = l.receipt_id where l.invoice_doc_id = $1
+     union all select dl.no, 'DO', dl.status from sales_deliveries dl where dl.inv_doc_id = $1
+     union all select dl.no, 'DO', dl.status from sales_invoice_deliveries x join sales_deliveries dl on dl.id = x.delivery_id where x.invoice_doc_id = $1
+     order by 1`, [docId]);
+  const seen = new Set<string>();
+  return r.rows.filter((x) => (seen.has(x.no) ? false : (seen.add(x.no), true)));
 }
 
 /** Lower-cased haystack for the returns bill picker (REQ-M08-06): bill no, customer, member, products, amount. */
@@ -288,13 +302,26 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
   return { doc: await getDoc(tx, ctx, no), replay: false };
 }
 
-export async function listDocs(tx: Tx, q: PageQuery & { type?: string }) {
+export interface DocFilters { type?: string; from?: string; to?: string; productId?: string; customerId?: string; createdBy?: string; category?: string }
+
+export async function listDocs(tx: Tx, q: PageQuery & DocFilters) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
   if (q.type) {
     params.push(q.type);
     where.push(`d.type = $${params.length}`);
+  }
+  // report drill-down filters (REQ-M11): the sales report row opens the documents behind it
+  if (q.from) { params.push(q.from); where.push(`d.date >= $${params.length}::date`); }
+  if (q.to) { params.push(q.to); where.push(`d.date <= $${params.length}::date`); }
+  if (q.customerId === '-') where.push(`d.customer_id is null`);
+  else if (q.customerId) { params.push(q.customerId); where.push(`d.customer_id = $${params.length}::uuid`); }
+  if (q.createdBy) { params.push(q.createdBy); where.push(`d.created_by = $${params.length}::uuid`); }
+  if (q.productId) { params.push(q.productId); where.push(`exists (select 1 from doc_lines x where x.doc_id = d.id and x.product_id = $${params.length}::uuid)`); }
+  if (q.category) {
+    params.push(q.category === '-' ? '' : q.category);
+    where.push(`exists (select 1 from doc_lines x join products p on p.id = x.product_id where x.doc_id = d.id and coalesce(p.category,'') = $${params.length})`);
   }
   for (const w of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
     params.push(`%${likeEscape(w)}%`);

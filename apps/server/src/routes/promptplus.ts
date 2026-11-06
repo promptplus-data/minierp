@@ -12,7 +12,7 @@ export function promptPlusRoutes(app: FastifyInstance, authed: Authed, client = 
   const tenantCode = async (tx: { query: (q: string) => Promise<{ rows: { code: string }[] }> }) => (await tx.query(`select code from tenants`)).rows[0]!.code;
 
   app.get('/api/promptplus/incoming', authed(async (tx, ctx, req) => {
-    requireAny(ctx, ['inv.receive', 'inv.view']);
+    requireAny(ctx, ['inv.receive', 'inv.view'], { readOnly: true });
     pageQuery.parse(req.query);
     if (!client.configured) return { items: [], nextCursor: null };
     return { items: await client.incoming(await tenantCode(tx)), nextCursor: null };

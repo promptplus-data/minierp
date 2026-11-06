@@ -32,15 +32,20 @@ const toCount = (r: CountRow) => ({
   submittedAt: r.submitted_at?.toISOString() ?? null, adjustRequestNo: r.adjust_request_no, lines: r.lines, counted: r.counted,
 });
 
-export async function listCounts(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string }) {
+export async function listCounts(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string }) {
   requireAny(ctx, ['inv.count', 'inv.adjApprove']);
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
-  let where = '';
+  const conds: string[] = [];
+  if (q.q?.trim()) {
+    params.push(`%${likeEscape(q.q.trim())}%`);
+    conds.push(`(c.no ilike $1 or coalesce(c.adjust_request_no,'') ilike $1)`);
+  }
   if (cur) {
     params.push(cur[0], cur[1]);
-    where = `where (c.opened_at, c.id) < ($1::timestamptz, $2::uuid)`;
+    conds.push(`(c.opened_at, c.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
   }
+  const where = conds.length ? `where ${conds.join(' and ')}` : '';
   params.push(q.limit + 1);
   const r = await tx.query<CountRow>(`${COUNT_SELECT} ${where} order by c.opened_at desc, c.id desc limit $${params.length}`, params);
   return pageOf(r.rows, q.limit, (x) => [x.opened_at.toISOString(), x.id], toCount);

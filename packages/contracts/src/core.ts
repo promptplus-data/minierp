@@ -142,6 +142,8 @@ export const SalesDoc = z.object({
   voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(), createdBy: z.string(), ref: z.string().nullable(),
   /** ABB only: POS ID of the machine (module C registry, REQ-M01-07 / REQ-M07-04). */
   posId: z.string().nullable().optional(),
+  /** Documents made from this one (credit note, full tax invoice, billing note, receipt, delivery), so the source lists its downstream docs. */
+  related: z.array(z.object({ no: z.string(), kind: z.enum(['CN', 'INV', 'BN', 'RE', 'DO']), status: z.enum(['active', 'void']) })).optional(),
 });
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });

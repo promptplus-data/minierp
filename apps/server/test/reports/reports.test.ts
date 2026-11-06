@@ -247,7 +247,7 @@ describe('home dashboard (REQ-M11-04)', () => {
     expect(r.body.lowStock.count).toBeGreaterThan(0);
     expect(r.body.lowStock.items.map((x: { name: string }) => x.name)).toContain('สีรองพื้นปูนใหม่ 9 ลิตร');
     expect(r.body.approvals.count).toBe(1);
-    expect(r.body.approvals.items[0].path).toBe('/stock');
+    expect(r.body.approvals.items[0].path).toBe('/stock?req=RQ2610-0002');
     expect(r.body.month.gp).not.toBeNull();
     expect(r.body.arDue).toMatchObject({ count: 0 });
     expect(r.body.sources.map((x: { key: string }) => x.key)).toContain('grPending');

@@ -86,14 +86,14 @@ export async function dashboard(tx: Tx, deps: Deps, ctx: Ctx): Promise<ReportDas
       const r = await tx.query<{ no: string; reason: string; created_at: Date; n: number }>(
         `select no, reason, created_at, count(*) over ()::int n from adjust_requests where status = 'pending' order by created_at limit 5`);
       count += r.rows[0]?.n ?? 0;
-      items.push(...r.rows.map((x) => ({ kind: 'stock-adjust', no: x.no, label: `ขอปรับยอดสต็อก · ${x.reason}`, at: x.created_at.toISOString(), path: '/stock' })));
+      items.push(...r.rows.map((x) => ({ kind: 'stock-adjust', no: x.no, label: `ขอปรับยอดสต็อก · ${x.reason}`, at: x.created_at.toISOString(), path: `/stock?req=${encodeURIComponent(x.no)}` })));
     }
     if (canLeave) {
       const r = await tx.query<{ no: string; name: string; days: string; created_at: Date; n: number }>(
         `select l.no, e.name, l.days::text, l.created_at, count(*) over ()::int n from leave_requests l join employees e on e.id = l.employee_id
           where l.status = 'pending' order by l.created_at limit 5`);
       count += r.rows[0]?.n ?? 0;
-      items.push(...r.rows.map((x) => ({ kind: 'leave', no: x.no, label: `ใบลา ${x.name} · ${Number(x.days)} วัน`, at: x.created_at.toISOString(), path: '/leave' })));
+      items.push(...r.rows.map((x) => ({ kind: 'leave', no: x.no, label: `ใบลา ${x.name} · ${Number(x.days)} วัน`, at: x.created_at.toISOString(), path: `/leave?no=${encodeURIComponent(x.no)}` })));
     }
     approvals = { count, items: items.sort((a, b) => a.at.localeCompare(b.at)).slice(0, 5) };
   }

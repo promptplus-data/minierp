@@ -4,7 +4,7 @@
  * FOR UPDATE), purchase discounts (BR-19) and the purchasing settings.
  */
 import type { Tx } from '@erp/db';
-import type { ApBill, ApPayment, GrDetail, GrSummary, VendorReturn } from '@erp/contracts';
+import type { ApBill, ApBillDetail, ApPayment, GrDetail, GrSummary, VendorReturn } from '@erp/contracts';
 import {
   addDays, agingSummary, checkAllocations, d, apDaysOverdue, fmtTHB, money, qty4, sum, termLabel, vendorReturnAmounts, whtAmount,
   type BillDiscountMode, type PaymentTerm,
@@ -84,8 +84,11 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
     `select g.id, g.line_no, g.product_id, p.name, g.warehouse_id, g.unit_idx, g.unit_name, g.unit_factor::text, g.qty::text, g.returned_base_qty::text, g.unit_price::text, g.amount::text
        from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = $1 order by g.line_no`, [g.id]);
   const cost = seeCost(ctx);
+  const rets = await tx.query<{ no: string; date: string; total: string }>(
+    `select no, to_char(date,'YYYY-MM-DD') date, total::text from vendor_returns where gr_no = $1 order by created_at`, [g.no]);
   return {
     ...toGr(g, ctx),
+    returns: rets.rows.map((x) => ({ no: x.no, date: x.date, total: money(x.total) })),
     billDiscount: cost && g.discount != null ? money(g.discount) : null,
     lines: lines.rows.map((l) => ({
       id: l.id, lineNo: l.line_no, productId: l.product_id, name: l.name, warehouseId: l.warehouse_id, unitIdx: l.unit_idx, unitName: l.unit_name,
@@ -140,6 +143,23 @@ export async function listBills(tx: Tx, deps: Deps, ctx: Ctx, q: { q?: string; l
   const r = await tx.query<BillRow>(`${BILL_SELECT} where ${where.join(' and ')} order by ${order[0]} ${order[1]}, b.id ${order[1]} limit $${params.length}`, params);
   const today = deps.today();
   return pageOf(r.rows, q.limit, (x) => (q.status === 'open' ? [x.due_date, x.id] : [x.created_at.toISOString(), x.id]), (x) => toBill(x, today));
+}
+
+/** One bill with the payment vouchers and vendor returns that settled it (so the bill, PV and return link both ways). */
+export async function getBill(tx: Tx, deps: Deps, ctx: Ctx, no: string): Promise<ApBillDetail> {
+  requirePerm(ctx, 'fin.ap', { readOnly: true });
+  const r = await tx.query<BillRow>(`${BILL_SELECT} where b.no = $1`, [no]);
+  const b = r.rows[0];
+  if (!b) throw E.notFound(`ไม่พบบิลเจ้าหนี้ ${no}`);
+  const pays = await tx.query<{ no: string; date: string; amount: string }>(
+    `select p.no, to_char(p.date,'YYYY-MM-DD') date, a.amount::text from ap_payment_allocs a join ap_payments p on p.id = a.payment_id where a.bill_id = $1 order by p.created_at`, [b.id]);
+  const rets = await tx.query<{ no: string; date: string; total: string; ap_applied: string }>(
+    `select r.no, to_char(r.date,'YYYY-MM-DD') date, r.total::text, r.ap_applied::text from vendor_returns r where r.ap_bill_id = $1 order by r.created_at`, [b.id]);
+  return {
+    ...toBill(b, deps.today()),
+    payments: pays.rows.map((x) => ({ no: x.no, date: x.date, amount: money(x.amount) })),
+    returns: rets.rows.map((x) => ({ no: x.no, date: x.date, total: money(x.total), apApplied: money(x.ap_applied) })),
+  };
 }
 
 export async function aging(tx: Tx, deps: Deps, ctx: Ctx) {

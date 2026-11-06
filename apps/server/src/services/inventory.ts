@@ -236,7 +236,7 @@ export async function requestAdjust(tx: Tx, deps: Deps, ctx: Ctx, req: { warehou
   return toAdj((await tx.query<AdjRow>(`${ADJ_SELECT} where a.id = $1`, [r.rows[0]!.id])).rows[0]!);
 }
 
-export async function listAdjust(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string; status?: string }) {
+export async function listAdjust(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string; status?: string; q?: string }) {
   requireAny(ctx, ['inv.adj', 'inv.adjApprove', 'inv.count']);
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
@@ -244,6 +244,10 @@ export async function listAdjust(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: 
   if (q.status) {
     params.push(q.status);
     where.push(`a.status = $${params.length}`);
+  }
+  if (q.q?.trim()) {
+    params.push(`%${q.q.trim().replace(/[\\%_]/g, '\\$&')}%`);
+    where.push(`a.no ilike $${params.length}`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);

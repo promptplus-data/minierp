@@ -87,7 +87,12 @@ export function opsRoutes(app: FastifyInstance, deps: Deps, authed: Authed): voi
   });
   app.get('/api/sales/docs', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['sales.doc', 'pos.sell', 'fin.ar'], { readOnly: true });
-    return listDocs(tx, pageQuery.extend({ type: z.enum(['ABB', 'INV', 'RC', 'CN', 'QT', 'SO', 'DO']).optional() }).parse(req.query));
+    const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
+    const id = z.union([z.string().uuid(), z.literal('-')]).optional();
+    return listDocs(tx, pageQuery.extend({
+      type: z.enum(['ABB', 'INV', 'RC', 'CN', 'QT', 'SO', 'DO']).optional(), from: ymd, to: ymd,
+      productId: z.string().uuid().optional(), customerId: id, createdBy: z.string().uuid().optional(), category: z.string().max(100).optional(),
+    }).parse(req.query));
   }));
   app.get('/api/sales/docs/:no', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['sales.doc', 'pos.sell', 'fin.ar'], { readOnly: true });

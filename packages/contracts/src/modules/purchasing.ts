@@ -39,7 +39,11 @@ export const GrLineView = z.object({
   id: z.string(), lineNo: z.number().int(), productId: z.string(), name: z.string(), warehouseId: z.string(),
   unitIdx: z.number().int(), unitName: z.string(), unitFactor: Dec, qty: Dec, returnedQty: Dec, unitPrice: Dec.nullable(), amount: Dec.nullable(),
 });
-export const GrDetail = GrSummary.extend({ lines: z.array(GrLineView), billDiscount: Dec.nullable() });
+/** Documents made from this receipt: vendor returns (`returns`). The AP bill is `apBillNo` on the summary. */
+export const GrDetail = GrSummary.extend({
+  lines: z.array(GrLineView), billDiscount: Dec.nullable(),
+  returns: z.array(z.object({ no: z.string(), date: Ymd, total: Dec })).default([]),
+});
 export type GrDetail = z.infer<typeof GrDetail>;
 export const GrListQuery = pageQuery.extend({ returnable: QBool.optional() });
 
@@ -51,6 +55,12 @@ export const ApBill = z.object({
   overdueDays: z.number().int(), createdBy: z.string(),
 });
 export type ApBill = z.infer<typeof ApBill>;
+/** One AP bill with what settled it: payment vouchers and vendor returns (REQ-M18, links both ways). */
+export const ApBillDetail = ApBill.extend({
+  payments: z.array(z.object({ no: z.string(), date: Ymd, amount: Dec })),
+  returns: z.array(z.object({ no: z.string(), date: Ymd, total: Dec, apApplied: Dec })),
+});
+export type ApBillDetail = z.infer<typeof ApBillDetail>;
 export const ApBillQuery = pageQuery.extend({ vendorId: z.string().optional(), status: z.enum(['open', 'all']).default('all') });
 export const ApAging = z.object({
   asOf: Ymd,
@@ -221,6 +231,7 @@ export const purchasingRoutes = {
   grReceipt: 'GET /api/purchasing/receipts/:no',
 
   apBills: 'GET /api/ap/bills',
+  apBill: 'GET /api/ap/bills/:no',
   apAging: 'GET /api/ap/aging',
   apPayments: 'GET /api/ap/payments',
   apPaymentCreate: 'POST /api/ap/payments',
