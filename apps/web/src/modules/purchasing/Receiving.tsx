@@ -12,6 +12,7 @@ import { useCatalog, useMeta, useVendors, useWarehouses } from '../../data';
 import { ReceiptModal } from '../../stock/forms';
 import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { ageText, downloadErrorRows, GrAlertBanner, readAsBase64, STATUS_PILL, STATUS_TH, thOrDash, useDashboard } from './shared';
+import { ErrorBanner } from '../../errors';
 
 const FIELD_TH: Record<(typeof DELIVERY_FIELDS)[number], string> = {
   product_code: 'รหัสสินค้า', product_name: 'ชื่อสินค้า', qty: 'จำนวน', unit: 'หน่วย', unit_price: 'ราคาต่อหน่วย',
@@ -71,7 +72,7 @@ function DraftList({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="row" style={{ marginBottom: 10 }}>
         <input type="search" placeholder="ค้นหาเลขที่ใบส่งของ ใบสั่งซื้อ หรือผู้แทนจำหน่าย" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} aria-label="ค้นหาใบรับของร่าง" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       <div className="tw">
         <table data-testid="draft-table">
           <thead><tr><th>ใบส่งของ (DN)</th><th className="pu-hide-sm">ใบสั่งซื้อ</th><th>ผู้แทนจำหน่าย</th><th className="pu-hide-sm">วันที่ส่ง</th><th className="n">รายการ</th><th>ค้าง</th><th /></tr></thead>
@@ -319,7 +320,7 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
       setErr(errText(e));
     }
   };
-  if (!g) return <Modal onClose={onClose} wide label="ตรวจรับของ"><h3>ตรวจรับของ</h3>{r.isError ? <div className="err">{errText(r.error)}</div> : <><div className="sk" /><div className="sk" /></>}</Modal>;
+  if (!g) return <Modal onClose={onClose} wide label="ตรวจรับของ"><h3>ตรวจรับของ</h3>{r.isError ? <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} /> : <><div className="sk" /><div className="sk" /></>}</Modal>;
   const mismatch = g.lines.some((l) => !d(l.receivedQty).eq(d(l.qty)) || d(l.damagedQty).gt(0));
   const amount = g.lines.reduce((a, l) => a.plus(l.unitCost ? d(l.unitCost).times(d(l.receivedQty).minus(d(l.damagedQty))) : 0), d(0));
   const invNo = inv ?? g.invoiceNo ?? '';

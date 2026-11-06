@@ -8,6 +8,7 @@ import { d } from '@erp/core';
 import { ApiFail, api } from '../../api';
 import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useToast } from '../../ui';
 import { PAY_STATUS, admErr, periodTH, prevPeriod, thisPeriod, todayYmd } from './common';
+import { ErrorBanner } from '../../errors';
 
 type Editable = 'days' | 'ot' | 'allowance' | 'tax' | 'advance';
 
@@ -99,7 +100,7 @@ export default function Payroll() {
           </span>
         )}
       </div>
-      {run.isError && !(run.error instanceof ApiFail && run.error.code === 'NOT_FOUND') && <div className="note bad small">{admErr(run.error)}</div>}
+      {run.isError && !(run.error instanceof ApiFail && run.error.code === 'NOT_FOUND') && <ErrorBanner error={run.error} onRetry={() => void run.refetch()} retrying={run.isFetching} />}
       {!period && !runs.isLoading && <div className="empty">ยังไม่มีการทำเงินเดือน กด "ทำเงินเดือนงวดใหม่"</div>}
       {period && (
         <div className="tw">
@@ -223,7 +224,7 @@ export function LabourCost() {
           </tbody>
         </table>
       </div>
-      {cost.isError && <div className="note bad small">{admErr(cost.error)}</div>}
+      {cost.isError && <ErrorBanner error={cost.error} onRetry={() => void cost.refetch()} retrying={cost.isFetching} />}
       <p className="small muted">ค่าใช้จ่ายพนักงาน = ค่าจ้างรวม + ประกันสังคมส่วนนายจ้าง ใช้ในรายงานกำไรขาดทุนของร้าน (REQ-M11-06) · ระบบไม่ยื่น ภ.ง.ด.1 / สปส. แทนร้าน</p>
     </>
   );

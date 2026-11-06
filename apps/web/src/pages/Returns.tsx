@@ -9,6 +9,7 @@ import { useAuth } from '../auth';
 import { useShift, useWarehouses } from '../data';
 import { Slip } from '../pos/Receipt';
 import { ApprovalModal, fmt, fq, Modal, Pager, Pill, ReasonField, reasonInit, reasonText, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput } from '../ui';
+import { ErrorBanner, checkFields } from '../errors';
 
 export default function Returns() {
   const { can } = useAuth();
@@ -97,7 +98,7 @@ function BillPicker({ onPick }: { onPick: (no: string) => void }) {
         </select>
       </div>
       <div style={{ marginTop: 8 }} className={res.isFetching && !res.isFetchingNextPage ? 'pgload' : undefined}>
-        {res.isError && <div className="note bad small">{errText(res.error)}</div>}
+        {res.isError && <ErrorBanner error={res.error} onRetry={() => void res.refetch()} retrying={res.isFetching} />}
         {res.isLoading ? <table><tbody><SkeletonRows cols={5} rows={3} /></tbody></table> : items.length ? (
           <div className="tw">
             <table data-testid="bill-results">
@@ -190,8 +191,17 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
     }
   };
   const save = () => {
-    if (!picked.length) return setErr('ใส่จำนวนที่รับคืนอย่างน้อย 1 รายการ');
-    if (overMax) return setErr('จำนวนรับคืนเกินที่ขายไปหักที่คืนแล้ว');
+    const rowChecks: Record<string, string | false> = Object.fromEntries(rows.map((x): [string, string | false] => {
+      const v = qty[x.l.id];
+      const typed = !!v && v.trim() !== '';
+      return [`rq.${x.l.id}`, typed && !valid(v) ? 'จำนวนต้องเป็นตัวเลขมากกว่า 0' : valid(v) && d(v!).gt(x.max) ? `เกินที่คืนได้ (สูงสุด ${fq(x.max.toString())})` : false];
+    }));
+    if (!picked.length) {
+      const typedAny = rows.some((x) => (qty[x.l.id] ?? '').trim() !== '');
+      checkFields({ ...rowChecks, ...(rows[0] && !typedAny ? { [`rq.${rows[0].l.id}`]: 'ใส่จำนวนที่รับคืนอย่างน้อย 1 รายการ' } : {}) });
+      return setErr('ใส่จำนวนที่รับคืนอย่างน้อย 1 รายการ');
+    }
+    if (!checkFields(rowChecks)) return setErr('จำนวนรับคืนไม่ถูกต้อง ดูช่องสีแดง');
     if (reasonText(reason) === null) return setErr('เลือก "อื่น ๆ" แล้ว ต้องพิมพ์เหตุผลก่อน');
     setErr('');
     if (needPin) setApv(true);
@@ -219,7 +229,7 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
       {src && doc.isLoading && <div className="sk" />}
-      {src && doc.isError && <div className="note bad small">{errText(doc.error)}</div>}
+      {src && doc.isError && <ErrorBanner error={doc.error} onRetry={() => void doc.refetch()} retrying={doc.isFetching} />}
       {s && (
         <>
           <div className="tw">
@@ -233,7 +243,7 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
                     <tr key={x.l.id}>
                       <td>{x.l.name}</td><td className="n">{fq(x.l.qty)} {x.l.unitName}</td><td className="n">{fq(x.l.returnedQty)}</td><td className="n">{fmt(x.unit)}</td>
                       <td className="n">
-                        <input className={`qty${bad ? ' bad' : ''}`} type="text" inputMode="decimal" placeholder="0" value={v} aria-label={`คืน ${x.l.name}`} data-testid={`rq-${i}`}
+                        <input className={`qty${bad ? ' bad' : ''}`} type="text" inputMode="decimal" placeholder="0" data-field={`rq.${x.l.id}`} data-line={x.l.id} value={v} aria-label={`คืน ${x.l.name}`} data-testid={`rq-${i}`}
                           onChange={(e) => setQty((qs) => ({ ...qs, [x.l.id]: e.target.value }))} />
                         <div className="small muted">สูงสุด {fq(x.max)}</div>
                       </td>
@@ -260,7 +270,7 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act">
         <button className="btn" onClick={onClose}>ยกเลิก</button>
-        <button className="btn pri" disabled={!s || !picked.length || busy} onClick={save} data-testid="ret-save">{needPin ? 'บันทึกรับคืน (ขออนุมัติ)' : 'บันทึกรับคืน'}</button>
+        <button className="btn pri" disabled={!s || busy} onClick={save} data-testid="ret-save">{needPin ? 'บันทึกรับคืน (ขออนุมัติ)' : 'บันทึกรับคืน'}</button>
       </div>
     </Modal>
   );

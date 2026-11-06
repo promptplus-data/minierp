@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { useCatalog, useWarehouses } from '../../data';
 import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, thTime, useCursorPager, useDebounced, useToast } from '../../ui';
 import './retail.css';
+import { ErrorBanner } from '../../errors';
 
 const STATUS: Record<Mo['status'], [string, 'ok' | 'warn' | 'mut']> = { wip: ['กำลังผลิต · เบิกแล้ว', 'warn'], closed: ['ผลิตเสร็จ · รับเข้าแล้ว', 'ok'], cancelled: ['ยกเลิก', 'mut'] };
 const isNum = (s: string) => /^\d+(\.\d+)?$/.test(s.trim());
@@ -64,7 +65,7 @@ function MoList() {
         </div>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขที่ หรือสินค้าที่ผลิต" aria-label="ค้นหาใบสั่งผลิต" />
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="mo-table">
           <thead><tr><th>เลขที่</th><th>วันที่</th><th>สินค้าที่ผลิต</th><th className="n">แผน</th><th>สถานะ</th>{see && <th className="n">ทุนวัตถุดิบ</th>}<th className="n">ได้จริง (ดี / เสีย)</th><th className="n">ผลได้</th>{see && <th className="n">ทุน/ชิ้น</th>}<th>โดย</th><th /></tr></thead>
@@ -124,7 +125,7 @@ function MoModal({ onClose, onDone }: { onClose: () => void; onDone: (m: Mo) => 
   const sug = useQuery({
     queryKey: ['mo-suggest', productId, dplan, issueWh],
     enabled: !!productId && !!issueWh && isNum(dplan) && d(dplan).gt(0),
-    queryFn: () => api('POST', '/api/mos/suggest', { body: { productId, planQty: dplan, issueWarehouseId: issueWh }, schema: MoSuggest }),
+    queryFn: () => api('POST', '/api/mos/suggest', { body: { productId, planQty: dplan, issueWarehouseId: issueWh }, schema: MoSuggest, silent: true }),
   });
   const lines = (sug.data?.lines ?? []).map((l) => ({ ...l, issue: iss[l.productId] ?? l.stdQty }));
   const short = lines.filter((l) => isNum(l.issue) && d(l.issue).gt(d(l.available)));
@@ -172,7 +173,7 @@ function MoModal({ onClose, onDone }: { onClose: () => void; onDone: (m: Mo) => 
           </tbody>
         </table>
       </div>
-      {sug.isError && <div className="note bad small">{errText(sug.error)}</div>}
+      {sug.isError && <ErrorBanner error={sug.error} onRetry={() => void sug.refetch()} retrying={sug.isFetching} />}
       {see && estMat && isNum(plan) && d(plan).gt(0) && (
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">ค่าแรง/ค่าใช้จ่ายตามสูตร {fmt(labour ?? 0)} ต่อหน่วย (แก้ได้ตอนปิดใบสั่งผลิต)</span>

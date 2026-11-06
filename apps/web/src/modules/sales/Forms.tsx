@@ -7,6 +7,7 @@ import {
 } from '@erp/contracts';
 import { d } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
+import { checkFields, qtyMsg } from '../../errors';
 import { useAuth } from '../../auth';
 import { useCustomers, useMeta, useWarehouses } from '../../data';
 import { fmt, fq, Modal, Pill, ShortageModal, th, useToast, type Shortage } from '../../ui';
@@ -82,7 +83,12 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   };
   const save = useGatedSave(
     async (extra) => {
-      if (!customerId) throw new ApiFail(400, 'VALIDATION', 'เลือกลูกค้าก่อน', null);
+      const real = lines.filter((l) => l.productId || l.name.trim());
+      if (!checkFields({
+        customerId: !customerId && 'เลือกลูกค้าก่อน',
+        ...Object.fromEntries(lines.flatMap((l, i) => (l.productId || l.name.trim() ? [[`lines.${i}.qty`, qtyMsg(l.qty)]] : []))),
+        ...(real.length ? {} : { 'lines.0.productId': 'เลือกสินค้าหรือพิมพ์ชื่อรายการอย่างน้อย 1 แถว' }),
+      })) throw new ApiFail(400, 'VALIDATION', 'ตรวจสอบช่องที่เป็นสีแดง', null);
       if (mode === 'QT' && edit) return { kind: 'QT', no: (await api<SalesQuote>('PATCH', `/api/sales/quotations/${edit.no}`, { body: body(extra) })).no };
       if (mode === 'QT') return { kind: 'QT', no: (await api<SalesQuote>('POST', '/api/sales/quotations', { body: body(extra) })).no };
       if (mode === 'SO') return { kind: 'SO', no: (await api<SalesOrder>('POST', '/api/sales/orders', { body: body(extra) })).no };
@@ -94,7 +100,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       onClose();
       nav(`/b2b/${r.kind.toLowerCase()}/${encodeURIComponent(r.no)}`);
     },
-    (e) => { if (e.code === 'INSUFFICIENT_STOCK') { setShort(e.details as Shortage[]); return true; } return false; },
+    (e) => { if (e.code === 'INSUFFICIENT_STOCK') { e.claim(); setShort(e.details as Shortage[]); return true; } return false; },
   );
   const freeLeft = mode !== 'QT' && lines.some((l) => !l.productId);
   const title = mode === 'QT' ? (edit ? `แก้ไขใบเสนอราคา ${edit.no}` : 'สร้างใบเสนอราคา') : mode === 'SO' ? (quote ? `แปลง ${quote.no} เป็นใบสั่งขาย` : 'สร้างใบสั่งขาย') : 'ออกใบกำกับภาษี (ขายตรง)';
@@ -163,7 +169,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       {freeLeft && <div className="note warn small">มีรายการที่ยังไม่มีในระบบ ต้องเลือกสินค้าในระบบให้ครบทุกแถวก่อนบันทึก (ใบสั่งขายตรวจต้นทุนและตัดสต็อก)</div>}
       {mode === 'QT' && <label className="f">หมายเหตุท้ายใบเสนอราคา<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ราคานี้รวมค่าขนส่งในเขตอำเภอ · ส่งภายใน 3 วันหลังยืนยัน" /></label>}
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <label className="f" style={{ maxWidth: 180 }}>ส่วนลดท้ายบิล (บาท)<input type="number" min="0" step="0.01" value={billDisc} onChange={(e) => setBillDisc(e.target.value)} /></label>
+        <label className="f" style={{ maxWidth: 180 }}>ส่วนลดท้ายบิล (บาท)<input type="number" min="0" step="0.01" name="billDiscount" value={billDisc} onChange={(e) => setBillDisc(e.target.value)} /></label>
         <div className="tot" style={{ minWidth: 240 }}>
           <span className="muted">รวมหลังส่วนลด</span><span>{fmt(d(t.net).minus(d(billDisc || 0)))}</span>
           {vatMode !== 'none' && <><span className="muted">VAT 7%{vatMode === 'inc' ? ' (รวมในราคา)' : ''}</span><span>{fmt(t.vat)}</span></>}
@@ -224,7 +230,7 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
       onClose();
       nav(`/b2b/do/${encodeURIComponent(r.no)}`);
     } catch (e) {
-      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK') setShort(e.details as Shortage[]);
+      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK' && e.claim()) setShort(e.details as Shortage[]);
       else setErr(errText(e));
     } finally {
       setBusy(false);
@@ -250,7 +256,7 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
                 {s.lines.map((l, i) => (
                   <tr key={l.id}>
                     <td>{l.name}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fq(l.delivered)}</td><td className="n">{fq(l.remaining)}</td>
-                    <td className="n"><input className={`qty${d(qty[l.id] || 0).gt(d(l.remaining)) ? ' bad' : ''}`} type="number" min="0" step="any" value={qty[l.id] ?? ''} disabled={!d(l.remaining).gt(0)} onChange={(e) => setQty({ ...qty, [l.id]: e.target.value })} aria-label={`ส่งรอบนี้ ${l.name}`} data-testid={`dlv-qty-${i}`} /></td>
+                    <td className="n"><input className={`qty${d(qty[l.id] || 0).gt(d(l.remaining)) ? ' bad' : ''}`} type="number" min="0" step="any" data-line={l.id} value={qty[l.id] ?? ''} disabled={!d(l.remaining).gt(0)} onChange={(e) => setQty({ ...qty, [l.id]: e.target.value })} aria-label={`ส่งรอบนี้ ${l.name}`} data-testid={`dlv-qty-${i}`} /></td>
                   </tr>
                 ))}
               </tbody>

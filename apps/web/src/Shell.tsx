@@ -7,6 +7,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_TH, useAuth } from './auth';
 import { IS_CLOUD } from './cloud';
 import { useMeta } from './data';
+import { QueryFailBar } from './errors';
 import { navFor, useVisibleNav } from './modules';
 import { iconSvg } from './modules/icons';
 import { SECTIONS, type Section } from './modules/types';
@@ -75,7 +76,7 @@ export function Shell({ children }: { children: ReactNode }) {
             <button className="btn sm" onClick={logout}>ออกจากระบบ</button>
           </div>
         </header>
-        <main className="content">{children}</main>
+        <main className="content"><QueryFailBar />{children}</main>
       </div>
     </div>
   );

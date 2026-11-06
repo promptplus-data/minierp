@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { d, fmtTHB, type Num } from '@erp/core';
+import { isErrorText, isPendingFailure } from './api';
 import { useApprovers, useCatalog, useWarehouses } from './data';
 
 // ---------- formatting ----------
@@ -41,17 +42,24 @@ export function useDebounced<T>(value: T, ms = 250): T {
 const ToastCtx = createContext<(msg: string) => void>(() => {});
 export const useToast = () => useContext(ToastCtx);
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; err: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   const show = useCallback((m: string) => {
-    setMsg(m);
+    if (isPendingFailure(m)) return; // the error dialog says exactly this
+    const err = isErrorText(m); // text that came from errText(e): red, with an icon, stays longer
+    setMsg({ text: m, err });
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setMsg(null), 3200);
+    timer.current = setTimeout(() => setMsg(null), err ? 8000 : 3200);
   }, []);
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      {msg && <div className="toast" role="status">{msg}</div>}
+      {msg && (
+        <div className={`toast${msg.err ? ' bad' : ''}`} role={msg.err ? 'alert' : 'status'}>
+          {msg.err && <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M15 9l-6 6M9 9l6 6" /></svg>}
+          <span>{msg.text}</span>
+        </div>
+      )}
     </ToastCtx.Provider>
   );
 }
@@ -128,16 +136,18 @@ export function ApprovalModal({ ownerOnly, title, label, onSubmit, onClose }: {
   const [by, setBy] = useState('');
   const [pin, setPin] = useState('');
   const [err, setErr] = useState('');
+  const [pinBad, setPinBad] = useState(false);
   const [busy, setBusy] = useState(false);
   const who = by || list[0]?.id || '';
   const go = async () => {
     if (!who) return setErr('ไม่มีผู้อนุมัติ');
-    if (!pin) return setErr('ใส่ PIN ก่อน');
+    if (!pin) { setPinBad(true); return setErr('ใส่ PIN ก่อน'); }
     setBusy(true);
     setErr('');
+    setPinBad(false);
     try {
       const e = await onSubmit({ approverUserId: who, pin });
-      if (e) setErr(e);
+      if (e) { setErr(e); setPinBad(/PIN/.test(e)); }
     } finally {
       setBusy(false);
     }
@@ -153,10 +163,15 @@ export function ApprovalModal({ ownerOnly, title, label, onSubmit, onClose }: {
         </select>
       </label>
       <label className="f">PIN
-        <input type="password" inputMode="numeric" autoComplete="off" maxLength={8} placeholder="••••" value={pin} autoFocus
-          onChange={(e) => setPin(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void go(); }} data-testid="apv-pin" />
+        <input type="password" inputMode="numeric" autoComplete="off" maxLength={8} placeholder="••••" value={pin} autoFocus name="pin"
+          aria-invalid={pinBad || undefined} onChange={(e) => { setPin(e.target.value); setPinBad(false); setErr(''); }} onKeyDown={(e) => { if (e.key === 'Enter') void go(); }} data-testid="apv-pin" />
       </label>
-      {err && <div className="err" role="alert">{err}</div>}
+      {err && (
+        <div className="errbox" role="alert">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M15 9l-6 6M9 9l6 6" /></svg>
+          <span>{err}</span>
+        </div>
+      )}
       <div className="act">
         <button className="btn" onClick={onClose}>ยกเลิก</button>
         <button className="btn pri" onClick={() => void go()} disabled={busy} data-testid="apv-ok">อนุมัติ</button>

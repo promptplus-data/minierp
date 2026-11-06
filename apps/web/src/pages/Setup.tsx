@@ -2,6 +2,7 @@
 import { useState, type FormEvent } from 'react';
 import { LoginRes } from '@erp/contracts';
 import { api, errText } from '../api';
+import { ErrorBox, checkFields, requiredMsg, taxIdMsg } from '../errors';
 import { useAuth } from '../auth';
 
 export default function Setup() {
@@ -13,10 +14,11 @@ export default function Setup() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!f.shop.trim() || !f.name.trim() || !f.username.trim()) return setErr('กรอกชื่อร้าน ชื่อเจ้าของ และชื่อผู้ใช้');
-    if (f.password.length < 6) return setErr('รหัสผ่านอย่างน้อย 6 ตัวอักษร');
-    if (f.password !== f.password2) return setErr('รหัสผ่านสองช่องไม่ตรงกัน');
-    if (!/^\d{4,6}$/.test(f.pin)) return setErr('PIN อนุมัติเป็นตัวเลข 4–6 หลัก');
+    if (!checkFields({
+      'shop.name': requiredMsg(f.shop, 'ชื่อร้าน'), 'shop.taxId': taxIdMsg(f.taxId), 'owner.name': requiredMsg(f.name, 'ชื่อเจ้าของร้าน'), 'owner.username': requiredMsg(f.username, 'ชื่อผู้ใช้'),
+      'owner.password': f.password.length < 6 && 'รหัสผ่านอย่างน้อย 6 ตัวอักษร', password2: f.password !== f.password2 && 'รหัสผ่านสองช่องไม่ตรงกัน',
+      'owner.pin': !/^\d{4,6}$/.test(f.pin) && 'PIN อนุมัติเป็นตัวเลข 4–6 หลัก',
+    })) return setErr('ตรวจสอบช่องที่เป็นสีแดง');
     setBusy(true);
     setErr('');
     try {
@@ -43,15 +45,15 @@ export default function Setup() {
           </div>
         </div>
         <div className="note small" style={{ margin: '14px 0' }}>เครื่องหลักยังไม่มีข้อมูลร้าน สร้างร้านและบัญชีเจ้าของร้านก่อนเริ่มใช้งาน ทำได้ครั้งเดียวจากเครื่องหลักเท่านั้น</div>
-        <label className="f">ชื่อร้าน<input type="text" value={f.shop} onChange={(e) => set('shop', e.target.value)} autoFocus /></label>
-        <label className="f" style={{ marginTop: 8 }}>เลขประจำตัวผู้เสียภาษี<input type="text" inputMode="numeric" value={f.taxId} onChange={(e) => set('taxId', e.target.value)} /></label>
+        <label className="f">ชื่อร้าน<input type="text" data-field="shop.name" value={f.shop} onChange={(e) => set('shop', e.target.value)} autoFocus /></label>
+        <label className="f" style={{ marginTop: 8 }}>เลขประจำตัวผู้เสียภาษี<input type="text" inputMode="numeric" data-field="shop.taxId" value={f.taxId} onChange={(e) => set('taxId', e.target.value)} /></label>
         <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={f.vat} onChange={(e) => set('vat', e.target.checked)} /> จดทะเบียนภาษีมูลค่าเพิ่ม (VAT)</label>
-        <label className="f" style={{ marginTop: 12 }}>ชื่อเจ้าของร้าน<input type="text" value={f.name} onChange={(e) => set('name', e.target.value)} /></label>
-        <label className="f" style={{ marginTop: 8 }}>ชื่อผู้ใช้<input type="text" autoComplete="username" value={f.username} onChange={(e) => set('username', e.target.value)} /></label>
-        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" autoComplete="new-password" value={f.password} onChange={(e) => set('password', e.target.value)} /></label>
-        <label className="f" style={{ marginTop: 8 }}>ยืนยันรหัสผ่าน<input type="password" autoComplete="new-password" value={f.password2} onChange={(e) => set('password2', e.target.value)} /></label>
-        <label className="f" style={{ marginTop: 8 }}>PIN อนุมัติ (4–6 หลัก)<input type="password" inputMode="numeric" maxLength={6} value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>
-        <div className="err" role="alert" style={{ minHeight: 18, marginTop: 6 }} data-testid="setup-error">{err}</div>
+        <label className="f" style={{ marginTop: 12 }}>ชื่อเจ้าของร้าน<input type="text" data-field="owner.name" value={f.name} onChange={(e) => set('name', e.target.value)} /></label>
+        <label className="f" style={{ marginTop: 8 }}>ชื่อผู้ใช้<input type="text" autoComplete="username" data-field="owner.username" value={f.username} onChange={(e) => set('username', e.target.value)} /></label>
+        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" autoComplete="new-password" data-field="owner.password" value={f.password} onChange={(e) => set('password', e.target.value)} /></label>
+        <label className="f" style={{ marginTop: 8 }}>ยืนยันรหัสผ่าน<input type="password" autoComplete="new-password" data-field="password2" value={f.password2} onChange={(e) => set('password2', e.target.value)} /></label>
+        <label className="f" style={{ marginTop: 8 }}>PIN อนุมัติ (4–6 หลัก)<input type="password" inputMode="numeric" maxLength={6} data-field="owner.pin" value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>
+        <ErrorBox testId="setup-error">{err}</ErrorBox>
         <button className="btn pri" style={{ width: '100%', justifyContent: 'center' }} type="submit" disabled={busy}>{busy ? 'กำลังสร้างร้าน…' : 'สร้างร้านและเข้าสู่ระบบ'}</button>
         <p className="small muted" style={{ marginTop: 12, marginBottom: 0 }}>ย้ายเครื่องหรือเครื่องเดิมเสีย? <a href="/restore">กู้คืนข้อมูลร้านจากข้อมูลสำรองบน cloud</a></p>
       </form>

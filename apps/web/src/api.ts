@@ -81,7 +81,10 @@ const THAI: Record<ErrorCode, string> = {
   NETWORK: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจสอบเครือข่ายแล้วลองใหม่',
 };
 
+export const baseMessage = (code: ErrorCode): string => THAI[code];
+
 const LOGIN_REASON: Record<string, string> = {
+  DISABLED: 'บัญชีนี้ถูกปิดใช้งาน เข้าระบบไม่ได้ ติดต่อผู้ดูแลระบบ',
   BAD_CREDENTIALS: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
   LOCKED: 'บัญชีถูกล็อกเพราะใส่รหัสผิด 5 ครั้ง ให้เจ้าของร้านปลดล็อกให้',
   RESIGNED: 'ผู้ใช้นี้ลาออกแล้ว เข้าระบบไม่ได้',
@@ -102,7 +105,16 @@ const FORBIDDEN_REASON: Record<string, string> = {
   OWNER_ONLY: 'เฉพาะเจ้าของร้านเท่านั้นที่ทำรายการนี้ได้',
 };
 
+/** Thai texts for module-specific details.reason values; screens' modules register theirs once (admin/common.tsx). */
+const MODULE_REASONS: Record<string, string> = {};
+export const registerReasons = (m: Record<string, string>) => { Object.assign(MODULE_REASONS, m); };
+
 export class ApiFail extends Error {
+  /** The response's x-request-id (support quotes it). */
+  requestId?: string;
+  method = 'GET';
+  path = '';
+  private own = false;
   constructor(
     readonly status: number,
     readonly code: ErrorCode,
@@ -112,6 +124,12 @@ export class ApiFail extends Error {
     super(thaiMessage(code, details, serverMessage));
     this.name = 'ApiFail';
   }
+  /**
+   * A screen that shows this failure itself (shortage modal, owner PIN flow, ...) calls claim() in its catch block;
+   * the app-wide error dialog then stays closed. Unclaimed mutation failures open the dialog (errors.tsx).
+   */
+  claim(): true { this.own = true; return true; }
+  get claimed() { return this.own; }
   /** details.<key> when details is an object. */
   detail<T = unknown>(key: string): T | undefined {
     return this.details && typeof this.details === 'object' ? ((this.details as Record<string, unknown>)[key] as T) : undefined;
@@ -123,12 +141,39 @@ function thaiMessage(code: ErrorCode, details: unknown, serverMessage: string): 
   if (code === 'UNAUTHORIZED' && typeof d.reason === 'string' && LOGIN_REASON[d.reason]) return LOGIN_REASON[d.reason]!;
   if (typeof d.approvalError === 'string' && APPROVAL_REASON[d.approvalError]) return APPROVAL_REASON[d.approvalError]!;
   if (code === 'FORBIDDEN' && typeof d.reason === 'string' && FORBIDDEN_REASON[d.reason]) return FORBIDDEN_REASON[d.reason]!;
+  if (code !== 'UNAUTHORIZED' && typeof d.reason === 'string' && MODULE_REASONS[d.reason]) return MODULE_REASONS[d.reason]!;
   if (code === 'VALIDATION' || code === 'CONFLICT') return `${THAI[code]} (${serverMessage})`;
   return THAI[code];
 }
 
+// ---------- failure reporting (error dialog) ----------
+export interface FailReport { fail: ApiFail; method: string; path: string }
+let failListener: ((r: FailReport) => void) | null = null;
+export const setFailListener = (fn: typeof failListener) => { failListener = fn; };
+/** Messages of mutation failures that may still open the dialog this tick; the toast skips them (the dialog says it). */
+const pendingMsgs = new Set<string>();
+export const isPendingFailure = (msg: string) => pendingMsgs.has(msg);
+
+/**
+ * Called for every failed request by api() and admApi(). Failed GETs are not reported (screens show an inline banner).
+ * A mutation failure opens the dialog one task later, unless a screen claimed it in its catch block, the request was
+ * made with `silent`, or it is a sign-in / PIN failure that the form itself shows.
+ */
+export function reportFailure(fail: ApiFail, method: string, path: string, silent = false): void {
+  fail.method = method;
+  fail.path = path;
+  if (method === 'GET' || method === 'HEAD') return;
+  const d = fail.details && typeof fail.details === 'object' ? (fail.details as Record<string, unknown>) : {};
+  if (silent || typeof d.approvalError === 'string' || path.endsWith('/auth/login')) return;
+  pendingMsgs.add(fail.message);
+  setTimeout(() => {
+    pendingMsgs.delete(fail.message);
+    if (!fail.claimed) failListener?.({ fail, method, path });
+  }, 0);
+}
+
 type Query = Record<string, string | number | boolean | null | undefined>;
-interface Opts<T> { body?: unknown; query?: Query; schema?: ZodType<T, ZodTypeDef, unknown> }
+interface Opts<T> { body?: unknown; query?: Query; schema?: ZodType<T, ZodTypeDef, unknown>; /** Never open the error dialog for this request's failure (background calls, flows that render the error themselves). */ silent?: boolean }
 
 export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path: string, opts: Opts<T> = {}): Promise<T> {
   const qs = opts.query
@@ -141,7 +186,9 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path: s
   try {
     res = await fetch(path + (qs ? `?${qs}` : ''), { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
   } catch (err) {
-    throw new ApiFail(0, 'NETWORK', String(err), null);
+    const fail = new ApiFail(0, 'NETWORK', String(err), null);
+    reportFailure(fail, method, path, opts.silent);
+    throw fail;
   }
   const text = await res.text();
   let json: unknown = null;
@@ -153,7 +200,9 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path: s
   if (!res.ok) {
     const e = ApiError.safeParse(json);
     const fail = e.success ? new ApiFail(res.status, e.data.code, e.data.message, e.data.details) : new ApiFail(res.status, 'INTERNAL', text.slice(0, 200), null);
+    fail.requestId = res.headers.get('x-request-id') ?? undefined;
     if (fail.code === 'UNAUTHORIZED' && token && !path.endsWith('/auth/login')) onUnauthorized();
+    reportFailure(fail, method, path, opts.silent);
     throw fail;
   }
   if (!opts.schema) return json as T;
@@ -165,4 +214,12 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path: s
   return parsed.data;
 }
 
-export const errText = (e: unknown): string => (e instanceof ApiFail ? e.message : e instanceof Error ? e.message : String(e));
+/** Text of any thrown value. Remembered, so a toast that shows exactly this text can tell it is an error (red, longer). */
+const errTexts = new Set<string>();
+export const isErrorText = (m: string) => errTexts.has(m);
+export const errText = (e: unknown): string => {
+  const m = e instanceof Error ? e.message : String(e);
+  errTexts.add(m);
+  if (errTexts.size > 200) errTexts.delete(errTexts.values().next().value as string);
+  return m;
+};

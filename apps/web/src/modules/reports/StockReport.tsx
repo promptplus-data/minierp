@@ -6,6 +6,7 @@ import { api, errText } from '../../api';
 import { useWarehouses } from '../../data';
 import { fmt, fq, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../../ui';
 import { DownloadButtons, Field, bkkToday } from './shared';
+import { ErrorBanner } from '../../errors';
 
 export default function StockReport() {
   const whs = useWarehouses();
@@ -37,7 +38,7 @@ export default function StockReport() {
         <span className="sp" />
         <DownloadButtons path="/api/reports/stock" query={filt} testId="stock-dl" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       {t && (
         <div className="rp-kpis" data-testid="stock-kpis">
           <div className="card"><div className="l">สินค้า (รายการ)</div><div className="v">{t.products}</div></div>

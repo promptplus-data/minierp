@@ -10,6 +10,7 @@ import { fmt, fq, th } from '../../ui';
 import { ApDueCard, GrAlertBanner } from '../purchasing/shared';
 import { monthTh } from './shared';
 import './reports.css';
+import { ErrorBanner } from '../../errors';
 
 const useDash = () => useQuery({ queryKey: ['rp', 'dashboard'], queryFn: () => api('GET', '/api/reports/dashboard', { schema: ReportDashboard }), staleTime: 30_000 });
 
@@ -58,7 +59,7 @@ export default function Home() {
   const q = useDash();
   const dash = q.data;
   const k = (c: string) => ({ '--k': `var(--c-${c})` }) as CSSProperties;
-  if (q.isError) return <div className="note bad">{errText(q.error)}</div>;
+  if (q.isError) return <ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />;
   if (!dash) return <div className="hm-grid" aria-busy="true">{[0, 1, 2, 3].map((i) => <div key={i} className="card"><div className="sk" /><div className="sk" style={{ width: '60%' }} /></div>)}</div>;
   const a = dash.approvals;
   return (

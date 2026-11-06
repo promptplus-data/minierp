@@ -9,6 +9,7 @@ import { useAuth } from '../../auth';
 import { ApprovalModal, fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput } from '../../ui';
 import { DeliveryModal, DocFormModal } from './Forms';
 import { DLV_STATUS, METHOD_TH, Paper, PrintModal, SOURCE_TH, StatusPill, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
+import { ErrorBanner } from '../../errors';
 
 export const TEMPLATES = ['30/40/30', '50/50', '100%', 'custom'] as const;
 export type Template = (typeof TEMPLATES)[number];
@@ -124,7 +125,7 @@ export default function Projects() {
             {[['active', 'กำลังดำเนินการ'], ['', 'ทั้งหมด'], ['void', 'ยกเลิก']].map(([k, l]) => <span key={k} role="button" tabIndex={0} className={status === k ? 'on' : ''} onClick={() => setStatus(k!)} onKeyDown={(e) => { if (e.key === 'Enter') setStatus(k!); }}>{l}</span>)}
           </div>
         </div>
-        {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+        {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
         <div className="tw">
           <table data-testid="pj-table">
             <thead><tr><th>โครงการ</th><th>ลูกค้า</th><th className="n">มูลค่า</th><th className="n">ส่งแล้ว</th><th className="n">วางบิลแล้ว</th><th className="n">รับเงินแล้ว</th><th className="n">คงค้าง</th></tr></thead>
@@ -202,7 +203,7 @@ export function ProjectDetail() {
   const [m, setM] = useState<PM>(null);
   const q = useQuery({ queryKey: ['project', id], queryFn: () => api('GET', `/api/sales/projects/${encodeURIComponent(id)}`, { schema: SalesProject }) });
   if (q.isLoading) return <div className="card"><div className="sk" /><div className="sk" /><div className="sk" /></div>;
-  if (!q.data) return <div className="card"><div className="note bad">{errText(q.error)}</div><p><Link to="/projects">‹ กลับไปรายการโครงการ</Link></p></div>;
+  if (!q.data) return <div className="card"><ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /><p><Link to="/projects">‹ กลับไปรายการโครงการ</Link></p></div>;
   const p = q.data;
   const live = p.status === 'active';
   const canPj = can('sales.project') === 1;

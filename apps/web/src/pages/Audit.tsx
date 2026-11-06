@@ -4,6 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { AuditEntry, page } from '@erp/contracts';
 import { api, errText } from '../api';
 import { Pager, Pill, SkeletonRows, thTime, useCursorPager, useDebounced, useToast, type PillKind } from '../ui';
+import { ErrorBanner } from '../errors';
 
 const ACT: Record<string, [string, PillKind]> = {
   login: ['เข้าสู่ระบบ', 'mut'], 'login-failed': ['เข้าไม่สำเร็จ', 'bad'], locked: ['ล็อกบัญชี', 'bad'], unlock: ['ปลดล็อก', 'acc'],
@@ -37,7 +38,7 @@ export default function Audit() {
       <div className="row" style={{ marginBottom: 10 }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขที่เอกสาร ผู้ใช้ การกระทำ หรือรายละเอียด" style={{ flex: 1, minWidth: 180 }} aria-label="ค้นหา log" />
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="audit-table">
           <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การกระทำ</th><th>เรื่อง</th><th>เลขที่</th><th>รายละเอียด</th></tr></thead>

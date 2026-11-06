@@ -7,6 +7,7 @@ import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { fmt, fq, th } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart, monthTh, thisMonth } from './shared';
+import { ErrorBanner } from '../../errors';
 
 export function CostReport() {
   const [month, setMonth] = useState(thisMonth());
@@ -19,7 +20,7 @@ export function CostReport() {
         <span className="sp" />
         <DownloadButtons path="/api/reports/costs" query={{ month }} testId="cost-dl" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       {r.isLoading && <div className="sk" />}
       {x && (
         <div className="tw">
@@ -58,7 +59,7 @@ export function PromoReport() {
         {!!can('promo.manage') && <Link className="btn sm" to="/promos" data-testid="promo-link">จัดการโปรโมชั่น / รายงานฉบับเต็ม</Link>}
         <DownloadButtons path="/api/reports/promotions" query={{ from, to }} testId="promo-dl" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       <div className="tw">
         <table data-testid="promo-table">
           <thead><tr><th>โปรโมชั่น</th><th className="n">บิล</th><th className="n">ชุดที่ขาย</th><th className="n">ยอดขายก่อน VAT</th><th className="n">ส่วนลดที่ให้</th>{cost && <><th className="n">ต้นทุน</th><th className="n">กำไร</th></>}<th className="n">ยอดช่วงก่อนโปร</th></tr></thead>

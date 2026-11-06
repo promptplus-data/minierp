@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { useCatalog, useCustomers } from '../../data';
 import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import './retail.css';
+import { ErrorBanner } from '../../errors';
 
 export const GROUP_TH: Record<string, string> = { retail: 'ลูกค้าปลีก', whole: 'ร้านค้าส่ง', contr: 'ผู้รับเหมา' };
 const isNum = (s: string) => /^\d+(\.\d+)?$/.test(s.trim());
@@ -37,7 +38,7 @@ export default function PriceLists() {
         <button className="btn pri" disabled={!manage} onClick={() => setEdit('new')} data-testid="pl-new">+ สร้าง price list</button>
       </div>
       <div className="rt-filters"><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อ price list หรือลูกค้า" aria-label="ค้นหา price list" /></div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="pl-table">
           <thead><tr><th>ชื่อ</th><th>ใช้กับ</th><th className="n">รายการ</th><th>ราคา</th><th>ช่วงเวลา</th><th>สถานะ</th><th>สร้างโดย</th><th /></tr></thead>

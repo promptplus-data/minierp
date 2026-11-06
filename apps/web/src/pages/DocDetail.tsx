@@ -8,6 +8,7 @@ import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
 import { DOC_TITLE, METHOD_TH, Slip } from '../pos/Receipt';
 import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useToast, type ApprovalInput } from '../ui';
+import { ErrorBanner } from '../errors';
 
 export default function DocDetail() {
   const { no = '' } = useParams();
@@ -16,7 +17,7 @@ export default function DocDetail() {
   const [slip, setSlip] = useState(false);
   const q = useQuery({ queryKey: ['doc', no], queryFn: () => api('GET', `/api/sales/docs/${encodeURIComponent(no)}`, { schema: SalesDoc }) });
   if (q.isLoading) return <div className="card"><div className="sk" /><div className="sk" /><div className="sk" /></div>;
-  if (q.isError || !q.data) return <div className="card"><div className="note bad">{errText(q.error)}</div><p><Link to="/sales">‹ กลับไปเอกสารขาย</Link></p></div>;
+  if (q.isError || !q.data) return <div className="card"><ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /><p><Link to="/sales">‹ กลับไปเอกสารขาย</Link></p></div>;
   const doc = q.data;
   const t = doc.totals;
   const canVoid = !!can('sales.voidDoc') && doc.status === 'active' && doc.type !== 'CN';
@@ -106,7 +107,7 @@ function VoidModal({ doc, onClose }: { doc: SalesDoc; onClose: () => void }) {
     } catch (e) {
       if (e instanceof ApiFail && e.detail('approvalError')) return e.message;
       setApv(false);
-      if (e instanceof ApiFail && e.code === 'DOWNSTREAM_FIRST') setBlocked(e.detail<string[]>('docs') ?? []);
+      if (e instanceof ApiFail && e.code === 'DOWNSTREAM_FIRST' && e.claim()) setBlocked(e.detail<string[]>('docs') ?? []);
       else setErr(errText(e));
       return null;
     }

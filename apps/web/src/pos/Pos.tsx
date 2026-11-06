@@ -14,6 +14,7 @@ import {
 import { METHOD_TH, Slip } from './Receipt';
 import { ShiftClosed, ShiftStrip } from './Shift';
 import { useTouch } from '../touch';
+import { ErrorBanner } from '../errors';
 
 interface CartLine { pid: string; u: number; qty: string; dval: string; dmode: 'amt' | 'pct' }
 type Method = PosSaleReq['payments'][number]['method'];
@@ -33,7 +34,7 @@ export const unitListPrice = (p: Product, u: number) => {
 export default function Pos() {
   const shift = useShift();
   if (shift.isLoading) return <div className="card"><div className="sk" /><div className="sk" /></div>;
-  if (shift.isError) return <div className="card"><div className="note bad">{errText(shift.error)}</div></div>;
+  if (shift.isError) return <div className="card"><ErrorBanner error={shift.error} onRetry={() => void shift.refetch()} retrying={shift.isFetching} /></div>;
   if (!shift.data) return <ShiftClosed />;
   return (
     <>
@@ -176,6 +177,8 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
 
   /** Routes a failed attempt to the right modal (mockup: needPerm / guardSale / blockShort). */
   const route = (f: ApiFail) => {
+    // these four have their own screen below; everything else (incl. SHIFT_REQUIRED) falls through to the error dialog
+    if ((f.code === 'FORBIDDEN' && f.detail('need') === 'discountApproval') || f.code === 'BELOW_COST' || f.code === 'INSUFFICIENT_STOCK' || (f.code === 'CONFLICT' && f.detail('reason') === 'PROMO_ENDED')) f.claim();
     if (f.code === 'FORBIDDEN' && f.detail('need') === 'discountApproval') return setStage({ k: 'apvDisc', pct: f.detail<string>('pct'), cap: f.detail('cap') });
     if (f.code === 'BELOW_COST') return setStage({ k: 'apvBelow', lines: f.detail<BelowLine[]>('lines') ?? [] });
     if (f.code === 'INSUFFICIENT_STOCK') return setStage({ k: 'short', list: (f.details as Shortage[]) ?? [] });
@@ -187,7 +190,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
     if (f.code === 'SHIFT_REQUIRED') {
       void qc.invalidateQueries({ queryKey: ['shift'] });
       setStage(null);
-      return toast(f.message);
+      return; // the error dialog says "ต้องเปิดกะก่อน"
     }
     setPayErr(f.message);
     setStage({ k: 'pay' });
@@ -299,7 +302,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
                 <div className="ctl">
                   <select value={l.u} aria-label="หน่วย" onChange={(e) => upd({ u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>
                   <button className="qbtn" aria-label="ลด" onClick={() => upd({ qty: d(isNum(l.qty) ? l.qty : '1').minus(1).lte(0) ? '1' : d(l.qty).minus(1).toString() })}>−</button>
-                  <input className={`qty${over || !isNum(l.qty) ? ' bad' : ''}`} type="text" inputMode="decimal" value={l.qty} aria-label="จำนวน" onChange={(e) => upd({ qty: e.target.value })} data-testid={`qty-${i}`} />
+                  <input className={`qty${over || !isNum(l.qty) ? ' bad' : ''}`} type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.qty} aria-label="จำนวน" onChange={(e) => upd({ qty: e.target.value })} data-testid={`qty-${i}`} />
                   <button className="qbtn" aria-label="เพิ่ม" onClick={() => upd({ qty: d(isNum(l.qty) ? l.qty : '0').plus(1).toString() })}>+</button>
                   <span className="small muted">@{fmt(x.price)}</span>
                   {x.lp.source !== 'retail' && <span className="row small" style={{ gap: 4 }} title={x.lp.promo?.name}><Pill k="ok">{x.lp.promo ? 'โปร' : 'ราคาลูกค้า'}</Pill><s className="muted">{fmt(x.lp.retail)}</s></span>}
@@ -325,7 +328,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
             onSets={(v) => setBcart((c) => c.map((y, j) => (j === i ? { ...y, sets: v } : y)))} onRemove={() => setBcart((c) => c.filter((_, j) => j !== i))} />
         ))}
         <div className="row" style={{ marginTop: 10 }}>
-          <label className="f" style={{ flex: 1 }}>ส่วนลดท้ายบิล (บาท)<input type="text" inputMode="decimal" value={billDisc} placeholder="0" onChange={(e) => setBillDisc(e.target.value)} data-testid="bill-disc" /></label>
+          <label className="f" style={{ flex: 1 }}>ส่วนลดท้ายบิล (บาท)<input type="text" inputMode="decimal" name="billDiscount" value={billDisc} placeholder="0" onChange={(e) => setBillDisc(e.target.value)} data-testid="bill-disc" /></label>
         </div>
         <div className="tot">
           <span className="muted">รวมเป็นเงิน</span><span>{fmt(totals.sub)}</span>
@@ -413,7 +416,7 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
           {!abbAllowed && <div className="note warn small" style={{ marginTop: 6 }} data-testid="abb-off">{abbNote}</div>}
           {kind === 'full' && (
             <label className="f" style={{ marginTop: 8 }}>ลูกค้า (ต้องมีเลขผู้เสียภาษี)
-              <select value={custId} onChange={(e) => setCust(e.target.value)}>{custList.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.taxId}</option>)}</select>
+              <select name="customerId" value={custId} onChange={(e) => setCust(e.target.value)}>{custList.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.taxId}</option>)}</select>
             </label>
           )}
         </div>
@@ -422,7 +425,7 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
           <div className="small muted" style={{ marginBottom: 6 }}>ประเภทเอกสาร</div>
           <b>ใบเสร็จรับเงิน</b> <span className="small muted">ร้านไม่จด VAT จึงไม่ออกใบกำกับภาษี</span>
           <label className="f" style={{ marginTop: 8 }}>ลูกค้า (ไม่บังคับ)
-            <select value={custId} onChange={(e) => setCust(e.target.value)}><option value="">ลูกค้าทั่วไป</option>{custList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <select name="customerId" value={custId} onChange={(e) => setCust(e.target.value)}><option value="">ลูกค้าทั่วไป</option>{custList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
           </label>
         </div>
       )}
@@ -433,7 +436,7 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
             <select value={l.method} onChange={(e) => upd(i, { method: e.target.value as Method })} aria-label={`วิธีชำระ ${i + 1}`} data-testid={`pm-${i}`}>
               {(['cash', 'transfer', 'promptpay', 'card'] as Method[]).map((m) => <option key={m} value={m}>{METHOD_TH[m]}</option>)}
             </select>
-            <input type="text" inputMode="decimal" value={l.amount} onChange={(e) => upd(i, { amount: e.target.value })} style={{ width: 140 }} aria-label={`จำนวนเงิน ${i + 1}`} data-testid={`pa-${i}`} />
+            <input type="text" inputMode="decimal" data-field={`payments.${i}.amount`} value={l.amount} onChange={(e) => upd(i, { amount: e.target.value })} style={{ width: 140 }} aria-label={`จำนวนเงิน ${i + 1}`} data-testid={`pa-${i}`} />
             {lines.length > 1 && <button className="btn sm bad" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>ลบ</button>}
           </div>
         ))}
@@ -443,7 +446,7 @@ function PayModal({ total, vat, err, onClose, onPay, defaultCustomer, abbAllowed
         }}>+ แยกชำระอีกวิธี</button>
         {cash && (
           <div className="row" style={{ marginTop: 8 }}>
-            <label className="f">รับเงินสดมา<input type="text" inputMode="decimal" value={recv} placeholder={cash.amount} onChange={(e) => setRecv(e.target.value)} /></label>
+            <label className="f">รับเงินสดมา<input type="text" inputMode="decimal" name="received" value={recv} placeholder={cash.amount} onChange={(e) => setRecv(e.target.value)} /></label>
             <div><div className="small muted">เงินทอน</div><b style={{ fontSize: 18 }} data-testid="pay-change">{fmt(change && change.gt(0) ? change : 0)}</b></div>
           </div>
         )}

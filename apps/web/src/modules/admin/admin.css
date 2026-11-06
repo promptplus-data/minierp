@@ -57,3 +57,17 @@ input.qty.w56{width:56px}input.qty.w74{width:74px}
 .adm-cal .d .n{font-weight:600;color:var(--muted)}
 .adm-cal .ev{border-radius:5px;padding:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--ok-soft);color:var(--ok)}
 .adm-cal .ev.pending{background:var(--warn-soft);color:var(--warn)}
+
+/* SCG admin accounts: one card per admin on a phone, so the status and the buttons are never off-screen */
+@media (max-width:600px){
+  table.admt thead{display:none}
+  table.admt tbody tr{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:10px 0;border-bottom:1px solid var(--line)}
+  table.admt td{border:0;padding:0}
+  table.admt td.c-name{font-weight:600;grid-column:1;grid-row:1}
+  table.admt td.c-st{text-align:right;grid-column:2;grid-row:1}
+  table.admt td.c-user,table.admt td.c-role,table.admt td.c-last,table.admt td.c-act{grid-column:1/-1}
+  table.admt td.c-last::before{content:"เข้าใช้ล่าสุด ";color:var(--muted)}
+  table.admt td.c-act{margin-top:6px}
+  table.admt td.c-act .row{justify-content:flex-start!important}
+  table.admt td.c-act .small{text-align:left!important}
+}

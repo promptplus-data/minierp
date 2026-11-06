@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { fmt, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../../ui';
 import { AbbInvoiceModal, DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } from './Forms';
 import { balPill, DLV_STATUS, QT_STATUS, SalesSettingsModal, SOURCE_TH, StatusPill, VoidPill } from './shared';
+import { ErrorBanner } from '../../errors';
 
 type Tab = 'qt' | 'so' | 'do' | 'inv' | 'cn';
 const TABS: [Tab, string][] = [['qt', 'ใบเสนอราคา'], ['so', 'ใบสั่งขาย'], ['do', 'ใบส่งของ'], ['inv', 'ใบกำกับภาษี'], ['cn', 'ใบลดหนี้']];
@@ -141,7 +142,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
   }
   return (
     <>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid={`b2b-table-${tab}`}>
           <thead>{head}</thead>

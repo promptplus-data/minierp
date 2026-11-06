@@ -7,6 +7,7 @@ import { api, errText } from '../api';
 import { useAuth } from '../auth';
 import { productPage } from '../data';
 import { fmt, Modal, Pager, Pill, SkeletonRows, useCursorPager, useDebounced, useToast } from '../ui';
+import { ErrorBanner, checkFields, requiredMsg } from '../errors';
 
 const PAGE = 20;
 
@@ -39,7 +40,7 @@ export default function Products() {
       <div className="row" style={{ marginBottom: 10 }}>
         <input type="search" placeholder="ค้นหาชื่อสินค้า รหัส หรือบาร์โค้ด" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} aria-label="ค้นหาสินค้า" data-testid="product-search" />
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="product-table">
           <thead>
@@ -88,10 +89,17 @@ function ProductModal({ product, onClose }: { product: Product | null; onClose: 
   const num = (s: string) => /^\d+(\.\d+)?$/.test(s.trim());
 
   const save = async () => {
-    if (!f.sku.trim() || !f.name.trim()) return setErr('กรอกรหัสและชื่อสินค้า');
-    if (!num(f.price) || !num(f.reorderPoint)) return setErr('ราคาและจุดสั่งซื้อต้องเป็นตัวเลข');
-    if (units.some((u) => !u.name.trim() || !num(u.factor) || d(u.factor).lte(0) || (u.price && !num(u.price)))) return setErr('หน่วยนับต้องมีชื่อ และตัวคูณมากกว่า 0');
-    if (!d(units[0]!.factor).eq(1)) return setErr('หน่วยแรกต้องเป็นหน่วยหลัก (ตัวคูณ 1)');
+    const unitChecks: Record<string, string | false> = {};
+    units.forEach((u, i) => {
+      unitChecks[`units.${i}.name`] = requiredMsg(u.name, 'ชื่อหน่วย');
+      unitChecks[`units.${i}.factor`] = !num(u.factor) || d(u.factor).lte(0) ? 'ตัวคูณต้องมากกว่า 0' : i === 0 && !d(u.factor).eq(1) ? 'หน่วยแรกต้องเป็นหน่วยหลัก (ตัวคูณ 1)' : false;
+      unitChecks[`units.${i}.price`] = !!u.price && !num(u.price) && 'ราคาต้องเป็นตัวเลข';
+    });
+    if (!checkFields({
+      sku: requiredMsg(f.sku, 'รหัสสินค้า'), name: requiredMsg(f.name, 'ชื่อสินค้า'),
+      price: !num(f.price) && 'ราคาต้องเป็นตัวเลข เช่น 120.00', reorderPoint: !num(f.reorderPoint) && 'จุดสั่งซื้อต้องเป็นตัวเลข',
+      ...unitChecks,
+    })) return;
     const body = {
       ...f, sku: f.sku.trim(), name: f.name.trim(), barcode: f.barcode.trim() || null, price: f.price.trim(), reorderPoint: f.reorderPoint.trim(),
       units: units.map((u) => ({ name: u.name.trim(), factor: u.factor.trim(), ...(u.price.trim() ? { price: u.price.trim() } : {}) })),
@@ -117,14 +125,14 @@ function ProductModal({ product, onClose }: { product: Product | null; onClose: 
     <Modal onClose={onClose} wide label="สินค้า">
       <h3>{product ? `แก้ไขสินค้า · ${product.sku}` : 'เพิ่มสินค้า'}</h3>
       <div className="fgrid">
-        <label className="f">รหัสสินค้า (SKU)<input type="text" value={f.sku} onChange={(e) => set('sku', e.target.value)} data-testid="pf-sku" /></label>
-        <label className="f">ชื่อสินค้า<input type="text" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="pf-name" /></label>
-        <label className="f">หมวดหมู่<input type="text" value={f.category} onChange={(e) => set('category', e.target.value)} /></label>
-        <label className="f">บาร์โค้ด<input type="text" value={f.barcode} onChange={(e) => set('barcode', e.target.value)} /></label>
+        <label className="f">รหัสสินค้า (SKU)<input type="text" name="sku" value={f.sku} onChange={(e) => set('sku', e.target.value)} data-testid="pf-sku" /></label>
+        <label className="f">ชื่อสินค้า<input type="text" name="name" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="pf-name" /></label>
+        <label className="f">หมวดหมู่<input type="text" name="category" value={f.category} onChange={(e) => set('category', e.target.value)} /></label>
+        <label className="f">บาร์โค้ด<input type="text" name="barcode" value={f.barcode} onChange={(e) => set('barcode', e.target.value)} /></label>
         <label className="f">ประเภท<select value={f.kind} onChange={(e) => set('kind', e.target.value as 'stock' | 'service')}><option value="stock">สินค้า (นับสต็อก)</option><option value="service">บริการ (ไม่นับสต็อก)</option></select></label>
         <label className="f">VAT ขาย<select value={f.vat} onChange={(e) => set('vat', e.target.value as 'v7' | 'exempt')}><option value="v7">7%</option><option value="exempt">ยกเว้น / 0%</option></select></label>
-        <label className="f">ราคาขาย / หน่วยหลัก (รวม VAT)<input type="text" inputMode="decimal" value={f.price} onChange={(e) => set('price', e.target.value)} data-testid="pf-price" /></label>
-        <label className="f">จุดสั่งซื้อ (หน่วยหลัก)<input type="text" inputMode="decimal" value={f.reorderPoint} onChange={(e) => set('reorderPoint', e.target.value)} /></label>
+        <label className="f">ราคาขาย / หน่วยหลัก (รวม VAT)<input type="text" inputMode="decimal" name="price" value={f.price} onChange={(e) => set('price', e.target.value)} data-testid="pf-price" /></label>
+        <label className="f">จุดสั่งซื้อ (หน่วยหลัก)<input type="text" inputMode="decimal" name="reorderPoint" value={f.reorderPoint} onChange={(e) => set('reorderPoint', e.target.value)} /></label>
       </div>
       <div className="row">
         <label className="row small"><input type="checkbox" checked={f.isScg} onChange={(e) => set('isScg', e.target.checked)} /> สินค้า SCG</label>
@@ -137,9 +145,9 @@ function ProductModal({ product, onClose }: { product: Product | null; onClose: 
           <tbody>
             {units.map((u, i) => (
               <tr key={i}>
-                <td><input type="text" value={u.name} aria-label={`ชื่อหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} /></td>
-                <td className="n"><input className="qty" type="text" inputMode="decimal" value={u.factor} disabled={i === 0} aria-label={`ตัวคูณหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, factor: e.target.value } : x)))} /></td>
-                <td className="n"><input className="qty" type="text" inputMode="decimal" value={u.price} placeholder="-" style={{ width: 100 }} aria-label={`ราคาหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} /></td>
+                <td><input type="text" data-field={`units.${i}.name`} value={u.name} aria-label={`ชื่อหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} /></td>
+                <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`units.${i}.factor`} value={u.factor} disabled={i === 0} aria-label={`ตัวคูณหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, factor: e.target.value } : x)))} /></td>
+                <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`units.${i}.price`} value={u.price} placeholder="-" style={{ width: 100 }} aria-label={`ราคาหน่วย ${i + 1}`} onChange={(e) => setUnits((us) => us.map((x, j) => (j === i ? { ...x, price: e.target.value } : x)))} /></td>
                 <td>{i > 0 && <button className="btn sm bad" onClick={() => setUnits((us) => us.filter((_, j) => j !== i))} aria-label="ลบหน่วย">✕</button>}</td>
               </tr>
             ))}

@@ -8,6 +8,7 @@ import { AdmCentralProduct, AdmPush, AdmPushResult, page } from '@erp/contracts'
 import { Modal, Pager, Pill, SkeletonRows, fmt, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
 import { admErr, todayYmd } from '../common';
 import { admApi, admCan, useAdm } from './admApi';
+import { checkFields, requiredMsg } from '../../../errors';
 
 const CATS = ['ปูนซีเมนต์', 'หลังคา', 'ผนัง', 'กาว/ยาแนว', 'ประปา', 'กระเบื้อง', 'สุขภัณฑ์', 'อื่น ๆ'];
 
@@ -115,8 +116,10 @@ function EditModal({ c, onClose, onDone }: { c: AdmCentralProduct | null; onClos
   });
   const [err, setErr] = useState('');
   const save = async () => {
-    if (!f.sku.trim() || !f.name.trim()) return setErr('กรอกรหัสและชื่อสินค้า');
-    if (f.units.some((u) => !u.name.trim() || !(Number(u.factor) > 0))) return setErr('หน่วยนับต้องมีชื่อและตัวคูณมากกว่า 0');
+    if (!checkFields({
+      sku: requiredMsg(f.sku, 'รหัส SKU'), name: requiredMsg(f.name, 'ชื่อสินค้า'),
+      ...Object.fromEntries(f.units.flatMap((u, i): [string, string | false][] => [[`units.${i}.name`, requiredMsg(u.name, 'ชื่อหน่วย')], [`units.${i}.factor`, !(Number(u.factor) > 0) && 'ตัวคูณต้องมากกว่า 0']])),
+    })) return;
     const body = { ...f, sku: f.sku.trim(), name: f.name.trim(), barcode: f.barcode.trim() || null, imageUrl: f.imageUrl.trim() || null, units: f.units.map((u, i) => ({ name: u.name.trim(), factor: i === 0 ? '1' : u.factor })) };
     try {
       await (c ? admApi('PATCH', `/api/adm/central-products/${c.id}`, { body, schema: AdmCentralProduct }) : admApi('POST', '/api/adm/central-products', { body, schema: AdmCentralProduct }));
@@ -130,10 +133,10 @@ function EditModal({ c, onClose, onDone }: { c: AdmCentralProduct | null; onClos
     <Modal onClose={onClose} wide label="สินค้า SCG">
       <h3>{c ? `แก้ไขสินค้า SCG · ${c.sku}` : 'เพิ่มสินค้า SCG (master กลาง)'}</h3>
       <div className="fgrid">
-        <label className="f">รหัส SKU *<input type="text" value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} data-testid="cp-sku" /></label>
-        <label className="f">ชื่อสินค้า *<input type="text" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} data-testid="cp-name" /></label>
+        <label className="f">รหัส SKU *<input type="text" name="sku" value={f.sku} onChange={(e) => setF({ ...f, sku: e.target.value })} data-testid="cp-sku" /></label>
+        <label className="f">ชื่อสินค้า *<input type="text" name="name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} data-testid="cp-name" /></label>
         <label className="f">หมวด<select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>{[...new Set([...CATS, f.category])].map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label className="f">บาร์โค้ด<input type="text" value={f.barcode} onChange={(e) => setF({ ...f, barcode: e.target.value })} /></label>
+        <label className="f">บาร์โค้ด<input type="text" name="barcode" value={f.barcode} onChange={(e) => setF({ ...f, barcode: e.target.value })} /></label>
         <label className="f">URL รูปสินค้า<input type="text" value={f.imageUrl} placeholder="https://" onChange={(e) => setF({ ...f, imageUrl: e.target.value })} /></label>
         <label className="f">ภาษีขาย<select value={f.vat} onChange={(e) => setF({ ...f, vat: e.target.value as 'v7' | 'exempt' })}><option value="v7">VAT 7%</option><option value="exempt">ยกเว้น VAT</option></select></label>
         <label className="row small"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> ใช้งาน</label>
@@ -141,8 +144,8 @@ function EditModal({ c, onClose, onDone }: { c: AdmCentralProduct | null; onClos
       <h4 className="sec">หน่วยนับและตัวแปลง (หน่วยแรก = หน่วยฐาน)</h4>
       {f.units.map((u, i) => (
         <div key={i} className="row">
-          <input type="text" value={u.name} aria-label="ชื่อหน่วย" style={{ width: 120 }} onChange={(e) => setF({ ...f, units: f.units.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
-          {i === 0 ? <span className="small muted">หน่วยฐาน</span> : <><span className="small">=</span><input type="number" min="0" value={u.factor} aria-label="ตัวคูณ" style={{ width: 90 }} onChange={(e) => setF({ ...f, units: f.units.map((x, j) => (j === i ? { ...x, factor: e.target.value } : x)) })} /><span className="small">{f.units[0]!.name}</span><button className="btn sm bad" onClick={() => setF({ ...f, units: f.units.filter((_, j) => j !== i) })}>ลบ</button></>}
+          <input type="text" data-field={`units.${i}.name`} value={u.name} aria-label="ชื่อหน่วย" style={{ width: 120 }} onChange={(e) => setF({ ...f, units: f.units.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} />
+          {i === 0 ? <span className="small muted">หน่วยฐาน</span> : <><span className="small">=</span><input type="number" min="0" data-field={`units.${i}.factor`} value={u.factor} aria-label="ตัวคูณ" style={{ width: 90 }} onChange={(e) => setF({ ...f, units: f.units.map((x, j) => (j === i ? { ...x, factor: e.target.value } : x)) })} /><span className="small">{f.units[0]!.name}</span><button className="btn sm bad" onClick={() => setF({ ...f, units: f.units.filter((_, j) => j !== i) })}>ลบ</button></>}
         </div>
       ))}
       <div><button className="btn sm" onClick={() => setF({ ...f, units: [...f.units, { name: '', factor: '1' }] })}>+ เพิ่มหน่วย</button></div>

@@ -5,6 +5,7 @@ import { ReportSales, type ReportSalesBy } from '@erp/contracts';
 import { api, errText } from '../../api';
 import { fmt, fq, Pager, SkeletonRows, useCursorPager, useDebounced } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart } from './shared';
+import { ErrorBanner } from '../../errors';
 
 const BY: [ReportSalesBy, string][] = [
   ['day', 'รายวัน'], ['month', 'รายเดือน'], ['product', 'ตามสินค้า'], ['category', 'ตามหมวดสินค้า'], ['customer', 'ตามลูกค้า'], ['seller', 'ตามพนักงานขาย'], ['saleType', 'ตามประเภทการขาย'],
@@ -42,7 +43,7 @@ export default function SalesReport() {
         <DownloadButtons path="/api/reports/sales" query={{ from, to, by, saleType, q: dq }} disabled={!ok} testId="sales-dl" />
       </div>
       {!ok && <div className="note warn small">ช่วงวันที่ไม่ถูกต้อง</div>}
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       {t && (
         <div className="rp-kpis" data-testid="sales-kpis">
           <div className="card"><div className="l">ยอดขายก่อน VAT</div><div className="v">฿{fmt(t.net)}</div></div>

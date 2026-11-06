@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { useCatalog, useWarehouses } from '../../data';
 import { fmt, fq, Pager, Pill, SkeletonRows, thTime, useCursorPager, useDebounced } from '../../ui';
 import { GrAlertBanner } from './shared';
+import { ErrorBanner } from '../../errors';
 
 const DOC_TH: Record<string, string> = { GR: 'รับสินค้า', PR: 'คืนผู้ขาย', TR: 'โอนคลัง', ADJ: 'เบิก / ปรับยอด', ABB: 'ขายหน้าร้าน', INV: 'ใบกำกับ', CN: 'รับคืน', OPEN: 'สต็อกเปิด', DO: 'ส่งของ', MO: 'ผลิต' };
 
@@ -56,7 +57,7 @@ function LedgerTab() {
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="ตั้งแต่วันที่" />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="ถึงวันที่" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       <div className="tw">
         <table data-testid="ledger-table">
           <thead><tr><th>วันที่</th><th>เอกสาร</th><th>สินค้า</th><th>คลัง</th><th className="n">จำนวน</th><th className="n">คงเหลือหลังรายการ</th>{seeCost && <th className="n">ทุน/หน่วย</th>}<th>หมายเหตุ</th><th>โดย</th></tr></thead>

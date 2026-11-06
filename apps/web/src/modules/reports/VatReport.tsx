@@ -5,6 +5,7 @@ import { ReportVat } from '@erp/contracts';
 import { api, errText } from '../../api';
 import { fmt, Pager, SkeletonRows, th, useCursorPager } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, monthTh, thisMonth } from './shared';
+import { ErrorBanner } from '../../errors';
 
 export default function VatReport() {
   const [month, setMonth] = useState(thisMonth());
@@ -30,7 +31,7 @@ export default function VatReport() {
         <span className="sp" />
         <DownloadButtons path="/api/reports/vat" query={filt} testId="vat-dl" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       {data && (
         <p className="small" style={{ margin: '0 0 8px' }}>
           รายงานภาษี{sales ? 'ขาย' : 'ซื้อ'} เดือน {monthTh(month)} · {data.shop.name} · เลขประจำตัวผู้เสียภาษี <span className="mono">{data.shop.taxId}</span> · สาขา {data.shop.branch}

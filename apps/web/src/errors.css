@@ -1,0 +1,50 @@
+/* Error UX: red field state, field error text, error dialog, failed-load banner, red toast. Works in light and dark. */
+:root{--errbar:#b4232c;--errbar-fg:#fff}
+
+/* a field the server or the client check rejected */
+input[aria-invalid="true"],select[aria-invalid="true"],textarea[aria-invalid="true"]{
+  border-color:var(--bad)!important;background-color:color-mix(in srgb,var(--bad) 9%,var(--surface))!important;
+  box-shadow:0 0 0 1px var(--bad)}
+input[aria-invalid="true"]:focus-visible,select[aria-invalid="true"]:focus-visible,textarea[aria-invalid="true"]:focus-visible{outline:2px solid var(--bad);outline-offset:1px}
+.ferr{flex:1 0 100%;display:flex;gap:5px;align-items:flex-start;color:var(--bad);font-size:12px;font-weight:500;line-height:1.35;margin-top:3px;white-space:normal;text-align:left}
+.ferr::before{content:"";flex:none;width:14px;height:14px;margin-top:1px;background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3Cpath d='M12 7v6M12 16.5v.01'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.5'/%3E%3Cpath d='M12 7v6M12 16.5v.01'/%3E%3C/svg%3E") center/contain no-repeat}
+td .ferr{font-size:11px;min-width:120px}
+
+/* login / form message box */
+.errbox{display:flex;gap:8px;align-items:flex-start;background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500;line-height:1.4;margin:8px 0}
+.errbox svg{flex:none;margin-top:1px}
+
+/* the dialog: above modals (50), toast (60), touch keyboard (70) and the top bar (100) */
+.ex-ov{position:fixed;inset:0;z-index:200;background:rgba(10,16,24,.6);display:flex;align-items:flex-start;justify-content:center;padding:10vh 16px 16px;overflow:auto;animation:ex-in .12s ease-out}
+.ex-dlg{background:var(--surface);color:var(--fg);width:min(520px,100%);border-radius:12px;border:2px solid var(--errbar);box-shadow:0 24px 60px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column;max-height:calc(100dvh - 10vh - 16px)}
+.ex-head{display:flex;align-items:center;gap:10px;background:var(--errbar);color:var(--errbar-fg);padding:14px 18px}
+.ex-head h2{margin:0;font-size:19px;font-weight:700;line-height:1.3}
+.ex-head svg{flex:none}
+.ex-body{padding:16px 18px 6px;display:flex;flex-direction:column;gap:10px;overflow:auto;min-height:0}
+.ex-sub{margin:0;font-size:16px;color:var(--bad)}
+.ex-msg{margin:0;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
+.ex-rows{margin:0;padding:10px 12px 10px 28px;background:var(--bad-soft);border-radius:8px;font-size:13px;display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.ex-meta{border-top:1px solid var(--line);padding-top:8px;overflow-wrap:anywhere;font-family:var(--mono)}
+.ex-act{display:flex;justify-content:flex-end;padding:12px 18px 16px}
+.ex-act .btn{min-width:96px;justify-content:center}
+@keyframes ex-in{from{opacity:0}to{opacity:1}}
+@media (max-width:600px){
+  .ex-ov{padding-top:6vh}
+  .ex-head{padding:12px 14px}.ex-head h2{font-size:17px}
+  .ex-body{padding:14px 14px 4px}.ex-act{padding:10px 14px 14px}
+  .ex-act .btn{flex:1}
+}
+
+/* failed list / detail load */
+.errbar{display:flex;gap:10px;align-items:center;background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);border-left-width:5px;border-radius:8px;padding:10px 12px;margin:0 0 12px}
+.errbar svg{flex:none}
+.errbar-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;font-size:13px;overflow-wrap:anywhere}
+.errbar-t b{font-size:14px}
+.errbar-t span{color:var(--fg)}
+.errbar .btn{flex:none}
+
+/* red toast (errors that no dialog covers: downloads, background actions) */
+.toast.bad{background:var(--errbar);color:var(--errbar-fg);display:flex;gap:8px;align-items:center;border:1px solid color-mix(in srgb,#fff 30%,var(--errbar));font-weight:500}
+.toast.bad svg{flex:none}

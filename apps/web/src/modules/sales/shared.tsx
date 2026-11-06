@@ -150,7 +150,7 @@ export function CustomerSelect({ value, onChange, noCash, testId }: { value: str
   const cs = useCustomers();
   const list = (cs.data ?? []).filter((c) => !noCash || c.code !== 'C00000');
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId} aria-label="ลูกค้า">
+    <select name="customerId" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId} aria-label="ลูกค้า">
       <option value="">— เลือกลูกค้า —</option>
       {list.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.code}{c.taxId ? '' : ' (ไม่มีเลขผู้เสียภาษี)'}</option>)}
     </select>
@@ -213,7 +213,7 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
                 <tr key={i}>
                   <td>
                     {!(allowFree && l.free) ? (
-                      <select value={l.productId} aria-label={`สินค้าแถว ${i + 1}`} data-testid={`line-product-${i}`} style={{ maxWidth: 260 }} onChange={(e) => {
+                      <select data-field={`lines.${i}.productId`} value={l.productId} aria-label={`สินค้าแถว ${i + 1}`} data-testid={`line-product-${i}`} style={{ maxWidth: 260 }} onChange={(e) => {
                         if (e.target.value === '__free') return set(i, { productId: '', name: '', unitName: 'งาน', unitPrice: '0', free: true });
                         if (l.quoteLineId) return set(i, { productId: e.target.value, unitIdx: 0 }); // keep the quoted price
                         const nl = { ...l, productId: e.target.value, unitIdx: 0, unitPrice: '' };
@@ -226,7 +226,7 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
                       </select>
                     ) : (
                       <>
-                        <input type="text" value={l.name} placeholder="พิมพ์ชื่อรายการ เช่น ประตูไม้สักบานคู่" aria-label={`ชื่อรายการแถว ${i + 1}`} data-testid={`line-name-${i}`} onChange={(e) => set(i, { name: e.target.value })} style={{ width: '100%', minWidth: 180 }} />
+                        <input type="text" data-field={`lines.${i}.name`} value={l.name} placeholder="พิมพ์ชื่อรายการ เช่น ประตูไม้สักบานคู่" aria-label={`ชื่อรายการแถว ${i + 1}`} data-testid={`line-name-${i}`} onChange={(e) => set(i, { name: e.target.value })} style={{ width: '100%', minWidth: 180 }} />
                         <div className="row small" style={{ gap: 6, marginTop: 4 }}>
                           <Pill k="warn">นอกระบบ · ไม่มีต้นทุน</Pill>
                           {vatMode !== 'none' && <select value={l.vat} onChange={(e) => set(i, { vat: e.target.value as 'v7' | 'exempt' })} aria-label="ภาษีรายการ"><option value="v7">VAT 7%</option><option value="exempt">ยกเว้น / 0%</option></select>}
@@ -243,9 +243,9 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
                       </select>
                     ) : !l.free ? null : <input type="text" value={l.unitName} onChange={(e) => set(i, { unitName: e.target.value })} placeholder="หน่วย" style={{ width: 70 }} aria-label="หน่วย" />}
                   </td>
-                  <td className="n" data-l="จำนวน"><input className="qty" type="number" min="0" step="any" value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} onBlur={() => { if (l.productId && !l.quoteLineId) void fetchPrice(i, l); }} aria-label={`จำนวนแถว ${i + 1}`} data-testid={`line-qty-${i}`} /></td>
+                  <td className="n" data-l="จำนวน"><input className="qty" type="number" min="0" step="any" data-field={`lines.${i}.qty`} value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} onBlur={() => { if (l.productId && !l.quoteLineId) void fetchPrice(i, l); }} aria-label={`จำนวนแถว ${i + 1}`} data-testid={`line-qty-${i}`} /></td>
                   <td className="n" data-l="ราคา/หน่วย">
-                    <input className={`qty${belowCost?.has(l.productId) ? ' bad' : ''}`} type="number" min="0" step="0.01" value={l.unitPrice} onChange={(e) => set(i, { unitPrice: e.target.value, priceSource: 'แก้ราคาเอง' })} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} data-testid={`line-price-${i}`} />
+                    <input className={`qty${belowCost?.has(l.productId) ? ' bad' : ''}`} type="number" min="0" step="0.01" data-field={`lines.${i}.unitPrice`} value={l.unitPrice} onChange={(e) => set(i, { unitPrice: e.target.value, priceSource: 'แก้ราคาเอง' })} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} data-testid={`line-price-${i}`} />
                     {l.priceSource && <div className="small muted">{l.priceSource}</div>}
                     {belowCost?.has(l.productId) && <div className="small" style={{ color: 'var(--bad)' }}>ต่ำกว่าทุน</div>}
                   </td>
@@ -293,6 +293,7 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
     } catch (e) {
       if (e instanceof ApiFail && e.detail('approvalError')) return e.message;
       if (e instanceof ApiFail && e.detail('need') === 'creditApproval') {
+        e.claim();
         const x = e.details as { limit: string; balance: string; amount: string; after: string; over: boolean; overdue: { no: string; days: number }[] };
         setGate({
           kind: 'credit', extra,
@@ -301,6 +302,7 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
         return null;
       }
       if (e instanceof ApiFail && e.code === 'BELOW_COST') {
+        e.claim();
         const lines = (e.detail<{ name: string; sell?: string; cost?: string }[]>('lines') ?? []);
         setGate({ kind: 'belowCost', extra, text: <div className="note bad">ขายต่ำกว่าทุน: {lines.map((l) => l.name + (l.sell ? ` (ขาย ${fmt(l.sell)} < ทุน ${fmt(l.cost!)})` : '')).join(', ')}</div> });
         return null;
@@ -342,7 +344,7 @@ export function VoidDocModal({ what, url, total, onClose, onDone, perm = 'sales.
     } catch (e) {
       if (e instanceof ApiFail && e.detail('approvalError')) return e.message;
       setApv(false);
-      if (e instanceof ApiFail && e.code === 'DOWNSTREAM_FIRST') setBlocked(e.detail<string[]>('docs') ?? []);
+      if (e instanceof ApiFail && e.code === 'DOWNSTREAM_FIRST' && e.claim()) setBlocked(e.detail<string[]>('docs') ?? []);
       else setErr(errText(e));
       return null;
     }

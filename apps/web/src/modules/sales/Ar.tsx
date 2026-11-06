@@ -12,6 +12,7 @@ import { useAuth } from '../../auth';
 import { useCustomers } from '../../data';
 import { fmt, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { CustomerSelect, Paper, PrintModal, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
+import { ErrorBanner } from '../../errors';
 
 type Tab = 'cust' | 'inv' | 'bn' | 'rc';
 const TABS: [Tab, string][] = [['cust', 'ลูกหนี้รายลูกค้า'], ['inv', 'ใบแจ้งหนี้ค้างชำระ'], ['bn', 'ใบวางบิล'], ['rc', 'ใบเสร็จรับเงิน']];
@@ -357,7 +358,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
                   <td><input type="checkbox" checked={!!on[x.no]} onChange={(e) => setOn({ ...on, [x.no]: e.target.checked })} aria-label={`เลือก ${x.no}`} /></td>
                   <td className="mono">{x.no}{x.billingNoteNo && <div className="small muted">{x.billingNoteNo}</div>}</td><td>{th(x.dueDate)} {x.overdueDays > 0 && <Pill k="bad">เกิน {x.overdueDays} วัน</Pill>}</td>
                   <td className="n">{fmt(x.arBalance)}</td>
-                  <td className="n"><input className={`qty${d(amt[x.no] || 0).gt(d(x.arBalance)) ? ' bad' : ''}`} type="number" min="0" step="0.01" style={{ width: 110 }} value={amt[x.no] ?? ''} disabled={!on[x.no]} onChange={(e) => setAmt({ ...amt, [x.no]: e.target.value })} aria-label={`ยอดรับ ${x.no}`} data-testid={`rc-amt-${i}`} /></td>
+                  <td className="n"><input className={`qty${d(amt[x.no] || 0).gt(d(x.arBalance)) ? ' bad' : ''}`} type="number" min="0" step="0.01" style={{ width: 110 }} data-invoice={x.no} value={amt[x.no] ?? ''} disabled={!on[x.no]} onChange={(e) => setAmt({ ...amt, [x.no]: e.target.value })} aria-label={`ยอดรับ ${x.no}`} data-testid={`rc-amt-${i}`} /></td>
                 </tr>
               ))}
               {!inv.isLoading && !items.length && <tr><td colSpan={5} className="empty">ลูกค้ารายนี้ไม่มียอดค้างชำระ</td></tr>}
@@ -409,7 +410,7 @@ function StatementModal({ customerId, onClose }: { customerId: string; onClose: 
     <Modal onClose={onClose} wide label="รายการเดินบัญชีลูกหนี้">
       <h3>รายการเดินบัญชี · {name}</h3>
       <div className="row"><label className="f">ตั้งแต่<input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label><label className="f">ถึง<input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label></div>
-      {st.isError && <div className="err">{errText(st.error)}</div>}
+      {st.isError && <ErrorBanner error={st.error} onRetry={() => void st.refetch()} retrying={st.isFetching} />}
       <div className="tw">
         <table>
           <thead><tr><th>วันที่</th><th>เอกสาร</th><th>รายการ</th><th className="n">เพิ่มหนี้</th><th className="n">ลดหนี้</th><th className="n">คงเหลือ</th></tr></thead>
@@ -442,7 +443,7 @@ export function BillingNoteDetail() {
   const [m, setM] = useState<null | 'print' | 'void'>(null);
   const q = useQuery({ queryKey: ['ar', 'bn', no], queryFn: () => api('GET', `/api/ar/billing-notes/${encodeURIComponent(no)}`, { schema: ArBillingNote }) });
   if (q.isLoading) return <div className="card"><div className="sk" /><div className="sk" /></div>;
-  if (!q.data) return <div className="card"><div className="note bad">{errText(q.error)}</div><p><Link to="/ar?tab=bn">‹ กลับ</Link></p></div>;
+  if (!q.data) return <div className="card"><ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /><p><Link to="/ar?tab=bn">‹ กลับ</Link></p></div>;
   const x = q.data;
   const live = x.status === 'active';
   return (
@@ -482,7 +483,7 @@ export function ReceiptDetail() {
   const [m, setM] = useState<null | 'print' | 'void'>(null);
   const q = useQuery({ queryKey: ['ar', 'rc', no], queryFn: () => api('GET', `/api/ar/receipts/${encodeURIComponent(no)}`, { schema: ArReceipt }) });
   if (q.isLoading) return <div className="card"><div className="sk" /><div className="sk" /></div>;
-  if (!q.data) return <div className="card"><div className="note bad">{errText(q.error)}</div><p><Link to="/ar?tab=rc">‹ กลับ</Link></p></div>;
+  if (!q.data) return <div className="card"><ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /><p><Link to="/ar?tab=rc">‹ กลับ</Link></p></div>;
   const x = q.data;
   const live = x.status === 'active';
   return (

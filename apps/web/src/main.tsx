@@ -8,6 +8,7 @@ import { Shell } from './Shell';
 import { MODULE_ROUTES, ModuleWraps, PUBLIC_ROUTES, useVisibleNav } from './modules';
 import { ToastProvider } from './ui';
 import { TouchProvider } from './touch';
+import { ErrorHost } from './errors';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import { useMeta } from './data';
@@ -64,11 +65,13 @@ createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={qc}>
       <TouchProvider>
         <ToastProvider>
-          <BrowserRouter>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </BrowserRouter>
+          <ErrorHost>
+            <BrowserRouter>
+              <AuthProvider>
+                <App />
+              </AuthProvider>
+            </BrowserRouter>
+          </ErrorHost>
         </ToastProvider>
       </TouchProvider>
     </QueryClientProvider>

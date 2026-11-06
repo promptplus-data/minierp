@@ -5,6 +5,7 @@
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { ErrorBox, QueryFailBar, checkFields, markLoginFailure } from '../../../errors';
 import { iconSvg } from '../../icons';
 import { admErr } from '../common';
 import { ADM_ROLE_TH, AdmAuthProvider, admCan, useAdm } from './admApi';
@@ -33,12 +34,14 @@ function Login() {
   const [busy, setBusy] = useState(false);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!checkFields({ username: !u.trim() && 'กรอกชื่อผู้ใช้', password: !p && 'กรอกรหัสผ่าน' })) return setErr('กรอกชื่อผู้ใช้และรหัสผ่าน');
     setBusy(true);
     setErr('');
     try {
       await login(u.trim(), p);
     } catch (ex) {
       setErr(admErr(ex));
+      markLoginFailure(ex);
     } finally {
       setBusy(false);
     }
@@ -51,10 +54,10 @@ function Login() {
           <div><b>SCG Admin</b><div className="small muted">ผู้ดูแลระบบฝั่ง SCG · <span className="ed cloud">Cloud</span></div></div>
         </div>
         <div className="note small" style={{ margin: '14px 0' }}>บัญชีผู้ดูแลของ SCG แยกจากผู้ใช้ของร้าน · ทุกการทำรายการบันทึกใน log ของ SCG</div>
-        <label className="f">ชื่อผู้ใช้<input type="text" autoComplete="username" value={u} onChange={(e) => setU(e.target.value)} autoFocus /></label>
-        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} /></label>
-        <div className="err" role="alert" style={{ minHeight: 18, marginTop: 6 }}>{err}</div>
-        <button className="btn pri" style={{ width: '100%', justifyContent: 'center' }} type="submit" disabled={busy || !u || !p}>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</button>
+        <label className="f">ชื่อผู้ใช้<input type="text" name="username" autoComplete="username" value={u} onChange={(e) => { setU(e.target.value); setErr(''); }} autoFocus /></label>
+        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" name="password" autoComplete="current-password" value={p} onChange={(e) => { setP(e.target.value); setErr(''); }} /></label>
+        <ErrorBox testId="adm-login-error">{err}</ErrorBox>
+        <button className="btn pri" style={{ width: '100%', justifyContent: 'center' }} type="submit" disabled={busy}>{busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}</button>
         <p className="small muted" style={{ marginTop: 12, marginBottom: 0 }}>ผู้ใช้ของร้านเข้าระบบที่ <a href="/">หน้าแรก</a></p>
       </form>
     </div>
@@ -101,6 +104,7 @@ function Shell() {
           </div>
         </header>
         <main className="content">
+          <QueryFailBar />
           <Routes>
             <Route index element={<Kpi />} />
             <Route path="shops" element={<Shops />} />

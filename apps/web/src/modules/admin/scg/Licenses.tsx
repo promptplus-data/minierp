@@ -10,6 +10,7 @@ import { addDays } from '@erp/core';
 import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
 import { admErr, todayYmd } from '../common';
 import { admApi, admCan, useAdm } from './admApi';
+import { checkFields, requiredMsg } from '../../../errors';
 
 type Lic = z.infer<typeof AdmLicense>;
 const REGIONS = ['', 'ภาคเหนือ', 'ภาคกลาง', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้', 'กรุงเทพและปริมณฑล'];
@@ -75,8 +76,7 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
-    if (!f.shopName.trim()) return setErr('ใส่ชื่อร้านให้ตรงกับที่ร้านตั้งในโปรแกรม');
-    if (!/^\d{13}$/.test(f.taxId)) return setErr('เลขผู้เสียภาษี 13 หลัก');
+    if (!checkFields({ shopName: requiredMsg(f.shopName, 'ชื่อร้านให้ตรงกับที่ร้านตั้งในโปรแกรม'), taxId: !/^\d{13}$/.test(f.taxId) && 'เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก' })) return;
     setBusy(true);
     setErr('');
     try {
@@ -93,8 +93,8 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
     <div className="card">
       <h2>ออก license key ให้ร้าน On-premise</h2>
       <div className="fgrid">
-        <label className="f">ชื่อร้าน (ตรงกับในโปรแกรมของร้าน) *<input type="text" value={f.shopName} onChange={(e) => setF({ ...f, shopName: e.target.value })} data-testid="lic-shop" /></label>
-        <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} value={f.taxId} onChange={(e) => setF({ ...f, taxId: e.target.value.replace(/\D/g, '') })} data-testid="lic-tax" /></label>
+        <label className="f">ชื่อร้าน (ตรงกับในโปรแกรมของร้าน) *<input type="text" name="shopName" value={f.shopName} onChange={(e) => setF({ ...f, shopName: e.target.value })} data-testid="lic-shop" /></label>
+        <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} name="taxId" value={f.taxId} onChange={(e) => setF({ ...f, taxId: e.target.value.replace(/\D/g, '') })} data-testid="lic-tax" /></label>
         <label className="f">ประเภท
           <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as typeof f.type })} data-testid="lic-type">
             <option value="expiring">มีวันหมดอายุ</option><option value="lifetime">ตลอดชีพ</option>

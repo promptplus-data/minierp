@@ -14,6 +14,7 @@ import { IS_CLOUD } from '../../cloud';
 import { useMeta } from '../../data';
 import { Pill, thTime, useToast } from '../../ui';
 import { admErr, usePrintA4 } from './common';
+import { ErrorBanner } from '../../errors';
 
 export const useTerms = () => {
   const { user } = useAuth();
@@ -77,7 +78,7 @@ export function TermsSign({ st, gate }: { st: TermsStatus; gate?: boolean }) {
 export default function Terms() {
   const st = useTerms();
   if (st.isLoading) return <div className="card"><div className="sk" /><div className="sk" /></div>;
-  if (st.isError || !st.data) return <div className="card"><div className="note bad small">{admErr(st.error)}</div></div>;
+  if (st.isError || !st.data) return <div className="card"><ErrorBanner error={st.error} onRetry={() => void st.refetch()} retrying={st.isFetching} /></div>;
   const s = st.data;
   const acc = s.acceptance;
   return (

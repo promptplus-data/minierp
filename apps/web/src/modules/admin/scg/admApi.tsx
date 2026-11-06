@@ -6,7 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useQueryClient } from '@tanstack/react-query';
 import type { ZodType, ZodTypeDef } from 'zod';
 import { AdmLoginRes, AdmUser, ApiError, type AdmRole } from '@erp/contracts';
-import { ApiFail } from '../../../api';
+import { ApiFail, reportFailure } from '../../../api';
 
 const KEY = 'erp-adm-token';
 const read = () => { try { return sessionStorage.getItem(KEY); } catch { return null; } };
@@ -27,7 +27,9 @@ export async function admApi<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path
   try {
     res = await fetch(path + (qs ? `?${qs}` : ''), { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
   } catch (err) {
-    throw new ApiFail(0, 'NETWORK', String(err), null);
+    const fail = new ApiFail(0, 'NETWORK', String(err), null);
+    reportFailure(fail, method, path);
+    throw fail;
   }
   const text = await res.text();
   let json: unknown = null;
@@ -35,7 +37,9 @@ export async function admApi<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path
   if (!res.ok) {
     const e = ApiError.safeParse(json);
     const fail = e.success ? new ApiFail(res.status, e.data.code, e.data.message, e.data.details) : new ApiFail(res.status, 'INTERNAL', text.slice(0, 200), null);
+    fail.requestId = res.headers.get('x-request-id') ?? undefined;
     if (fail.code === 'UNAUTHORIZED' && token && !path.endsWith('/auth/login')) onUnauthorized();
+    reportFailure(fail, method, path);
     throw fail;
   }
   if (!opts.schema) return json as T;

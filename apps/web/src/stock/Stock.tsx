@@ -10,6 +10,7 @@ import { CloudIncomingCard, CloudReorderButton, IS_CLOUD } from '../cloud';
 import { useCatalog, useWarehouses } from '../data';
 import { fmt, fq, Modal, Pager, Pill, ShortageModal, SkeletonRows, th, useCursorPager, useDebounced, useToast, type Shortage } from '../ui';
 import { ReceiptModal, StockFormModal, type StockKind } from './forms';
+import { ErrorBanner } from '../errors';
 
 const PAGE = 20; // products per page (NFR-12); the API pages product × warehouse rows
 
@@ -67,7 +68,7 @@ export default function Stock() {
         <div className="row" style={{ marginBottom: 10 }}>
           <input type="search" placeholder="ค้นหาชื่อสินค้าหรือรหัส" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: 1, minWidth: 200 }} aria-label="ค้นหาสต็อก" />
         </div>
-        {bal.isError && <div className="note bad small">{errText(bal.error)}</div>}
+        {bal.isError && <ErrorBanner error={bal.error} onRetry={() => void bal.refetch()} retrying={bal.isFetching} />}
         <div className="tw">
           <table data-testid="stock-table">
             <thead>
@@ -140,7 +141,7 @@ function LotsModal({ productId, onClose }: { productId: string; onClose: () => v
     <Modal onClose={onClose} wide label="ล็อตสินค้า">
       <h3>ล็อตสินค้า · {p?.name}</h3>
       <p className="small muted" style={{ margin: 0 }}>ระบบเก็บสต็อกเป็นล็อตตามวันที่รับเข้า ขาย เบิก หรือส่งของจะตัดล็อตที่เก่าที่สุดของคลังนั้นก่อน (FIFO) และใช้ทุนของล็อตนั้นเป็นต้นทุนขาย · โอนคลังแล้วล็อตย้ายไปพร้อมวันที่เดิม</p>
-      {lots.isError && <div className="note bad small">{errText(lots.error)}</div>}
+      {lots.isError && <ErrorBanner error={lots.error} onRetry={() => void lots.refetch()} retrying={lots.isFetching} />}
       <div className="tw">
         <table data-testid="lots-table">
           <thead><tr><th>ลำดับตัด</th><th>วันที่รับ</th><th>คลัง</th><th>อ้างอิง</th><th className="n">คงเหลือ</th><th className="n">ทุน/หน่วย</th><th className="n">มูลค่า</th><th className="n">อายุ (วัน)</th></tr></thead>
@@ -205,7 +206,7 @@ function AdjustCard() {
       }
       await Promise.all([qc.invalidateQueries({ queryKey: ['adjust'] }), qc.invalidateQueries({ queryKey: ['stock'] })]);
     } catch (e) {
-      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK') setShort(e.details as Shortage[]);
+      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK' && e.claim()) setShort(e.details as Shortage[]);
       else toast(errText(e));
     } finally {
       setBusy(null);

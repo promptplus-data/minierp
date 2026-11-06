@@ -10,6 +10,7 @@ import { ROLE_TH } from '../../../auth';
 import { Modal, Pager, Pill, SkeletonRows, fmt, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
 import { admErr } from '../common';
 import { admApi, admCan, useAdm } from './admApi';
+import { ErrorBanner, checkFields, requiredMsg } from '../../../errors';
 
 const REGIONS = ['ภาคเหนือ', 'ภาคกลาง', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้', 'กรุงเทพและปริมณฑล'];
 
@@ -42,7 +43,7 @@ export default function Shops() {
         <input type="search" style={{ flex: 1, minWidth: 180 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อร้าน รหัส เลขผู้เสียภาษี ภาค หรือรหัสลูกค้า SCG" aria-label="ค้นหาร้าน" />
         <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} aria-label="สถานะร้าน"><option value="">ทุกสถานะ</option><option value="active">ใช้งาน</option><option value="suspended">ระงับ</option></select>
       </div>
-      {list.isError && <div className="note bad small">{admErr(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="shops-table">
           <thead><tr><th>รหัส</th><th>ร้าน</th><th>ภาค</th><th>Edition</th><th>สถานะ</th><th className="n">ผู้ใช้</th><th className="n">บิล 30 วัน</th><th className="n">ยอดขายเดือนนี้</th><th>บิลล่าสุด</th><th /></tr></thead>
@@ -85,12 +86,12 @@ function NewShop({ onClose, onDone }: { onClose: () => void; onDone: () => void 
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof typeof f>(k: K, v: (typeof f)[K]) => setF((x) => ({ ...x, [k]: v }));
   const save = async () => {
-    if (!/^[a-z0-9-]{3,30}$/.test(f.code)) return setErr('รหัสร้าน a–z 0–9 - 3–30 ตัว');
-    if (!/^\d{13}$/.test(f.taxId)) return setErr('เลขผู้เสียภาษี 13 หลัก');
-    if (!f.name.trim() || !f.oName.trim()) return setErr('กรอกชื่อร้านและชื่อเจ้าของร้าน');
-    if (!/^[a-z0-9._]{3,20}$/.test(f.oUser)) return setErr('ชื่อผู้ใช้เจ้าของร้าน a–z 0–9 . _ 3–20 ตัว');
-    if (f.oPass.length < 6) return setErr('รหัสผ่านเริ่มต้นอย่างน้อย 6 ตัว');
-    if (!/^\d{4,6}$/.test(f.oPin)) return setErr('PIN อนุมัติ 4–6 หลัก');
+    if (!checkFields({
+      code: !/^[a-z0-9-]{3,30}$/.test(f.code) && 'รหัสร้าน a–z 0–9 - 3–30 ตัว', name: requiredMsg(f.name, 'ชื่อร้าน'),
+      taxId: !/^\d{13}$/.test(f.taxId) && 'เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก',
+      'owner.name': requiredMsg(f.oName, 'ชื่อเจ้าของร้าน'), 'owner.username': !/^[a-z0-9._]{3,20}$/.test(f.oUser) && 'ชื่อผู้ใช้เจ้าของร้าน a–z 0–9 . _ 3–20 ตัว',
+      'owner.password': f.oPass.length < 6 && 'รหัสผ่านเริ่มต้นอย่างน้อย 6 ตัว', 'owner.pin': !/^\d{4,6}$/.test(f.oPin) && 'PIN อนุมัติ 4–6 หลัก',
+    })) return;
     setBusy(true);
     setErr('');
     try {
@@ -113,9 +114,9 @@ function NewShop({ onClose, onDone }: { onClose: () => void; onDone: () => void 
     <Modal onClose={onClose} wide label="เปิดร้านใหม่">
       <h3>เปิดร้านซับดีลเลอร์ใหม่</h3>
       <div className="fgrid">
-        <label className="f">รหัสร้าน *<input type="text" value={f.code} placeholder="เช่น lampang-home" onChange={(e) => set('code', e.target.value.toLowerCase())} data-testid="ns-code" /></label>
-        <label className="f">ชื่อร้าน *<input type="text" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="ns-name" /></label>
-        <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} value={f.taxId} onChange={(e) => set('taxId', e.target.value.replace(/\D/g, ''))} data-testid="ns-tax" /></label>
+        <label className="f">รหัสร้าน *<input type="text" name="code" value={f.code} placeholder="เช่น lampang-home" onChange={(e) => set('code', e.target.value.toLowerCase())} data-testid="ns-code" /></label>
+        <label className="f">ชื่อร้าน *<input type="text" name="name" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="ns-name" /></label>
+        <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} name="taxId" value={f.taxId} onChange={(e) => set('taxId', e.target.value.replace(/\D/g, ''))} data-testid="ns-tax" /></label>
         <label className="f">สาขา<input type="text" value={f.branch} onChange={(e) => set('branch', e.target.value)} /></label>
         <label className="f">ภาค / เขตขาย<select value={f.region} onChange={(e) => set('region', e.target.value)}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></label>
         <label className="f">รหัสลูกค้า SCG (customer code)<input type="text" value={f.customerCode} onChange={(e) => set('customerCode', e.target.value)} /></label>
@@ -125,10 +126,10 @@ function NewShop({ onClose, onDone }: { onClose: () => void; onDone: () => void 
       </div>
       <h4 className="sec">เจ้าของร้าน (ผู้ใช้คนแรก · สร้างพร้อมพนักงาน)</h4>
       <div className="fgrid">
-        <label className="f">ชื่อเจ้าของร้าน *<input type="text" value={f.oName} onChange={(e) => set('oName', e.target.value)} data-testid="ns-oname" /></label>
-        <label className="f">ชื่อผู้ใช้ *<input type="text" value={f.oUser} autoComplete="off" onChange={(e) => set('oUser', e.target.value.toLowerCase())} data-testid="ns-ouser" /></label>
-        <label className="f">รหัสผ่านเริ่มต้น *<input type="password" autoComplete="new-password" value={f.oPass} onChange={(e) => set('oPass', e.target.value)} data-testid="ns-opass" /></label>
-        <label className="f">PIN อนุมัติ *<input type="password" inputMode="numeric" maxLength={6} value={f.oPin} onChange={(e) => set('oPin', e.target.value)} data-testid="ns-opin" /></label>
+        <label className="f">ชื่อเจ้าของร้าน *<input type="text" data-field="owner.name" value={f.oName} onChange={(e) => set('oName', e.target.value)} data-testid="ns-oname" /></label>
+        <label className="f">ชื่อผู้ใช้ *<input type="text" data-field="owner.username" value={f.oUser} autoComplete="off" onChange={(e) => set('oUser', e.target.value.toLowerCase())} data-testid="ns-ouser" /></label>
+        <label className="f">รหัสผ่านเริ่มต้น *<input type="password" autoComplete="new-password" data-field="owner.password" value={f.oPass} onChange={(e) => set('oPass', e.target.value)} data-testid="ns-opass" /></label>
+        <label className="f">PIN อนุมัติ *<input type="password" inputMode="numeric" maxLength={6} data-field="owner.pin" value={f.oPin} onChange={(e) => set('oPin', e.target.value)} data-testid="ns-opin" /></label>
       </div>
       <p className="small muted" style={{ margin: 0 }}>ระบบสร้างร้าน คลังหน้าร้าน (POS) และเจ้าของร้าน · เจ้าของร้านต้องลงนามสัญญาการใช้งานตอนเข้าระบบครั้งแรกก่อนใช้เมนูอื่น</p>
       {err && <div className="err" role="alert">{err}</div>}

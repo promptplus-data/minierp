@@ -12,6 +12,7 @@ import { useAuth } from '../../auth';
 import { Modal, Pager, Pill, SkeletonRows, fq, th, thTime, useCursorPager, useDebounced, useToast } from '../../ui';
 import { LEAVE_LABEL, admErr, periodTH, prevPeriod, thisPeriod, todayYmd, useHrMe } from './common';
 import { useLeaveBalances } from './Employees';
+import { ErrorBanner } from '../../errors';
 
 const TYPES: HrLeaveType[] = ['sick', 'personal', 'vacation', 'maternity', 'other', 'unpaid'];
 const STATUS: Record<HrLeave['status'], ['ok' | 'bad' | 'warn', string]> = { approved: ['ok', 'อนุมัติ'], rejected: ['bad', 'ไม่อนุมัติ'], pending: ['warn', 'รออนุมัติ'] };
@@ -37,7 +38,7 @@ export default function Leave() {
           </span>
           <button className="btn sm pri" onClick={() => setOpen(true)} disabled={!boss && !myEmp} data-testid="leave-new">+ บันทึกการลา</button>
         </h2>
-        {bal.isError && <div className="note bad small">{admErr(bal.error)}</div>}
+        {bal.isError && <ErrorBanner error={bal.error} onRetry={() => void bal.refetch()} retrying={bal.isFetching} />}
         <div className="tw">
           <table data-testid="balance-table">
             <thead>

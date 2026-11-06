@@ -7,6 +7,7 @@ import { useAuth } from '../../auth';
 import { useMeta } from '../../data';
 import { Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useToast } from '../../ui';
 import './retail.css';
+import { ErrorBanner } from '../../errors';
 
 const ST: Record<PosDevice['status'], [string, 'ok' | 'warn' | 'mut']> = { approved: ['อนุมัติแล้ว', 'ok'], pending: ['รออนุมัติ', 'warn'], retired: ['เลิกใช้', 'mut'] };
 
@@ -36,7 +37,7 @@ export default function PosDevices() {
         </div>
         <button className="btn pri" disabled={!manage} onClick={() => setEdit('new')} data-testid="dev-new">+ เพิ่มเครื่อง</button>
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw" style={{ marginTop: 12 }}>
         <table data-testid="dev-table">
           <thead><tr><th>เครื่อง</th><th>POS ID จากสรรพากร</th><th>วันที่อนุมัติ</th><th>สถานะ</th><th>ใบกำกับอย่างย่อ</th><th>แก้ล่าสุด</th><th /></tr></thead>

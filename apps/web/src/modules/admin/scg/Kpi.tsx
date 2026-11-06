@@ -5,6 +5,7 @@ import { iconSvg } from '../../icons';
 import { admErr, periodTH } from '../common';
 import { th } from '../../../ui';
 import { admApi } from './admApi';
+import { ErrorBanner } from '../../../errors';
 
 const I = (svg: string) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />;
 const CLOUD = 'var(--info)';
@@ -13,7 +14,7 @@ const ONPREM = 'var(--c-sys)';
 export default function Kpi() {
   const k = useQuery({ queryKey: ['scg', 'kpi'], queryFn: () => admApi('GET', '/api/adm/kpi', { schema: AdmKpi }) });
   if (k.isLoading) return <div className="grid g4">{[0, 1, 2, 3].map((i) => <div key={i} className="card"><div className="sk" /><div className="sk" /></div>)}</div>;
-  if (k.isError || !k.data) return <div className="card"><div className="note bad small">{admErr(k.error)}</div></div>;
+  if (k.isError || !k.data) return <div className="card"><ErrorBanner error={k.error} onRetry={() => void k.refetch()} retrying={k.isFetching} /></div>;
   const x = k.data;
   const maxMonth = Math.max(1, ...x.newPerMonth.map((m) => m.cloud + m.onprem));
   const maxRegion = Math.max(1, ...x.byRegion.map((r) => r.total));

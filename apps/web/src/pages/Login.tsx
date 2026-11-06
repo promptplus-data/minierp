@@ -1,5 +1,6 @@
 import { Suspense, useState, type FormEvent } from 'react';
 import { errText } from '../api';
+import { ErrorBox, checkFields, markLoginFailure } from '../errors';
 import { useAuth } from '../auth';
 import { CloudSsoButton, IS_CLOUD } from '../cloud';
 import { useMeta } from '../data';
@@ -14,13 +15,14 @@ export default function Login() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!u || !p) return setErr('กรอกชื่อผู้ใช้และรหัสผ่าน');
+    if (!checkFields({ username: !u.trim() && 'กรอกชื่อผู้ใช้', password: !p && 'กรอกรหัสผ่าน' })) return setErr('กรอกชื่อผู้ใช้และรหัสผ่าน');
     setBusy(true);
     setErr('');
     try {
       await login(u.trim(), p);
     } catch (ex) {
       setErr(errText(ex));
+      markLoginFailure(ex);
     } finally {
       setBusy(false);
     }
@@ -42,9 +44,9 @@ export default function Login() {
           <div className="note small" style={{ marginTop: 16 }}>On-premise · เข้าด้วยชื่อผู้ใช้ของร้าน</div>
         )}
         <div className="small muted" style={{ textAlign: 'center', margin: '12px 0' }}>{IS_CLOUD ? 'หรือ พนักงานเข้าด้วยชื่อผู้ใช้ของร้าน' : 'พนักงานเข้าด้วยชื่อผู้ใช้ของร้าน'}</div>
-        <label className="f">ชื่อผู้ใช้<input type="text" name="username" autoComplete="username" placeholder="เช่น prae" value={u} onChange={(e) => setU(e.target.value)} autoFocus /></label>
-        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" name="password" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} /></label>
-        <div className="err" role="alert" style={{ minHeight: 18, marginTop: 6 }} data-testid="login-error">{err}</div>
+        <label className="f">ชื่อผู้ใช้<input type="text" name="username" autoComplete="username" placeholder="เช่น prae" value={u} onChange={(e) => { setU(e.target.value); setErr(''); }} autoFocus /></label>
+        <label className="f" style={{ marginTop: 8 }}>รหัสผ่าน<input type="password" name="password" autoComplete="current-password" value={p} onChange={(e) => { setP(e.target.value); setErr(''); }} /></label>
+        <ErrorBox testId="login-error">{err}</ErrorBox>
         <button className={`btn${IS_CLOUD ? '' : ' pri'}`} style={{ width: '100%', justifyContent: 'center' }} type="submit" disabled={busy}>
           {busy ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
         </button>

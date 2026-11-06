@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DocSummary, page } from '@erp/contracts';
 import { api, errText } from '../api';
 import { fmt, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../ui';
+import { ErrorBanner } from '../errors';
 
 const TYPES = [['', 'ทั้งหมด'], ['ABB', 'ใบกำกับอย่างย่อ'], ['INV', 'ใบกำกับเต็มรูป'], ['RC', 'ใบเสร็จรับเงิน'], ['CN', 'ใบลดหนี้ / รับคืน']] as const;
 export const TYPE_TH: Record<string, string> = { ABB: 'อย่างย่อ', INV: 'เต็มรูป', RC: 'ใบเสร็จ', CN: 'ใบลดหนี้', QT: 'ใบเสนอราคา', SO: 'ใบสั่งขาย', DO: 'ใบส่งของ' };
@@ -33,7 +34,7 @@ export default function SalesDocs() {
       <div className="row" style={{ marginBottom: 10 }}>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นเลขที่เอกสาร ชื่อ/เบอร์ลูกค้า สินค้า หรือยอดเงิน" style={{ flex: 1, minWidth: 200 }} aria-label="ค้นหาเอกสาร" data-testid="docs-search" />
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="docs-table">
           <thead><tr><th>เลขที่</th><th>ประเภท</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th className="n">ยอด</th><th>สถานะ</th></tr></thead>

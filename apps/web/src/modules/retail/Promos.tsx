@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { useCatalog, useMeta } from '../../data';
 import { ApprovalModal, fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput, type PillKind } from '../../ui';
 import './retail.css';
+import { ErrorBanner } from '../../errors';
 
 const STATES: [PromoState | '', string][] = [['', 'ทั้งหมด'], ['live', 'กำลังใช้'], ['scheduled', 'ยังไม่เริ่ม'], ['draft', 'ร่าง'], ['expired', 'หมดอายุ'], ['closed', 'ปิดแล้ว']];
 const STATE_PILL: Record<PromoState, PillKind> = { live: 'ok', scheduled: 'acc', draft: 'warn', expired: 'mut', closed: 'mut' };
@@ -65,7 +66,7 @@ function PromoList() {
         </div>
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัส ชื่อโปร หรือ SKU ชุดโปร" aria-label="ค้นหาโปรโมชั่น" />
       </div>
-      {list.isError && <div className="note bad small">{errText(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="promo-table">
           <thead><tr><th>รหัส</th><th>ชื่อโปร</th><th>แบบ</th><th>สินค้าที่ร่วม</th><th>ระยะเวลา</th><th>สถานะ</th><th className="n">ขายแล้ว</th><th className="n">ยอดขาย</th><th /></tr></thead>
@@ -111,6 +112,7 @@ function ActivateButton({ p, onDone }: { p: Promo; onDone: (msg: string) => void
       return null;
     } catch (e) {
       if (e instanceof ApiFail && e.code === 'BELOW_COST') {
+        e.claim();
         if (approval && e.detail('approvalError')) return e.message;
         setApv(true);
         return null;
@@ -195,7 +197,7 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
   const check = useQuery({
     queryKey: ['promo-check', dkey],
     enabled: !!ready,
-    queryFn: () => api('POST', '/api/promos/check', { body: JSON.parse(dkey), schema: PromoCheck }),
+    queryFn: () => api('POST', '/api/promos/check', { body: JSON.parse(dkey), schema: PromoCheck, silent: true }),
     retry: false,
   });
   const ck = check.data;
@@ -214,6 +216,7 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
       return null;
     } catch (e) {
       if (e instanceof ApiFail && e.code === 'BELOW_COST') {
+        e.claim();
         if (approval && e.detail('approvalError')) return e.message;
         setApv(true);
         return null;

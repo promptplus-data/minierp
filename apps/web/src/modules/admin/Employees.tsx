@@ -8,6 +8,7 @@ import { api } from '../../api';
 import { ROLE_TH, useAuth } from '../../auth';
 import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { EMP_TYPE_TH, admErr, todayYmd } from './common';
+import { ErrorBanner, checkFields, requiredMsg } from '../../errors';
 
 const ROLES = Role.options.filter((r) => r !== 'owner');
 const TYPES: HrEmpType[] = ['monthly', 'daily', 'parttime', 'external'];
@@ -69,7 +70,7 @@ export default function Employees() {
           <option value="all">ทุกสถานะ</option><option value="active">ทำงาน</option><option value="resigned">ลาออก</option>
         </select>
       </div>
-      {list.isError && <div className="note bad small">{admErr(list.error)}</div>}
+      {list.isError && <ErrorBanner error={list.error} onRetry={() => void list.refetch()} retrying={list.isFetching} />}
       <div className="tw">
         <table data-testid="emp-table">
           <thead>
@@ -145,11 +146,13 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
   const owner = emp?.type === 'owner';
 
   const save = async () => {
-    if (!f.name.trim()) return setErr('ใส่ชื่อพนักงาน');
     const uname = f.username.trim().toLowerCase();
-    if (isNew && withUser && !USERNAME_RE.test(uname)) return setErr('ชื่อผู้ใช้ 3–20 ตัว ใช้ a–z 0–9 . _');
-    if (f.pin && !/^\d{4,6}$/.test(f.pin)) return setErr('PIN อนุมัติเป็นตัวเลข 4–6 หลัก');
-    if (sal && f.nationalId.trim() && !thaiIdValid(f.nationalId.trim())) return setErr('เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก ตรวจเลขท้ายไม่ผ่าน)');
+    if (!checkFields({
+      name: requiredMsg(f.name, 'ชื่อพนักงาน'),
+      'user.username': isNew && withUser && !USERNAME_RE.test(uname) && 'ชื่อผู้ใช้ 3–20 ตัว ใช้ a–z 0–9 . _',
+      'user.pin': !!f.pin && !/^\d{4,6}$/.test(f.pin) && 'PIN อนุมัติเป็นตัวเลข 4–6 หลัก',
+      nationalId: sal && !!f.nationalId.trim() && !thaiIdValid(f.nationalId.trim()) && 'เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก ตรวจเลขท้ายไม่ผ่าน)',
+    })) return;
     setBusy(true);
     setErr('');
     const base = {
@@ -182,8 +185,8 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
       <h3>{isNew ? 'เพิ่มพนักงาน' : `แก้ไข · ${emp.name}`}</h3>
       <h4 className="sec">ข้อมูลพนักงาน</h4>
       <div className="fgrid">
-        <label className="f">รหัสพนักงาน<input type="text" value={f.code} readOnly={!isNew} placeholder="เว้นว่าง ระบบตั้งให้" onChange={(e) => set('code', e.target.value)} /></label>
-        <label className="f">ชื่อ-สกุล / ชื่อเรียก *<input type="text" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="emp-name" /></label>
+        <label className="f">รหัสพนักงาน<input type="text" name="code" value={f.code} readOnly={!isNew} placeholder="เว้นว่าง ระบบตั้งให้" onChange={(e) => set('code', e.target.value)} /></label>
+        <label className="f">ชื่อ-สกุล / ชื่อเรียก *<input type="text" name="name" value={f.name} onChange={(e) => set('name', e.target.value)} data-testid="emp-name" /></label>
         <label className="f">ตำแหน่ง<input type="text" value={f.position} placeholder="เช่น แคชเชียร์" onChange={(e) => set('position', e.target.value)} data-testid="emp-position" /></label>
         <label className="f">ประเภทการจ้าง
           <select value={f.type} disabled={owner} onChange={(e) => set('type', e.target.value as HrEmpType)} data-testid="emp-type">
@@ -198,10 +201,10 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
         <>
           <h4 className="sec">ค่าจ้างและข้อมูลส่วนบุคคล (เห็นเฉพาะเจ้าของร้าน)</h4>
           <div className="fgrid">
-            <label className="f">เงินเดือน (บาท/เดือน)<input type="number" min="0" value={f.salary} onChange={(e) => set('salary', e.target.value)} data-testid="emp-salary" /></label>
-            <label className="f">ค่าจ้างรายวัน (บาท/วัน)<input type="number" min="0" value={f.dailyRate} onChange={(e) => set('dailyRate', e.target.value)} data-testid="emp-daily" /></label>
+            <label className="f">เงินเดือน (บาท/เดือน)<input type="number" min="0" name="salary" value={f.salary} onChange={(e) => set('salary', e.target.value)} data-testid="emp-salary" /></label>
+            <label className="f">ค่าจ้างรายวัน (บาท/วัน)<input type="number" min="0" name="dailyRate" value={f.dailyRate} onChange={(e) => set('dailyRate', e.target.value)} data-testid="emp-daily" /></label>
             <label className="f">คอมมิชชัน (% ยอดขายก่อน VAT)<input type="number" min="0" step="0.1" value={f.commissionPct} onChange={(e) => set('commissionPct', e.target.value)} /></label>
-            <label className="f">เลขบัตรประชาชน<input type="text" inputMode="numeric" maxLength={17} value={f.nationalId} onChange={(e) => set('nationalId', e.target.value)} /></label>
+            <label className="f">เลขบัตรประชาชน<input type="text" inputMode="numeric" maxLength={17} name="nationalId" value={f.nationalId} onChange={(e) => set('nationalId', e.target.value)} /></label>
             <label className="row small"><input type="checkbox" checked={f.sso} onChange={(e) => set('sso', e.target.checked)} /> หักประกันสังคม</label>
           </div>
         </>
@@ -216,13 +219,13 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
       {isNew && <label className="row small"><input type="checkbox" checked={withUser} onChange={(e) => setWithUser(e.target.checked)} /> สร้างผู้ใช้เข้าระบบให้พนักงานคนนี้</label>}
       {(isNew ? withUser : !!emp.user) ? (
         <div className="fgrid">
-          <label className="f">ชื่อผู้ใช้ *<input type="text" value={f.username} readOnly={!isNew} autoComplete="off" placeholder="ภาษาอังกฤษ เช่น prae" onChange={(e) => set('username', e.target.value)} data-testid="emp-username" /></label>
+          <label className="f">ชื่อผู้ใช้ *<input type="text" data-field="user.username" value={f.username} readOnly={!isNew} autoComplete="off" placeholder="ภาษาอังกฤษ เช่น prae" onChange={(e) => set('username', e.target.value)} data-testid="emp-username" /></label>
           <label className="f">บทบาท (สิทธิ์)
             <select value={f.role} disabled={owner} onChange={(e) => set('role', e.target.value as Form['role'])} data-testid="emp-role">
               {(owner ? Role.options : ROLES).map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}
             </select>
           </label>
-          {isNew && <label className="f">PIN อนุมัติ (ผู้จัดการ · ไม่บังคับ)<input type="password" inputMode="numeric" maxLength={6} value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>}
+          {isNew && <label className="f">PIN อนุมัติ (ผู้จัดการ · ไม่บังคับ)<input type="password" inputMode="numeric" maxLength={6} data-field="user.pin" value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>}
           {isNew && <div className="small muted" style={{ alignSelf: 'end' }}>รหัสผ่าน: ระบบตั้งรหัสชั่วคราวให้และแสดงครั้งเดียวหลังบันทึก</div>}
         </div>
       ) : <div className="small muted">{isNew ? 'ไม่สร้างผู้ใช้ (เช่น พนักงานที่ไม่ใช้ระบบ)' : 'พนักงานคนนี้ไม่มีผู้ใช้ · สร้างผู้ใช้ได้ตอนเพิ่มพนักงานเท่านั้น'}</div>}

@@ -5,6 +5,7 @@ import { ReportCoupons } from '@erp/contracts';
 import { api, errText } from '../../api';
 import { fmt, th } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart } from './shared';
+import { ErrorBanner } from '../../errors';
 
 export default function CouponReport() {
   const [from, setFrom] = useState(monthStart());
@@ -19,7 +20,7 @@ export default function CouponReport() {
         <span className="sp" />
         <DownloadButtons path="/api/reports/coupons" query={{ from, to }} testId="coupon-dl" />
       </div>
-      {r.isError && <div className="note bad small">{errText(r.error)}</div>}
+      {r.isError && <ErrorBanner error={r.error} onRetry={() => void r.refetch()} retrying={r.isFetching} />}
       <div className="tw">
         <table data-testid="coupon-table">
           <thead><tr><th>บิล</th><th>วันที่</th><th>สมาชิก</th><th>คูปอง</th><th className="n">มูลค่า</th><th>เลขอ้างอิงการตัด</th></tr></thead>

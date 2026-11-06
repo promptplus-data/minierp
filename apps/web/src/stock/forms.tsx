@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AdjustRequest, StockDoc, type Product } from '@erp/contracts';
 import { d, sum } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
+import { checkFields, qtyMsg, requiredMsg } from '../errors';
 import { useCatalog, useMeta, useVendors, useWarehouseStock, useWarehouses } from '../data';
 import { fmt, fq, Modal, ReasonField, reasonInit, reasonText, ShortageModal, useToast, type ReasonState, type Shortage } from '../ui';
 
@@ -65,8 +66,11 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
     const r = reasonText(reason);
     if (r === null) return setErr('เลือก "อื่น ๆ" แล้ว ต้องพิมพ์เหตุผลก่อน');
     if (!rows.length) return setErr('เพิ่มสินค้าอย่างน้อย 1 รายการ');
-    if (rows.some((l) => !isNum(l.q, kind === 'adj') || d(l.q).isZero() || (kind !== 'adj' && d(l.q).lt(0)))) return setErr(kind === 'adj' ? 'ใส่จำนวน + หรือ − ทุกแถว (ห้าม 0)' : 'จำนวนต้องมากกว่า 0 ทุกแถว');
-    if (kind === 'tr' && from === to) return setErr('เลือกคลังปลายทางที่ต่างจากต้นทาง');
+    const badQty = (l: Line) => !isNum(l.q, kind === 'adj') || d(l.q).isZero() || (kind !== 'adj' && d(l.q).lt(0));
+    if (!checkFields({
+      ...Object.fromEntries(rows.map((l, i) => [`lines.${i}.qty`, badQty(l) && (kind === 'adj' ? 'ใส่จำนวน + หรือ − (ห้าม 0)' : 'จำนวนต้องมากกว่า 0')])),
+      toWarehouseId: kind === 'tr' && from === to && 'เลือกคลังปลายทางที่ต่างจากต้นทาง',
+    })) return;
     const fullReason = note.trim() ? `${r} · ${note.trim()}` : r;
     setBusy(true);
     setErr('');
@@ -89,7 +93,7 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
       toast(kind === 'adj' ? `ส่งขออนุมัติปรับยอด ${no} แล้ว` : `บันทึก ${no} แล้ว ${rows.length} รายการ`);
       onClose();
     } catch (e) {
-      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK') setShort(e.details as Shortage[]);
+      if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK' && e.claim()) setShort(e.details as Shortage[]);
       else setErr(errText(e));
     } finally {
       setBusy(false);
@@ -104,10 +108,10 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
       <p className="small muted" style={{ margin: 0 }}>ใส่ได้หลายสินค้าในใบเดียว · สแกนบาร์โค้ดเพื่อเพิ่มแถวได้ · {kind === 'adj' ? 'ใส่ + เพื่อเพิ่ม หรือ − เพื่อลด ทุกแถวต้องรอเจ้าของร้านหรือผู้จัดการอนุมัติก่อนสต็อกเปลี่ยน' : kind === 'tr' ? 'ล็อตย้ายไปพร้อมวันที่และต้นทุนเดิม' : 'ตัดล็อตเก่าก่อน (FIFO)'}</p>
       <div className="fgrid">
         <label className="f">{kind === 'tr' ? 'จากคลัง' : 'คลัง'}
-          <select value={from} onChange={(e) => setWh(e.target.value)} data-testid="sf-wh">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
+          <select name={kind === 'tr' ? 'fromWarehouseId' : 'warehouseId'} value={from} onChange={(e) => setWh(e.target.value)} data-testid="sf-wh">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
         </label>
         {kind === 'tr' && (
-          <label className="f">ไปคลัง<select value={to} onChange={(e) => setWh2(e.target.value)} data-testid="sf-wh2">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+          <label className="f">ไปคลัง<select name="toWarehouseId" value={to} onChange={(e) => setWh2(e.target.value)} data-testid="sf-wh2">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
         )}
         <ReasonField kind={kind} value={reason} onChange={setReason} label={kind === 'tr' ? 'เหตุผลการโอน' : 'เหตุผล'} />
         <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === 'iss' ? 'เช่น ใช้ซ่อมหลังคาร้าน' : 'ไม่บังคับ'} /></label>
@@ -137,7 +141,7 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
                       <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p?.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>
                     )}
                   </td>
-                  <td className="n"><input className={`qty${bad ? ' bad' : ''}`} type="text" inputMode="decimal" value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`sf-q${i}`} /></td>
+                  <td className="n"><input className={`qty${bad ? ' bad' : ''}`} type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`sf-q${i}`} /></td>
                   <td className="n">{fq(av)} {p?.units[0]?.name}</td>
                   <td className="n" style={bad ? { color: 'var(--bad)', fontWeight: 600 } : undefined}>
                     {fq(after)}{bad && <div className="small">{kind === 'adj' ? (isNum(l.q, true) && !d(l.q).isZero() ? 'ติดลบไม่ได้' : 'ใส่จำนวน') : 'เกินคงเหลือ'}</div>}
@@ -192,12 +196,13 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const vatAmt = vat ? net.times('0.07') : d(0);
 
   const save = async () => {
-    if (!dn.trim()) return setErr('กรอกเลขที่ใบส่งของ');
-    if (!inv.trim()) return setErr('กรอกเลขที่ใบกำกับภาษี / บิลของผู้ขาย');
     const ls = lines.filter((l) => l.pid);
     if (!ls.length) return setErr('เลือกสินค้าอย่างน้อย 1 รายการ');
-    if (ls.some((l) => !isNum(l.q) || d(l.q).lte(0) || !isNum(l.cost))) return setErr('จำนวนต้องมากกว่า 0 และต้นทุนต้องเป็นตัวเลข');
-    if (bd && !isNum(bd)) return setErr('ส่วนลดท้ายบิลต้องเป็นตัวเลข');
+    if (!checkFields({
+      deliveryNo: requiredMsg(dn, 'เลขที่ใบส่งของ'), vendorInvoiceNo: requiredMsg(inv, 'เลขที่ใบกำกับภาษี / บิลของผู้ขาย'),
+      ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [[`lines.${i}.qty`, qtyMsg(l.q)], [`lines.${i}.unitCost`, !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
+      billDiscount: !!bd && !isNum(bd) && 'ส่วนลดท้ายบิลต้องเป็นตัวเลข',
+    })) return;
     setBusy(true);
     setErr('');
     try {
@@ -220,10 +225,10 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
       <h3>ซื้อเข้าแบบบันทึกเอง</h3>
       <p className="small muted" style={{ margin: 0 }}>สำหรับของที่ซื้อจากผู้จำหน่าย · 1 ใบรับได้หลายสินค้า · บันทึกแล้วสร้างล็อตใหม่ตามวันที่รับของ</p>
       <div className="fgrid">
-        <label className="f">ผู้จำหน่าย<select value={vId} onChange={(e) => setVendor(e.target.value)}>{(vendors.data ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
-        <label className="f">เลขที่ใบส่งของ (จำเป็น)<input type="text" value={dn} onChange={(e) => setDn(e.target.value)} placeholder="เช่น DO-6910-0158" data-testid="gr-dn" /></label>
-        <label className="f">เลขที่ใบกำกับภาษีผู้ขาย (จำเป็น)<input type="text" value={inv} onChange={(e) => setInv(e.target.value)} placeholder="เช่น IV6910-0042" data-testid="gr-inv" /></label>
-        <label className="f">เข้าคลัง<select value={whId} onChange={(e) => setWh(e.target.value)}>{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+        <label className="f">ผู้จำหน่าย<select name="vendorId" value={vId} onChange={(e) => setVendor(e.target.value)}>{(vendors.data ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+        <label className="f">เลขที่ใบส่งของ (จำเป็น)<input type="text" name="deliveryNo" value={dn} onChange={(e) => setDn(e.target.value)} placeholder="เช่น DO-6910-0158" data-testid="gr-dn" /></label>
+        <label className="f">เลขที่ใบกำกับภาษีผู้ขาย (จำเป็น)<input type="text" name="vendorInvoiceNo" value={inv} onChange={(e) => setInv(e.target.value)} placeholder="เช่น IV6910-0042" data-testid="gr-inv" /></label>
+        <label className="f">เข้าคลัง<select name="warehouseId" value={whId} onChange={(e) => setWh(e.target.value)}>{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
       </div>
       <div className="tw">
         <table>
@@ -242,8 +247,8 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
                     {!p && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
                   </td>
                   <td>{p ? <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select> : '-'}</td>
-                  <td className="n"><input className="qty" type="text" inputMode="decimal" value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`gr-q${i}`} /></td>
-                  <td className="n"><input className="qty" type="text" inputMode="decimal" value={l.cost} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
+                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`gr-q${i}`} /></td>
+                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.cost} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
                   <td className="n">{fmt(amt(l))}</td>
                   <td>{lines.length > 1 && <button className="btn sm bad" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>ลบ</button>}</td>
                 </tr>
@@ -255,7 +260,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
       <div className="row"><button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0' }])}>+ เพิ่มสินค้า</button><span className="small muted">{lines.filter((l) => l.pid).length} รายการ</span></div>
       <div className="grid g2" style={{ gap: 12 }}>
         <div>
-          <label className="f">ส่วนลดท้ายบิลจากผู้ขาย (บาท{vat ? ' ก่อน VAT' : ''} · ไม่ได้ระบุรายสินค้า)<input type="text" inputMode="decimal" value={bd} placeholder="0" onChange={(e) => setBd(e.target.value)} data-testid="gr-bd" /></label>
+          <label className="f">ส่วนลดท้ายบิลจากผู้ขาย (บาท{vat ? ' ก่อน VAT' : ''} · ไม่ได้ระบุรายสินค้า)<input type="text" inputMode="decimal" name="billDiscount" value={bd} placeholder="0" onChange={(e) => setBd(e.target.value)} data-testid="gr-bd" /></label>
           <div className="small muted" style={{ marginTop: 4 }}>ตั้งต้นบันทึกเป็นส่วนลดรับแยก ไม่ลดทุนรายสินค้า (BR-19) · ร้านเลือกให้กระจายเข้าทุนได้ในตั้งค่า · ยอดเจ้าหนี้คิดหลังหักส่วนลด</div>
         </div>
         <div className="tot">

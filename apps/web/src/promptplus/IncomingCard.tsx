@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, errText } from '../api';
 import { useMeta } from '../data';
+import { ErrorBanner } from '../errors';
 
 interface Incoming { id: string; deliveryNo: string; vendorId: string | null; lines: { sku: string; qty: string }[] }
 
@@ -17,7 +18,7 @@ export default function IncomingCard() {
   return (
     <div className="card" data-testid="pp-incoming">
       <h2>ของที่กำลังมาจาก Prompt Plus</h2>
-      {q.isError ? <div className="note bad small">{errText(q.error)}</div> : (
+      {q.isError ? <ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} /> : (
         <div className="tw"><table>
           <thead><tr><th>ใบส่งของ</th><th>สถานะ</th><th>สินค้า</th></tr></thead>
           <tbody>

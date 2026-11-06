@@ -16,6 +16,7 @@ import { useAuth } from '../../auth';
 import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useToast } from '../../ui';
 import { LICENSE_STATE, admErr, todayYmd } from './common';
 import { useLicense } from './Gate';
+import { ErrorBanner } from '../../errors';
 
 const TABS = [['license', 'License key'], ['backup', 'สำรองข้อมูลขึ้น cloud'], ['share', 'ส่งสรุปยอดขายให้ SCG'], ['export', 'ย้ายร้านไป Cloud']] as const;
 type Tab = (typeof TABS)[number][0];
@@ -173,7 +174,7 @@ function Backup() {
   };
 
   if (cfg.isLoading) return <><div className="sk" /><div className="sk" /></>;
-  if (cfg.isError || !c) return <div className="note bad small">{admErr(cfg.error)}</div>;
+  if (cfg.isError || !c) return <ErrorBanner error={cfg.error} onRetry={() => void cfg.refetch()} retrying={cfg.isFetching} />;
   const oauthReady = provider !== 's3' && c.oauthClientConfigured[provider];
   const connected = provider !== 's3' && c.provider === provider && !!c.oauth?.connected;
 
@@ -271,7 +272,7 @@ function OauthModal({ provider, start, onClose, onDone }: { provider: 'gdrive' |
   useEffect(() => {
     if (status !== 'pending') return;
     const t = setInterval(() => {
-      api('POST', '/api/backup/oauth/poll', { body: { provider }, schema: BackupOauthPolled })
+      api('POST', '/api/backup/oauth/poll', { body: { provider }, schema: BackupOauthPolled, silent: true })
         .then((r) => { if (r.status === 'connected') onDone(); else if (r.status !== 'pending') setStatus(r.status); })
         .catch((e: unknown) => { setErr(admErr(e)); setStatus('error'); });
     }, start.interval * 1000);

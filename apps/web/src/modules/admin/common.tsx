@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { HrMe, type HrEmpType, type HrLeaveType, type HrPayslip, type LicenseStatus } from '@erp/contracts';
 import { LEAVE_TH, periodTH } from '@erp/core';
-import { ApiFail, api, errText } from '../../api';
+import { ApiFail, api, errText, registerReasons } from '../../api';
 import { useAuth } from '../../auth';
 import { fmt, th } from '../../ui';
 import './admin.css';
@@ -28,6 +28,8 @@ export const prevPeriod = (p: string) => {
 /** Thai text for the module's own error reasons (details.reason), else the generic message. */
 const REASONS: Record<string, string> = {
   OWNER_ONLY: 'เฉพาะเจ้าของร้านเท่านั้นที่ทำรายการนี้ได้',
+  LAST_SUPER: 'ต้องมี Super admin ที่ใช้งานอยู่อย่างน้อย 1 คน ปิดใช้งานหรือลดบทบาทคนสุดท้ายไม่ได้',
+  ADM_SELF: 'ปิดใช้งานหรือลดบทบาทบัญชีของตัวเองไม่ได้ ให้ Super admin คนอื่นทำให้',
   LICENSE_INVALID: 'license key ไม่ถูกต้อง (ลายเซ็นไม่ตรง หรือคัดลอกไม่ครบ)',
   LICENSE_EDITION: 'คีย์นี้ไม่ใช่ของรุ่น On-premise',
   LICENSE_SHOP_MISMATCH: 'คีย์นี้ออกให้ร้านอื่น (ชื่อร้านหรือเลขผู้เสียภาษีไม่ตรงกับร้านนี้)',
@@ -60,9 +62,16 @@ const REASONS: Record<string, string> = {
   OAUTH_POLL_FAILED: 'เชื่อมบัญชีไม่สำเร็จ ลองใหม่อีกครั้ง',
   OAUTH_NETWORK: 'ติดต่อผู้ให้บริการไม่ได้ ตรวจอินเทอร์เน็ต',
 };
+registerReasons(REASONS);
+const ADM_LOGIN: Record<string, string> = {
+  DISABLED: 'บัญชีผู้ดูแลนี้ถูกปิดใช้งาน เข้าระบบไม่ได้ ให้ Super admin เปิดใช้งานให้',
+  LOCKED: 'บัญชีถูกล็อกเพราะใส่รหัสผ่านผิด 5 ครั้ง ให้ Super admin ตั้งรหัสผ่านใหม่ให้',
+  BAD_CREDENTIALS: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+};
 export function admErr(e: unknown): string {
   if (e instanceof ApiFail) {
     const r = e.detail<string>('reason');
+    if (e.code === 'UNAUTHORIZED' && r && ADM_LOGIN[r]) return ADM_LOGIN[r]!;
     if (r && REASONS[r]) return REASONS[r]!;
   }
   return errText(e);
