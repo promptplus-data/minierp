@@ -3,6 +3,7 @@
  * server's private key) and the key registry; REQ-M19-10 the sales summaries shops chose to send.
  */
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { AdmLicense, AdmShare, page } from '@erp/contracts';
@@ -19,7 +20,8 @@ export default function Licenses() {
   const { admin } = useAdm();
   const qc = useQueryClient();
   const write = admCan(admin, 'licenseWrite');
-  const [q, setQ] = useState('');
+  const [sp] = useSearchParams();
+  const [q, setQ] = useState(sp.get('q') ?? '');
   const dq = useDebounced(q.trim(), 300);
   const pager = useCursorPager(dq);
   const list = useQuery({
@@ -48,7 +50,7 @@ export default function Licenses() {
                 return (
                   <tr key={l.licenseId} className={l.revokedAt ? 'off' : ''}>
                     <td className="mono small">{l.licenseId}</td>
-                    <td>{l.shopName}<div className="small muted">{l.taxId}{l.region ? ` · ${l.region}` : ''}</div></td>
+                    <td><Link to={`/scg/shops?q=${encodeURIComponent(l.taxId)}`}>{l.shopName}</Link><div className="small muted">{l.taxId}{l.region ? ` · ${l.region}` : ''}</div></td>
                     <td className="small">{l.type === 'lifetime' ? 'ตลอดชีพ' : 'มีวันหมดอายุ'}</td>
                     <td className="small">{l.expiresAt ? th(l.expiresAt) : '-'}</td>
                     <td className="small">{thTime(l.issuedAt)}<div className="muted">{l.issuedBy}</div></td>

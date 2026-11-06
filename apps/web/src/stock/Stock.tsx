@@ -1,5 +1,6 @@
 /** M06 stock: balances per warehouse, FIFO lots, multi-line forms, adjustment requests with approve / reject. */
-import { Suspense, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdjustRequest, StockBalance, StockDoc, StockLot, page } from '@erp/contracts';
 import { d } from '@erp/core';
@@ -11,6 +12,7 @@ import { useCatalog, useWarehouses } from '../data';
 import { fmt, fq, Modal, Pager, Pill, ShortageModal, SkeletonRows, th, useCursorPager, useDebounced, useToast, type Shortage } from '../ui';
 import { ReceiptModal, StockFormModal, type StockKind } from './forms';
 import { ErrorBanner } from '../errors';
+import { DocLink, DocText, RouteLink } from '../doclink';
 
 const PAGE = 20; // products per page (NFR-12); the API pages product × warehouse rows
 
@@ -87,7 +89,7 @@ export default function Stock() {
                 const low = p && total.lt(d(p.reorderPoint));
                 return (
                   <tr key={pid}>
-                    <td>{p?.name ?? pid} {p?.isScg && <Pill k="acc">SCG</Pill>}</td>
+                    <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(pid)}`}>{p?.name ?? pid}</RouteLink> {p?.isScg && <Pill k="acc">SCG</Pill>}</td>
                     <td>{p?.units[0]?.name}{p && p.units.length > 1 && <div className="small muted">{p.units.slice(1).map((u) => `1 ${u.name} = ${fq(u.factor)} ${p.units[0]!.name}`).join(' · ')}</div>}</td>
                     {active.map((w) => <td key={w.id} className="n">{fq(byWh.get(w.id) ?? '0')}</td>)}
                     <td className="n"><b>{fq(total)}</b></td>
@@ -154,7 +156,7 @@ function LotsModal({ productId, onClose }: { productId: string; onClose: () => v
                   <td className="lot-first">{first ? <Pill k="acc">ตัดก่อน</Pill> : 'ถัดไป'}</td>
                   <td>{th(l.receivedAt)}</td>
                   <td>{whs.data?.find((w) => w.id === l.warehouseId)?.name}</td>
-                  <td className="mono small">{l.ref}</td>
+                  <td className="mono small"><DocLink no={l.ref} /></td>
                   <td className="n">{fq(l.qty)} {p?.units[0]?.name}</td>
                   <td className="n">{fmt(l.unitCost)}</td>
                   <td className="n">{fmt(d(l.qty).times(d(l.unitCost)))}</td>
@@ -167,6 +169,7 @@ function LotsModal({ productId, onClose }: { productId: string; onClose: () => v
         </table>
       </div>
       <div className="row" style={{ justifyContent: 'space-between' }}>
+        <RouteLink className="small" to={`/stock-ledger?productId=${encodeURIComponent(productId)}`}>ดูความเคลื่อนไหวของสินค้านี้ (สมุดคุมสต็อก)</RouteLink>
         <span className="small muted">ทุนเฉลี่ยของล็อตคงเหลือ (FIFO) {fmt(totalQ.gt(0) ? totalV.div(totalQ) : 0)}</span>
         <b>มูลค่าตาม FIFO {fmt(totalV)}</b>
       </div>
@@ -185,6 +188,14 @@ function AdjustCard() {
   const cat = useCatalog();
   const whs = useWarehouses();
   const [status, setStatus] = useState<Status>('pending');
+  // ?req=RQ… (home approvals card, audit log, stock count): open the tab that holds that request and highlight it
+  const [sp] = useSearchParams();
+  const req = sp.get('req');
+  const found = useQuery({
+    queryKey: ['adjust', 'by-no', req], enabled: !!req,
+    queryFn: async () => (await api('GET', '/api/stock/adjust-requests', { query: { q: req ?? '', limit: 5 }, schema: page(AdjustRequest) })).items.find((a) => a.no === req)?.status ?? null,
+  });
+  useEffect(() => { if (found.data) setStatus(found.data); }, [found.data]);
   const pager = useCursorPager(status);
   const [short, setShort] = useState<Shortage[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -227,7 +238,7 @@ function AdjustCard() {
           <thead><tr><th>เลขที่</th><th>วันที่</th><th>คลัง</th><th>สินค้า / ผลต่าง</th><th>เหตุผล</th><th>สถานะ</th><th /></tr></thead>
           <tbody>
             {list.isLoading ? <SkeletonRows cols={7} rows={2} /> : items.map((a) => (
-              <tr key={a.id}>
+              <tr key={a.id} id={`adj-${a.no}`} style={a.no === req ? { background: 'var(--acc-soft, #fff7d6)' } : undefined}>
                 <td className="mono">{a.no}</td>
                 <td className="small">{th(a.createdAt)}</td>
                 <td>{whs.data?.find((w) => w.id === a.warehouseId)?.name}</td>
@@ -235,8 +246,8 @@ function AdjustCard() {
                   const neg = d(l.qtyDelta).lt(0);
                   return <div key={l.productId}>{cat.byId.get(l.productId)?.name ?? l.productId} <b style={{ color: neg ? 'var(--bad)' : 'var(--ok)' }}>{neg ? '' : '+'}{fq(l.qtyDelta)}</b></div>;
                 })}</td>
-                <td className="small">{a.reason}</td>
-                <td>{a.status === 'pending' ? <Pill k="warn">รออนุมัติ</Pill> : a.status === 'approved' ? <Pill k="ok">อนุมัติแล้ว{a.resultDocNo ? ` · ${a.resultDocNo}` : ''}</Pill> : <Pill k="mut">ไม่อนุมัติ</Pill>}</td>
+                <td className="small"><DocText text={a.reason} /></td>
+                <td>{a.status === 'pending' ? <Pill k="warn">รออนุมัติ</Pill> : a.status === 'approved' ? <><Pill k="ok">อนุมัติแล้ว</Pill>{a.resultDocNo && <div className="mono small"><DocLink no={a.resultDocNo} type="ADJ" /></div>}</> : <Pill k="mut">ไม่อนุมัติ</Pill>}</td>
                 <td>
                   {a.status === 'pending' && (canApprove ? (
                     <div className="row" style={{ flexWrap: 'nowrap' }}>

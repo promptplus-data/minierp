@@ -6,6 +6,13 @@ import { api, errText } from '../../api';
 import { fmt, Pager, SkeletonRows, th, useCursorPager } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, monthTh, thisMonth } from './shared';
 import { ErrorBanner } from '../../errors';
+import { DocLink } from '../../doclink';
+
+/** ABB summaries per device-day have no document of their own (the note says so); every other number opens its document. */
+function VatNo({ no }: { no: string }) {
+  const parts = no.split(/\s+[–-]\s+/);
+  return <>{parts.map((n, i) => <span key={n}>{i > 0 && ' – '}<DocLink no={n} /></span>)}</>;
+}
 
 export default function VatReport() {
   const [month, setMonth] = useState(thisMonth());
@@ -43,7 +50,7 @@ export default function VatReport() {
           <tbody>
             {loading ? <SkeletonRows cols={11} rows={8} /> : (data?.rows ?? []).map((x) => (
               <tr key={`${x.seq}-${x.no}`} className={x.note.startsWith('ยกเลิก') ? 'rp-void' : ''}>
-                <td className="n">{x.seq}</td><td className="small">{th(x.date)}</td><td className="mono small">{x.no}</td><td>{x.name}</td><td className="mono small">{x.taxId || '-'}</td><td className="small">{x.branch}</td>
+                <td className="n">{x.seq}</td><td className="small">{th(x.date)}</td><td className="mono small"><VatNo no={x.no} /></td><td>{x.name}</td><td className="mono small">{x.taxId || '-'}</td><td className="small">{x.branch}</td>
                 <td className="n">{fmt(x.base7)}</td><td className="n">{fmt(x.exempt)}</td><td className="n">{fmt(x.vat)}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.note}</td>
               </tr>
             ))}

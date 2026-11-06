@@ -10,6 +10,10 @@ const Ap = lazy(() => import('./Ap'));
 const Count = lazy(() => import('./Count'));
 const Ledger = lazy(() => import('./Ledger'));
 const Import = lazy(() => import('./Import'));
+const GrDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.GrDetailPage })));
+const ApBillDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.ApBillDetailPage })));
+const PvDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.PvDetailPage })));
+const VendorReturnDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.VendorReturnDetailPage })));
 
 export const purchasingModule: WebModule = {
   nav: [
@@ -21,9 +25,13 @@ export const purchasingModule: WebModule = {
   ],
   routes: [
     { path: '/purchasing', element: <Receiving /> },
+    { path: '/purchasing/gr/:no', element: <GrDetailPage /> },
     { path: '/stock-ledger', element: <Ledger /> },
     { path: '/stock-count', element: <Count /> },
     { path: '/ap', element: <Ap /> },
+    { path: '/ap/bill/:no', element: <ApBillDetailPage /> },
+    { path: '/ap/pv/:no', element: <PvDetailPage /> },
+    { path: '/ap/pr/:no', element: <VendorReturnDetailPage /> },
     { path: '/import', element: <Import /> },
   ],
 };

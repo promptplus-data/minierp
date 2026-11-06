@@ -6,11 +6,25 @@ import { api, errText } from '../../api';
 import { fmt, fq, Pager, SkeletonRows, useCursorPager, useDebounced } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart } from './shared';
 import { ErrorBanner } from '../../errors';
+import { RouteLink } from '../../doclink';
 
 const BY: [ReportSalesBy, string][] = [
   ['day', 'รายวัน'], ['month', 'รายเดือน'], ['product', 'ตามสินค้า'], ['category', 'ตามหมวดสินค้า'], ['customer', 'ตามลูกค้า'], ['seller', 'ตามพนักงานขาย'], ['saleType', 'ตามประเภทการขาย'],
 ];
 const LABEL_TH: Record<string, string> = { retail: 'ขายปลีกหน้าร้าน', whole: 'ขายส่ง / เงินเชื่อ', project: 'ขายโครงการ' };
+
+/** Report row → the documents behind it: the sales list filtered by the row's key and the report period. */
+function drill(by: ReportSalesBy, key: string, from: string, to: string): string {
+  const p = new URLSearchParams();
+  if (by === 'day') { p.set('from', key); p.set('to', key); }
+  else if (by === 'month') { p.set('from', `${key}-01`); p.set('to', new Date(Date.UTC(Number(key.slice(0, 4)), Number(key.slice(5, 7)), 0)).toISOString().slice(0, 10)); }
+  else {
+    p.set('from', from); p.set('to', to);
+    if (by === 'product') p.set('productId', key); else if (by === 'customer') p.set('customerId', key);
+    else if (by === 'seller') p.set('createdBy', key); else if (by === 'category') p.set('category', key);
+  }
+  return `/sales?${p}`;
+}
 
 export default function SalesReport() {
   const [from, setFrom] = useState(monthStart());
@@ -63,7 +77,7 @@ export default function SalesReport() {
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={8} /> : (data?.rows ?? []).map((x) => (
               <tr key={x.key}>
-                <td>{by === 'saleType' ? (LABEL_TH[x.key] ?? x.label) : x.label}{x.sub && <div className="small muted">{x.sub}</div>}</td>
+                <td><RouteLink to={drill(by, x.key, from, to)}>{by === 'saleType' ? (LABEL_TH[x.key] ?? x.label) : x.label}</RouteLink>{x.sub && <div className="small muted">{x.sub}</div>}</td>
                 <td className="n">{x.bills}</td><td className="n">{x.returns || ''}</td>{by === 'product' && <td className="n">{x.qty != null ? fq(x.qty) : ''}</td>}
                 <td className="n">{fmt(x.net)}</td><td className="n">{fmt(x.vat)}</td><td className="n">{fmt(x.total)}</td>
                 {cost && <><td className="n">{x.cogs != null ? fmt(x.cogs) : ''}</td><td className="n">{x.gp != null ? fmt(x.gp) : ''}</td><td className="n">{x.gpPct ?? ''}</td></>}

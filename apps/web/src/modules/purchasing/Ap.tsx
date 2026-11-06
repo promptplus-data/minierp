@@ -12,6 +12,7 @@ import { useAuth } from '../../auth';
 import { useMeta, useVendors } from '../../data';
 import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { ApDueCard } from './shared';
+import { DocLink, DocLinks } from '../../doclink';
 
 const METHOD_TH = { transfer: 'โอนเงิน', cheque: 'เช็ค', cash: 'เงินสด' } as const;
 const RET_REASONS = ['สินค้าชำรุด / แตก', 'ส่งผิดรุ่น / ผิดสี', 'ส่งเกินจำนวนที่สั่ง', 'คุณภาพไม่ได้มาตรฐาน'];
@@ -88,7 +89,7 @@ function BillList() {
           <tbody>
             {loading ? <SkeletonRows cols={12} rows={5} /> : (r.data?.items ?? []).map((b) => (
               <tr key={b.id}>
-                <td className="mono">{b.no}</td><td>{b.vendorName}</td><td className="mono small">{b.vendorInvoiceNo}</td><td className="mono small">{b.grNo ?? (b.source === 'opening' ? 'ยอดยกมา' : '-')}</td>
+                <td className="mono"><DocLink no={b.no} type="AP" /></td><td>{b.vendorName}</td><td className="mono small">{b.vendorInvoiceNo}</td><td className="mono small">{b.grNo ? <DocLink no={b.grNo} type="GR" /> : b.source === 'opening' ? 'ยอดยกมา' : '-'}</td>
                 <td>{th(b.date)}</td><td>{th(b.dueDate)}<div className="small muted">{b.termLabel}</div></td>
                 <td className="n">{fmt(b.total)}</td><td className="n">{d(b.discount).gt(0) ? fmt(b.discount) : '-'}</td><td className="n">{fmt(b.paid)}</td><td className="n">{d(b.returned).gt(0) ? fmt(b.returned) : '-'}</td>
                 <td className="n"><b>{fmt(b.balance)}</b> {d(b.balance).gt(0) ? (b.overdueDays > 0 ? <Pill k="bad">เกิน {b.overdueDays} วัน</Pill> : null) : <Pill k="ok">จ่ายครบ</Pill>}</td>
@@ -129,8 +130,8 @@ function ReturnList({ canWrite, onNew }: { canWrite: boolean; onNew: () => void 
           <tbody>
             {loading ? <SkeletonRows cols={6} rows={3} /> : (r.data?.items ?? []).map((x) => (
               <tr key={x.id}>
-                <td className="mono">{x.no}</td><td>{th(x.date)}</td><td>{x.vendorName}</td>
-                <td className="mono small">{x.grNo}{x.vendorCnNo && <div className="muted">ใบลดหนี้ผู้ขาย {x.vendorCnNo}</div>}</td>
+                <td className="mono"><DocLink no={x.no} type="PR" /></td><td>{th(x.date)}</td><td>{x.vendorName}</td>
+                <td className="mono small"><DocLink no={x.grNo} type="GR" />{x.vendorCnNo && <div className="muted">ใบลดหนี้ผู้ขาย {x.vendorCnNo}</div>}</td>
                 <td className="small">{x.reason}<div className="muted">{x.lines.map((l) => `${l.name} × ${fq(l.qty)} ${l.unitName}`).join(', ')}</div></td>
                 <td className="n">{fmt(x.total)}{d(x.unapplied).gt(0) && <div className="small muted">เครดิตคงเหลือ {fmt(x.unapplied)}</div>}</td>
               </tr>
@@ -159,7 +160,7 @@ function PaymentList() {
           <tbody>
             {loading ? <SkeletonRows cols={7} rows={3} /> : (r.data?.items ?? []).map((p) => (
               <tr key={p.id}>
-                <td className="mono">{p.no}</td><td>{th(p.date)}</td><td>{p.vendorName}<div className="small muted">{p.bills.map((b) => b.billNo).join(', ')}</div></td>
+                <td className="mono"><DocLink no={p.no} type="PV" /></td><td>{th(p.date)}</td><td>{p.vendorName}<div className="small muted"><DocLinks nos={p.bills.map((b) => b.billNo)} type="AP" /></div></td>
                 <td className="small">{METHOD_TH[p.method]}{p.ref && <div className="muted">{p.ref}</div>}</td>
                 <td className="n">{fmt(p.amount)}</td><td className="n">{d(p.wht).gt(0) ? fmt(p.wht) : '-'}</td><td className="small">{p.createdBy}</td>
               </tr>
@@ -183,7 +184,7 @@ function DiscountList() {
           <thead><tr><th>วันที่</th><th>ใบรับสินค้า</th><th>ผู้ขาย</th><th className="n">ส่วนลด (ก่อน VAT)</th><th>บันทึกโดย</th></tr></thead>
           <tbody>
             {loading ? <SkeletonRows cols={5} rows={2} /> : (r.data?.items ?? []).map((x) => (
-              <tr key={x.billNo}><td>{th(x.date)}</td><td className="mono">{x.grNo ?? x.billNo}</td><td>{x.vendorName}</td><td className="n">{fmt(x.amount)}</td><td className="small">{x.createdBy}</td></tr>
+              <tr key={x.billNo}><td>{th(x.date)}</td><td className="mono">{x.grNo ? <DocLink no={x.grNo} type="GR" /> : <DocLink no={x.billNo} type="AP" />}</td><td>{x.vendorName}</td><td className="n">{fmt(x.amount)}</td><td className="small">{x.createdBy}</td></tr>
             ))}
             {!loading && !r.data?.items.length && <tr><td colSpan={5} className="empty">ยังไม่มี</td></tr>}
           </tbody>

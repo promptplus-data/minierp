@@ -7,6 +7,7 @@ import { useWarehouses } from '../../data';
 import { fmt, fq, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../../ui';
 import { DownloadButtons, Field, bkkToday } from './shared';
 import { ErrorBanner } from '../../errors';
+import { RouteLink } from '../../doclink';
 
 export default function StockReport() {
   const whs = useWarehouses();
@@ -53,7 +54,7 @@ export default function StockReport() {
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={8} /> : (data?.rows ?? []).map((x) => (
               <tr key={x.productId}>
-                <td>{x.name}<div className="small muted mono">{x.sku}</div></td><td className="small">{x.category}</td>
+                <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(x.productId)}`}>{x.name}</RouteLink><div className="small muted mono">{x.sku}</div></td><td className="small">{x.category}</td>
                 <td className="n">{fq(x.qty)} <span className="small muted">{x.unit}</span></td>
                 {cost && <><td className="n">{x.avgCost != null ? fmt(x.avgCost) : ''}</td><td className="n">{x.value != null ? fmt(x.value) : ''}</td></>}
                 <td className="n">{Number(x.reorderPoint) ? fq(x.reorderPoint) : ''}</td>

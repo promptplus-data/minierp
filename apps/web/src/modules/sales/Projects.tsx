@@ -1,6 +1,6 @@
 /** M09 ขายโครงการ: project list, project page (installments, deposits, delivery rounds, variation orders) and the "set up as project" modal. */
 import { useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { SalesOrderSummary, SalesProject, SalesProjectSummary, page, type SalesDeposit, type SalesOrder } from '@erp/contracts';
 import { d } from '@erp/core';
@@ -99,8 +99,9 @@ function FlowMap() {
 export default function Projects() {
   const nav = useNavigate();
   const { can } = useAuth();
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState('active');
+  const [sp] = useSearchParams();
+  const [q, setQ] = useState(sp.get('q') ?? '');
+  const [status, setStatus] = useState(sp.get('q') ? '' : 'active');
   const [m, setM] = useState(false);
   const dq = useDebounced(q.trim(), 250);
   const pager = useCursorPager(`${dq}|${status}`);

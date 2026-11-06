@@ -3,7 +3,8 @@
  * (several people at once), the system quantity stays hidden while counting, submit → variances become one
  * adjustment request that the owner / manager approves on the stock page.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StockCount, StockCountSummary, page } from '@erp/contracts';
 import { d } from '@erp/core';
@@ -11,6 +12,7 @@ import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useCatalog, useWarehouses } from '../../data';
 import { fq, Modal, Pager, Pill, SkeletonRows, thTime, useCursorPager, useToast } from '../../ui';
+import { DocLink } from '../../doclink';
 import './purchasing.css';
 
 const STATUS = { counting: ['กำลังนับ', 'warn'], submitted: ['ส่งผลแล้ว', 'ok'], cancelled: ['ยกเลิก', 'mut'] } as const;
@@ -20,6 +22,14 @@ export default function Count() {
   const whs = useWarehouses();
   const [open, setOpen] = useState<string | null>(null);
   const [start, setStart] = useState(false);
+  // ?no=CNT… (links from the ledger, audit log and adjust requests) opens that round
+  const [sp, setSp] = useSearchParams();
+  const wantNo = sp.get('no');
+  const byNo = useQuery({
+    queryKey: ['pu', 'count-by-no', wantNo], enabled: !!wantNo,
+    queryFn: async () => (await api('GET', '/api/stock-counts', { query: { q: wantNo ?? '' }, schema: page(StockCountSummary) })).items.find((c) => c.no === wantNo)?.id ?? null,
+  });
+  useEffect(() => { if (byNo.data) { setOpen(byNo.data); setSp({}, { replace: true }); } }, [byNo.data, setSp]);
   const pager = useCursorPager('');
   const list = useQuery({
     queryKey: ['pu', 'counts', pager.cursor],
@@ -41,7 +51,7 @@ export default function Count() {
                 <td className="mono">{c.no}</td><td>{wName(c.warehouseId)}</td><td>{c.category ?? 'ทั้งคลัง'}</td>
                 <td><Pill k={STATUS[c.status][1]}>{STATUS[c.status][0]}</Pill></td><td className="n">{c.counted} / {c.lines}</td>
                 <td className="small">{c.openedBy}<div className="muted">{thTime(c.openedAt)}</div></td>
-                <td className="mono small">{c.adjustRequestNo ?? (c.status === 'submitted' ? 'ตรงทุกรายการ' : '-')}</td>
+                <td className="mono small">{c.adjustRequestNo ? <DocLink no={c.adjustRequestNo} type="RQ" /> : c.status === 'submitted' ? 'ตรงทุกรายการ' : '-'}</td>
                 <td><button className="btn sm" onClick={() => setOpen(c.id)} data-testid={`count-open-${c.no}`}>{c.status === 'counting' ? 'นับต่อ' : 'ดูผล'}</button></td>
               </tr>
             ))}
@@ -183,7 +193,7 @@ function CountSheet({ id, onBack }: { id: string; onBack: () => void }) {
           </tbody>
         </table>
       </div>
-      {x?.adjustRequestNo && <div className="note small" style={{ marginTop: 10 }}>ผลต่างส่งเป็นคำขอปรับยอด {x.adjustRequestNo} แล้ว · ผู้จัดการหรือเจ้าของร้านอนุมัติได้ที่หน้า "คลังสินค้า"</div>}
+      {x?.adjustRequestNo && <div className="note small" style={{ marginTop: 10 }}>ผลต่างส่งเป็นคำขอปรับยอด <DocLink no={x.adjustRequestNo} type="RQ" /> แล้ว · ผู้จัดการหรือเจ้าของร้านอนุมัติได้ที่หน้า "คลังสินค้า"</div>}
       {canCount && (
         <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
           <button className="btn bad" onClick={() => void cancel()}>ยกเลิกรอบนับ</button>

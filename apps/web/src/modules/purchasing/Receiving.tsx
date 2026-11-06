@@ -3,6 +3,7 @@
  * (REQ-M05-03/04), confirmed receipts with their AP bill, manual receipt (core form), BR-19 setting.
  */
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DELIVERY_FIELDS, DeliveryCommitRes, DeliveryPreview, GrDraft, GrDraftConfirmRes, GrDraftSummary, GrSummary, PurchasingSettings, page } from '@erp/contracts';
 import { d } from '@erp/core';
@@ -13,6 +14,7 @@ import { ReceiptModal } from '../../stock/forms';
 import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { ageText, downloadErrorRows, GrAlertBanner, readAsBase64, STATUS_PILL, STATUS_TH, thOrDash, useDashboard } from './shared';
 import { ErrorBanner } from '../../errors';
+import { DocLink, DocLinks } from '../../doclink';
 
 const FIELD_TH: Record<(typeof DELIVERY_FIELDS)[number], string> = {
   product_code: 'รหัสสินค้า', product_name: 'ชื่อสินค้า', qty: 'จำนวน', unit: 'หน่วย', unit_price: 'ราคาต่อหน่วย',
@@ -25,7 +27,10 @@ export default function Receiving() {
   const { can } = useAuth();
   const qc = useQueryClient();
   const [modal, setModal] = useState<'import' | 'manual' | 'settings' | null>(null);
-  const [draftId, setDraftId] = useState<string | null>(null);
+  const [sp, setSp] = useSearchParams();
+  const [draftId, setDraftIdState] = useState<string | null>(sp.get('draft'));
+  // ?draft=<id> opens that draft (links from the GR-overdue banner and the home dashboard)
+  const setDraftId = (id: string | null) => { setDraftIdState(id); if (sp.has('draft') && !id) setSp({}, { replace: true }); };
   const dash = useDashboard();
   const canReceive = can('inv.receive') === 1;
   const refresh = () => qc.invalidateQueries({ queryKey: ['pu'] });
@@ -34,7 +39,7 @@ export default function Receiving() {
       <GrAlertBanner link={false} />
       <div className="grid g4 pu-kpis">
         <div className="card kpi"><div className="l">ของรอยืนยันรับ</div><div className="v">{dash.data ? `${dash.data.draftCount} ใบ` : '…'}</div><div className="s">{dash.data?.overdueDrafts ? `ค้างเกิน 2 วัน ${dash.data.overdueDrafts} ใบ` : 'ไม่มีใบค้างเกิน 2 วัน'}</div></div>
-        <div className="card kpi"><div className="l">สินค้าต่ำกว่าจุดสั่งซื้อ</div><div className="v">{dash.data ? `${dash.data.belowReorder} รายการ` : '…'}</div><div className="s">ดูที่ "สมุดคุมสต็อก"</div></div>
+        <Link className="card kpi" to="/stock-ledger?tab=reorder" data-testid="kpi-reorder"><div className="l">สินค้าต่ำกว่าจุดสั่งซื้อ</div><div className="v">{dash.data ? `${dash.data.belowReorder} รายการ` : '…'}</div><div className="s">ดูรายการที่ "สมุดคุมสต็อก"</div></Link>
       </div>
       <div className="card">
         <h2>
@@ -123,13 +128,13 @@ function ReceiptList() {
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={4} /> : (r.data?.items ?? []).map((g) => (
               <tr key={g.id}>
-                <td className="mono">{g.no}</td>
+                <td className="mono"><DocLink no={g.no} type="GR" /></td>
                 <td className="mono small">{g.deliveryNo ?? '-'}<div className="muted">{g.vendorInvoiceNo ?? ''}</div></td>
                 <td>{th(g.date)}</td>
                 <td>{g.vendorName ?? '-'}<div className="small muted">{whs.data?.find((w) => w.id === g.warehouseId)?.name}</div></td>
                 <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div></td>
                 {seeCost && <td className="n">{g.total != null ? fmt(g.total) : '-'}</td>}
-                <td className="mono small">{g.apBillNo ?? '-'}</td>
+                <td className="mono small"><DocLink no={g.apBillNo} type="AP" /></td>
               </tr>
             ))}
             {!loading && !r.data?.items.length && <tr><td colSpan={cols} className="empty">ยังไม่มีใบรับสินค้า</td></tr>}
@@ -247,7 +252,7 @@ function DeliveryImportModal({ onClose, onDone }: { onClose: () => void; onDone:
                 <span>{g.dealerName ?? 'ไม่ระบุผู้ขาย'}{g.vendorId ? ` → ${vendors.data?.find((v) => v.id === g.vendorId)?.name ?? ''}` : ' · เลือกผู้ขายตอนยืนยัน'}</span>
                 <span className="muted">{g.lines} รายการ{g.deliveryDate ? ` · ส่ง ${th(g.deliveryDate)}` : ''}{g.poNo ? ` · ${g.poNo}` : ''}</span>
                 <span className="row">{g.unmatched ? <Pill k="warn">ยังไม่ผูก {g.unmatched}</Pill> : null}{g.errors ? <Pill k="bad">ผิด {g.errors}</Pill> : null}{!g.dnNo && <Pill k="mut">กรอก DN ตอนยืนยัน</Pill>}</span>
-                {g.duplicate && <div className="pu-msgs bad">{g.duplicate.kind === 'received' ? `DN ${g.dnNo} รับแล้วใน ${g.duplicate.ref} เมื่อ ${th(g.duplicate.date)}` : `DN ${g.dnNo} มีใบรับของร่างค้างอยู่แล้ว`}</div>}
+                {g.duplicate && <div className="pu-msgs bad">{g.duplicate.kind === 'received' ? <>DN {g.dnNo} รับแล้วใน <DocLink no={g.duplicate.ref} type="GR" /> เมื่อ {th(g.duplicate.date)}</> : `DN ${g.dnNo} มีใบรับของร่างค้างอยู่แล้ว`}</div>}
                 {g.duplicate?.kind === 'received' && g.dnNo && (
                   <label className="row small"><input type="checkbox" checked={force.includes(g.dnNo)} onChange={(e) => setForce((f) => (e.target.checked ? [...f, g.dnNo!] : f.filter((x) => x !== g.dnNo)))} /> นำเข้าซ้ำ (ต้องระบุเหตุผล)</label>
                 )}

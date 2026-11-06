@@ -9,6 +9,7 @@ import { useAuth } from '../auth';
 import { DOC_TITLE, METHOD_TH, Slip } from '../pos/Receipt';
 import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useToast, type ApprovalInput } from '../ui';
 import { ErrorBanner } from '../errors';
+import { DocLink, DocLinks } from '../doclink';
 
 export default function DocDetail() {
   const { no = '' } = useParams();
@@ -35,7 +36,8 @@ export default function DocDetail() {
         <div className="kv">
           <span>วันที่</span><span>{th(doc.date)}</span>
           <span>ลูกค้า</span><span>{doc.customer.name}{doc.customer.phone ? ` · ${doc.customer.phone}` : ''}</span>
-          {doc.ref && <><span>อ้างอิง</span><span className="mono"><Link to={`/sales/${encodeURIComponent(doc.ref)}`}>{doc.ref}</Link></span></>}
+          {doc.ref && <><span>อ้างอิง</span><span className="mono" data-testid="doc-ref"><DocLink no={doc.ref} /></span></>}
+          {!!doc.related?.length && <><span>เอกสารต่อเนื่อง</span><span className="mono" data-testid="doc-related">{doc.related.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}><DocLink no={x.no} type={x.kind} /></span></span>)}</span></>}
           <span>ภาษี</span><span>{doc.vatMode === 'inc' ? 'ราคารวม VAT 7%' : doc.vatMode === 'exc' ? 'ราคาไม่รวม VAT' : 'ร้านไม่จด VAT'}</span>
           <span>ชำระโดย</span><span>{doc.payments.map((p) => `${METHOD_TH[p.method] ?? p.method} ${fmt(p.amount)}`).join(' + ') || '-'}</span>
         </div>
@@ -117,7 +119,7 @@ function VoidModal({ doc, onClose }: { doc: SalesDoc; onClose: () => void }) {
     return (
       <Modal onClose={onClose} label="ยกเลิกไม่ได้">
         <h3>ยกเลิก {doc.no} ไม่ได้</h3>
-        <div className="note bad" data-testid="downstream">มีเอกสารอ้างอิงบิลนี้แล้ว ให้จัดการเอกสารนั้นก่อน: {blocked.join(', ') || '-'} · ถ้าต้องการคืนของเพิ่ม ให้ทำใบลดหนี้ / รับคืนสินค้าแทน</div>
+        <div className="note bad" data-testid="downstream">มีเอกสารอ้างอิงบิลนี้แล้ว ให้จัดการเอกสารนั้นก่อน: <DocLinks nos={blocked} /> · ถ้าต้องการคืนของเพิ่ม ให้ทำใบลดหนี้ / รับคืนสินค้าแทน</div>
         <div className="act"><button className="btn pri" onClick={onClose}>ตกลง</button></div>
       </Modal>
     );

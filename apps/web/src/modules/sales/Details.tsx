@@ -1,15 +1,16 @@
 /** Detail pages of the B2B chain with their actions and A4 print layouts: quotation, sales order, delivery order, tax invoice. */
 import { useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { SalesDelivery, SalesInvoice, SalesOrder, SalesProject, SalesQuote } from '@erp/contracts';
 import { d } from '@erp/core';
-import { api, errText } from '../../api';
+import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useMeta } from '../../data';
 import { fmt, fq, Modal, Pill, th, useToast } from '../../ui';
 import { DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } from './Forms';
 import { ProjectSetupModal } from './Projects';
+import { DocLink, DocLinks, RouteLink } from '../../doclink';
 import {
   balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
 } from './shared';
@@ -18,7 +19,7 @@ const Loading = () => <div className="card"><div className="sk" /><div className
 const Fail = ({ error }: { error: unknown }) => <div className="card"><div className="note bad">{errText(error)}</div><p><Link to="/b2b">‹ กลับไปเอกสารขายส่ง</Link></p></div>;
 const Back = ({ tab }: { tab: string }) => <Link to={`/b2b?tab=${tab}`} className="btn sm">‹ กลับ</Link>;
 const Refs = ({ items }: { items: { no: string; status: 'active' | 'void'; date?: string; to?: string; extra?: ReactNode }[] }) =>
-  items.length ? <>{items.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span className="mono" style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}>{x.to ? <Link to={x.to}>{x.no}</Link> : x.no}</span>{x.extra}</span>)}</> : <span className="muted">-</span>;
+  items.length ? <>{items.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span className="mono" style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}>{x.to ? <RouteLink to={x.to}>{x.no}</RouteLink> : x.no}</span>{x.extra}</span>)}</> : <span className="muted">-</span>;
 
 // ---------- quotation ----------
 export function QuoteDetail() {
@@ -116,7 +117,7 @@ export function OrderDetail() {
             <button className="btn sm" onClick={() => setM('print')}>พิมพ์</button>
             {live && canDeliver && x.dlvStatus !== 'delivered' && <button className="btn sm pri" onClick={() => setM('deliver')} data-testid="so-deliver">ออกใบส่งของ</button>}
             {live && !x.project && can('sales.project') === 1 && !x.invoices.some((i) => i.status === 'active') && <button className="btn sm" onClick={() => setM('project')} data-testid="so-make-project">ตั้งเป็นโครงการ</button>}
-            {x.project && <Link className="btn sm" to={`/projects/${x.project.id}`}>ดูโครงการ</Link>}
+            {x.project && <RouteLink className="btn sm" to={`/projects/${x.project.id}`}>ดูโครงการ</RouteLink>}
             {live && !!can('sales.voidDoc') && <button className="btn sm bad" onClick={() => setM('void')} data-testid="void">ยกเลิก</button>}
           </span>
         </h2>
@@ -124,10 +125,10 @@ export function OrderDetail() {
           <span>ลูกค้า</span><span>{x.customer.name}</span>
           <span>วันที่</span><span>{th(x.date)}</span>
           <span>เงื่อนไขชำระ</span><span>{TERM_TH(x.term)}</span>
-          {x.quoteNo && <><span>จากใบเสนอราคา</span><span className="mono"><Link to={`/b2b/qt/${encodeURIComponent(x.quoteNo)}`}>{x.quoteNo}</Link></span></>}
-          {x.project && <><span>โครงการ</span><span><Link to={`/projects/${x.project.id}`}>{x.project.name}</Link> {x.project.isMain ? <Pill k="acc">สัญญางาน</Pill> : <Pill k="mut">งานเพิ่ม</Pill>}</span></>}
+          {x.quoteNo && <><span>จากใบเสนอราคา</span><span className="mono"><DocLink no={x.quoteNo} type="QT" /></span></>}
+          {x.project && <><span>โครงการ</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink> {x.project.isMain ? <Pill k="acc">สัญญางาน</Pill> : <Pill k="mut">งานเพิ่ม</Pill>}</span></>}
           {x.shipTo && <><span>ส่งที่</span><span>{x.shipTo}</span></>}
-          <span>ใบส่งของ</span><span><Refs items={x.deliveries.map((v) => ({ ...v, to: `/b2b/do/${encodeURIComponent(v.no)}`, extra: v.invoiceNo ? <span className="small muted"> → {v.invoiceNo}</span> : null }))} /></span>
+          <span>ใบส่งของ</span><span><Refs items={x.deliveries.map((v) => ({ ...v, to: `/b2b/do/${encodeURIComponent(v.no)}`, extra: v.invoiceNo ? <span className="small muted"> → <DocLink no={v.invoiceNo} type="INV" /></span> : null }))} /></span>
           <span>ใบกำกับภาษี</span><span><Refs items={x.invoices.map((v) => ({ ...v, to: `/b2b/inv/${encodeURIComponent(v.no)}` }))} /></span>
         </div>
         {x.creditApproval && <div className="note small" style={{ marginTop: 10 }} data-testid="credit-approval">อนุมัติขายเชื่อ: {x.creditApproval.detail}</div>}
@@ -199,8 +200,8 @@ export function DeliveryDetail() {
         <div className="kv">
           <span>ลูกค้า</span><span>{x.customer.name}</span>
           <span>วันที่</span><span>{th(x.date)}</span>
-          <span>อ้างอิง</span><span className="mono">{x.soNo ? <Link to={`/b2b/so/${encodeURIComponent(x.soNo)}`}>{x.soNo}</Link> : x.invoiceNo ? <Link to={`/b2b/inv/${encodeURIComponent(x.invoiceNo)}`}>{x.invoiceNo}</Link> : '-'}</span>
-          {x.project && <><span>โครงการ / หน้างาน</span><span><Link to={`/projects/${x.project.id}`}>{x.project.name}</Link>{x.project.site ? ` · ${x.project.site}` : ''}</span></>}
+          <span>อ้างอิง</span><span className="mono">{x.soNo ? <DocLink no={x.soNo} type="SO" /> : x.invoiceNo ? <DocLink no={x.invoiceNo} type="INV" /> : '-'}</span>
+          {x.project && <><span>โครงการ / หน้างาน</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink>{x.project.site ? ` · ${x.project.site}` : ''}</span></>}
           <span>ส่งที่</span><span>{x.shipTo || '-'}</span>
           <span>รถ / คนขับ</span><span>{x.vehicle || '-'}</span>
           <span>สต็อก</span><span>{x.cutsStock ? `ตัดสต็อก FIFO จาก ${x.warehouse?.name}` : 'ไม่ตัดสต็อก (ตัดแล้วตอนออกใบกำกับ)'}</span>
@@ -235,8 +236,10 @@ export function InvoiceDetail() {
   const meta = useMeta();
   const invalidate = useSalesInvalidate();
   const [m, setM] = useState<null | 'print' | 'void' | 'deliver'>(null);
-  const q = useQuery({ queryKey: ['invoice', no], queryFn: () => api('GET', `/api/sales/invoices/${encodeURIComponent(no)}`, { schema: SalesInvoice }) });
+  const q = useQuery({ queryKey: ['invoice', no], queryFn: () => api('GET', `/api/sales/invoices/${encodeURIComponent(no)}`, { schema: SalesInvoice }), retry: false });
   if (q.isLoading) return <Loading />;
+  // a POS full tax invoice has no B2B record: its document page is the core sales-document screen
+  if (!q.data && q.error instanceof ApiFail && q.error.status === 404) return <Navigate to={`/sales/${encodeURIComponent(no)}`} replace />;
   if (!q.data) return <Fail error={q.error} />;
   const x = q.data;
   const live = x.doc.status === 'active';
@@ -257,12 +260,12 @@ export function InvoiceDetail() {
         <div className="kv">
           <span>ลูกค้า</span><span>{x.customer.name}{x.customer.taxId ? ` · เลขผู้เสียภาษี ${x.customer.taxId}` : ''}</span>
           <span>วันที่</span><span>{th(x.doc.date)}</span>
-          <span>ที่มา</span><span>{SOURCE_TH[x.source]}{x.doc.ref ? <> · อ้างอิง <span className="mono">{x.doc.ref}</span></> : ''}</span>
+          <span>ที่มา</span><span>{SOURCE_TH[x.source]}{x.doc.ref ? <> · อ้างอิง <span className="mono"><DocLink no={x.doc.ref} /></span></> : ''}</span>
           {x.kind === 'credit' && <><span>ครบกำหนด</span><span>{th(x.dueDate)} ({TERM_TH(x.term)})</span></>}
           <span>ยอดค้าง</span><span><b data-testid="inv-balance">{fmt(x.arBalance)}</b>{d(x.settled).gt(0) ? ` · รับชำระแล้ว ${fmt(x.settled)}` : ''}{d(x.credited).gt(0) ? ` · ลดหนี้ ${fmt(x.credited)}` : ''}</span>
           {x.deliveries.length > 0 && <><span>ใบส่งของ</span><span><Refs items={x.deliveries.map((n) => ({ no: n, status: 'active' as const, to: `/b2b/do/${encodeURIComponent(n)}` }))} /></span></>}
-          {x.soNo && <><span>ใบสั่งขาย</span><span className="mono"><Link to={`/b2b/so/${encodeURIComponent(x.soNo)}`}>{x.soNo}</Link></span></>}
-          {x.project && <><span>โครงการ</span><span><Link to={`/projects/${x.project.id}`}>{x.project.name}</Link>{x.installment ? ` · งวดที่ ${x.installment.n} (${x.installment.pct}%)` : ''}</span></>}
+          {x.soNo && <><span>ใบสั่งขาย</span><span className="mono"><DocLink no={x.soNo} type="SO" /></span></>}
+          {x.project && <><span>โครงการ</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink>{x.installment ? ` · งวดที่ ${x.installment.n} (${x.installment.pct}%)` : ''}</span></>}
           <span>ใบวางบิล</span><span><Refs items={x.billingNotes.map((v) => ({ ...v, to: `/ar/bn/${encodeURIComponent(v.no)}` }))} /></span>
           <span>ใบเสร็จรับเงิน</span><span><Refs items={x.receipts.map((v) => ({ ...v, to: `/ar/rc/${encodeURIComponent(v.no)}`, extra: <span className="small muted"> {fmt(v.settled)}</span> }))} /></span>
           <span>ใบลดหนี้</span><span><Refs items={x.creditNotes.map((v) => ({ ...v, to: `/sales/${encodeURIComponent(v.no)}`, extra: <span className="small muted"> {fmt(v.total)}{v.refund === 'credit' ? ' ลดหนี้' : ''}</span> }))} /></span>

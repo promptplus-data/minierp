@@ -28,6 +28,7 @@ export const retailModule: WebModule = {
   routes: [
     { path: '/promos', element: <Promos /> },
     { path: '/production', element: <Production /> },
+    { path: '/production/:no', element: <Production /> },
     { path: '/price-lists', element: <PriceLists /> },
     { path: '/product-images', element: <ProductImages /> },
     { path: '/pos-devices', element: <PosDevices /> },

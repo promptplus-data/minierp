@@ -3,6 +3,7 @@
  * REQ-M14-05 read-only support view (needs the shop's grant), REQ-M19-07 import an on-prem export as a new shop.
  */
 import { useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { AdmImportResult, AdmSupportView, AdmTenant, page } from '@erp/contracts';
@@ -17,7 +18,8 @@ const REGIONS = ['ภาคเหนือ', 'ภาคกลาง', 'ภาค
 export default function Shops() {
   const { admin } = useAdm();
   const qc = useQueryClient();
-  const [q, setQ] = useState('');
+  const [sp] = useSearchParams();
+  const [q, setQ] = useState(sp.get('q') ?? '');
   const [status, setStatus] = useState<'' | 'active' | 'suspended'>('');
   const dq = useDebounced(q.trim(), 300);
   const pager = useCursorPager(`${dq}|${status}`);
@@ -52,7 +54,7 @@ export default function Shops() {
               <tr key={t.id}>
                 <td className="mono small">{t.code}</td>
                 <td>{t.name}<div className="small muted">{t.taxId}{t.vatRegistered ? ' · จด VAT' : ''}{t.customerCode ? ` · ลูกค้า ${t.customerCode}` : ''}</div></td>
-                <td className="small">{t.region || '-'}</td>
+                <td className="small">{t.region || '-'}{t.edition === 'onprem' && <div><Link to={`/scg/licenses?q=${encodeURIComponent(t.taxId)}`}>license</Link></div>}</td>
                 <td><span className={`ed ${t.edition}`}>{t.edition === 'cloud' ? 'Cloud' : 'On-premise'}</span></td>
                 <td>{t.status === 'active' ? <Pill k="ok">ใช้งาน</Pill> : <span title={t.statusReason ?? ''}><Pill k="bad">ระงับ</Pill></span>}</td>
                 <td className="n">{t.users}</td><td className="n">{t.bills30d}</td><td className="n">{fmt(t.salesMonth)}</td>

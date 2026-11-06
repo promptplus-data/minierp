@@ -13,15 +13,20 @@ export const useDashboard = () => useQuery({ queryKey: ['pu', 'dashboard'], quer
 /** BR-10 / REQ-M05-09: draft receipts waiting more than 2 days. Shown until someone confirms them. */
 export function GrAlertBanner({ link = true }: { link?: boolean }) {
   const a = useGrAlert();
+  const { can } = useAuth();
   if (!a.data?.count) return null;
+  const canOpen = can('inv.receive') === 1;
   return (
     <div className="note bad pu-banner" role="alert" data-testid="gr-alert">
       <span>
         <b>ของรอยืนยันรับเกิน {a.data.days} วัน {a.data.count} ใบ</b>
-        {' · '}{a.data.items.slice(0, 5).map((g) => `${g.dnNo ?? 'ไม่มีเลข DN'} (${g.ageDays} วัน)`).join(', ')}
+        {' · '}{a.data.items.slice(0, 5).map((g, i) => {
+          const label = `${g.dnNo ?? 'ไม่มีเลข DN'} (${g.ageDays} วัน)`;
+          return <span key={g.id}>{i > 0 && ', '}{canOpen && link ? <Link to={`/purchasing?draft=${encodeURIComponent(g.id)}`} data-testid="gr-alert-item">{label}</Link> : label}</span>;
+        })}
         {' · '}สต็อกในระบบยังไม่รวมของชุดนี้ และขายติดลบไม่ได้
       </span>
-      {link && <Link className="btn sm pri" to="/purchasing">ไปยืนยันรับ</Link>}
+      {link && canOpen && <Link className="btn sm pri" to="/purchasing">ไปยืนยันรับ</Link>}
     </div>
   );
 }
@@ -32,11 +37,11 @@ export function ApDueCard() {
   const q = useDashboard();
   if (!can('fin.ap') || !q.data) return null;
   return (
-    <div className="card kpi" data-testid="ap-due-card">
+    <Link className="card kpi" to="/ap" data-testid="ap-due-card">
       <div className="l">เจ้าหนี้ครบกำหนดใน 7 วัน</div>
       <div className="v">฿{fmt(q.data.apDue7.amount)}</div>
-      <div className="s">{q.data.apDue7.count} ใบ{q.data.apOverdue.count ? ` · เกินกำหนดแล้ว ${q.data.apOverdue.count} ใบ ฿${fmt(q.data.apOverdue.amount)}` : ''} · <Link to="/ap">ไปจ่ายเงิน</Link></div>
-    </div>
+      <div className="s">{q.data.apDue7.count} ใบ{q.data.apOverdue.count ? ` · เกินกำหนดแล้ว ${q.data.apOverdue.count} ใบ ฿${fmt(q.data.apOverdue.amount)}` : ''} · ไปจ่ายเงิน</div>
+    </Link>
   );
 }
 

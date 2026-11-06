@@ -6,6 +6,7 @@ import { api, errText } from '../../api';
 import { fmt, th } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart } from './shared';
 import { ErrorBanner } from '../../errors';
+import { DocLink } from '../../doclink';
 
 export default function CouponReport() {
   const [from, setFrom] = useState(monthStart());
@@ -25,7 +26,7 @@ export default function CouponReport() {
         <table data-testid="coupon-table">
           <thead><tr><th>บิล</th><th>วันที่</th><th>สมาชิก</th><th>คูปอง</th><th className="n">มูลค่า</th><th>เลขอ้างอิงการตัด</th></tr></thead>
           <tbody>
-            {rows.map((x) => <tr key={x.billNo + x.couponCode}><td className="mono">{x.billNo}</td><td>{th(x.date)}</td><td className="mono">{x.memberId}</td><td>{x.couponCode}</td><td className="n">{fmt(x.amount)}</td><td className="mono small">{x.redeemRef}</td></tr>)}
+            {rows.map((x) => <tr key={x.billNo + x.couponCode}><td className="mono"><DocLink no={x.billNo} /></td><td>{th(x.date)}</td><td className="mono">{x.memberId}</td><td>{x.couponCode}</td><td className="n">{fmt(x.amount)}</td><td className="mono small">{x.redeemRef}</td></tr>)}
             {!r.isLoading && !rows.length && <tr><td colSpan={6} className="empty">ยังไม่มีบิลที่ใช้คูปอง SCG Family ในช่วงนี้</td></tr>}
             {!!rows.length && <tr className="rp-tot"><td colSpan={4}>รวม</td><td className="n">{fmt(r.data!.total)}</td><td /></tr>}
           </tbody>

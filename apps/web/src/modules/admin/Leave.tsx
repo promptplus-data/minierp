@@ -3,7 +3,7 @@
  * calendar, and the employee's own payslips. Staff see only their own rows (server-side).
  */
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { HrLeave, HrLeaveCreated, page, type HrLeaveType } from '@erp/contracts';
 import { addDays, d, dayOfWeek, leaveDays } from '@erp/core';
@@ -76,8 +76,10 @@ export default function Leave() {
 function LeaveList({ boss, myEmpId }: { boss: boolean; myEmpId: string | null }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [sp] = useSearchParams();
   const [status, setStatus] = useState<'' | HrLeave['status']>('');
-  const [q, setQ] = useState('');
+  // ?no=LV… (dashboard approvals, audit log) filters the list to that request
+  const [q, setQ] = useState(sp.get('no') ?? '');
   const dq = useDebounced(q.trim(), 300);
   const pager = useCursorPager(`${status}|${dq}`);
   const list = useQuery({

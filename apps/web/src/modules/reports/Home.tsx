@@ -7,6 +7,7 @@ import { d } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { fmt, fq, th } from '../../ui';
+import { DocLink, RouteLink } from '../../doclink';
 import { ApDueCard, GrAlertBanner } from '../purchasing/shared';
 import { monthTh } from './shared';
 import './reports.css';
@@ -21,7 +22,7 @@ function ArDueCard() {
   if (!can('fin.ar') || !q.data) return null;
   const { dueSoon, overdue } = q.data;
   return (
-    <Link className="card kpi" to="/ar" data-testid="ar-due-card" style={{ '--k': 'var(--c-sale)' } as CSSProperties}>
+    <Link className="card kpi" to="/ar?tab=inv" data-testid="ar-due-card" style={{ '--k': 'var(--c-sale)' } as CSSProperties}>
       <div className="l">ลูกหนี้ครบกำหนดใน 7 วัน</div>
       <div className="v">฿{fmt(dueSoon.amount)}</div>
       <div className="s">{dueSoon.invoices} ใบ · {dueSoon.customers} ราย{d(overdue.amount).gt(0) ? ` · เกินกำหนดแล้ว ${overdue.invoices} ใบ ฿${fmt(overdue.amount)}` : ''}</div>
@@ -80,14 +81,14 @@ export default function Home() {
           </Link>
         )}
         {dash.grPending && (
-          <Link className="card kpi" to="/purchasing" style={k('inv')} data-testid="card-gr">
+          <Link className="card kpi" to={can('inv.receive') ? '/purchasing' : '/stock-ledger'} style={k('inv')} data-testid="card-gr">
             <div className="l">ของรอยืนยันรับ</div>
             <div className="v">{dash.grPending.count} ใบ</div>
             <div className="s">{dash.grPending.count ? `รอนานสุด ${dash.grPending.oldestDays} วัน` : 'ไม่มีของค้างรอ'}</div>
           </Link>
         )}
         {dash.lowStock && (
-          <Link className="card kpi" to="/stock-ledger" style={k('inv')} data-testid="card-low-stock">
+          <Link className="card kpi" to="/stock-ledger?tab=reorder" style={k('inv')} data-testid="card-low-stock">
             <div className="l">สินค้าต่ำกว่าจุดสั่งซื้อ</div>
             <div className="v">{dash.lowStock.count} รายการ</div>
             <div className="s">{dash.lowStock.items[0] ? `ใกล้หมดสุด: ${dash.lowStock.items[0].name}` : 'สต็อกเพียงพอ'}</div>
@@ -129,7 +130,7 @@ export default function Home() {
             <h2>ใกล้หมดสต็อก</h2>
             <ul className="hm-list">
               {dash.lowStock.items.map((x) => (
-                <li key={x.productId}><span>{x.name}{x.isScg && <span className="pill p-acc" style={{ marginLeft: 6 }}>SCG</span>}</span><span className="n">{fq(x.qty)} / {fq(x.reorderPoint)} {x.unit}</span></li>
+                <li key={x.productId}><span><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(x.productId)}`}>{x.name}</RouteLink>{x.isScg && <span className="pill p-acc" style={{ marginLeft: 6 }}>SCG</span>}</span><span className="n">{fq(x.qty)} / {fq(x.reorderPoint)} {x.unit}</span></li>
               ))}
             </ul>
           </div>
@@ -139,7 +140,7 @@ export default function Home() {
             <h2>ลูกหนี้ที่ต้องตาม</h2>
             <ul className="hm-list">
               {dash.arDue.items.map((x) => (
-                <li key={x.no}><span>{x.customer}<div className="small muted mono">{x.no} · ครบ {th(x.dueDate)}</div></span><span className="n">฿{fmt(x.balance)}{x.overdueDays > 0 && <div className="small" style={{ color: 'var(--bad)' }}>เกิน {x.overdueDays} วัน</div>}</span></li>
+                <li key={x.no}><span>{x.customer}<div className="small muted mono"><DocLink no={x.no} /> · ครบ {th(x.dueDate)}</div></span><span className="n">฿{fmt(x.balance)}{x.overdueDays > 0 && <div className="small" style={{ color: 'var(--bad)' }}>เกิน {x.overdueDays} วัน</div>}</span></li>
               ))}
             </ul>
           </div>

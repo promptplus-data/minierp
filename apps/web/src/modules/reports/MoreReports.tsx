@@ -8,6 +8,7 @@ import { useAuth } from '../../auth';
 import { fmt, fq, th } from '../../ui';
 import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart, monthTh, thisMonth } from './shared';
 import { ErrorBanner } from '../../errors';
+import { RouteLink } from '../../doclink';
 
 export function CostReport() {
   const [month, setMonth] = useState(thisMonth());
@@ -66,7 +67,7 @@ export function PromoReport() {
           <tbody>
             {r.isLoading && <tr><td colSpan={8}><div className="sk" /></td></tr>}
             {rows.map((x) => (
-              <tr key={x.key}><td>{x.label}</td><td className="n">{x.bills}</td><td className="n">{Number(x.sets) ? fq(x.sets) : ''}</td><td className="n">{fmt(x.sales)}</td><td className="n">{fmt(x.discount)}</td>
+              <tr key={x.key}><td><RouteLink to="/promos">{x.label}</RouteLink></td><td className="n">{x.bills}</td><td className="n">{Number(x.sets) ? fq(x.sets) : ''}</td><td className="n">{fmt(x.sales)}</td><td className="n">{fmt(x.discount)}</td>
                 {cost && <><td className="n">{x.cogs != null ? fmt(x.cogs) : ''}</td><td className="n">{x.gp != null ? fmt(x.gp) : ''}</td></>}
                 <td className="n">{x.before ? fmt(x.before.sales) : '-'}</td></tr>
             ))}

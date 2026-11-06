@@ -9,6 +9,7 @@ import { fmt, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from
 import { AbbInvoiceModal, DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } from './Forms';
 import { balPill, DLV_STATUS, QT_STATUS, SalesSettingsModal, SOURCE_TH, StatusPill, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
+import { DocLink, DocLinks } from '../../doclink';
 
 type Tab = 'qt' | 'so' | 'do' | 'inv' | 'cn';
 const TABS: [Tab, string][] = [['qt', 'ใบเสนอราคา'], ['so', 'ใบสั่งขาย'], ['do', 'ใบส่งของ'], ['inv', 'ใบกำกับภาษี'], ['cn', 'ใบลดหนี้']];
@@ -87,6 +88,8 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     queryFn: () => api<{ items: unknown[]; nextCursor: string | null }>('GET', URL[tab], { query: { status, q, limit: 20, cursor: pager.cursor } }),
     placeholderData: keepPreviousData,
   });
+  // the previous tab's page stays as placeholder data while the next tab loads: never parse it with this tab's schema
+  const data = list.isPlaceholderData ? undefined : list.data;
   const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
   const open = (path: string) => nav(path);
   let head: ReactNode;
@@ -94,7 +97,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
   const cols = 7;
   if (tab === 'qt') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ยืนราคาถึง</th><th className="n">ยอด</th><th>สถานะ</th><th>โดย</th></tr>;
-    rows = page(SalesQuoteSummary).parse(list.data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesQuoteSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/qt/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/qt/${encodeURIComponent(x.no)}`}>{x.no}</Link>{x.revision > 1 && <span className="small muted"> rev {x.revision}</span>}</td>
         <td>{th(x.date)}</td><td>{x.customer.name}{x.freeLines > 0 && <div><Pill k="warn">นอกระบบ {x.freeLines}</Pill></div>}</td><td>{th(x.validUntil)}</td>
@@ -103,27 +106,27 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else if (tab === 'so') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th className="n">ยอด</th><th>สถานะ</th><th>อ้างอิง</th></tr>;
-    rows = page(SalesOrderSummary).parse(list.data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesOrderSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/so/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/so/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div><Pill k="acc">โครงการ: {x.projectName}</Pill></div>}</td><td className="small">{x.itemsPreview}</td>
         <td className="n">{x.status === 'void' ? <s>{fmt(x.total)}</s> : fmt(x.total)}</td>
-        <td>{x.status === 'void' ? <VoidPill /> : <StatusPill map={DLV_STATUS} k={x.dlvStatus} />}</td><td className="mono small">{x.quoteNo ?? '-'}</td>
+        <td>{x.status === 'void' ? <VoidPill /> : <StatusPill map={DLV_STATUS} k={x.dlvStatus} />}</td><td className="mono small"><DocLink no={x.quoteNo} type="QT" /></td>
       </tr>
     ));
   } else if (tab === 'do') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th>อ้างอิง</th><th className="n">มูลค่า</th><th>สถานะ</th></tr>;
-    rows = page(SalesDeliverySummary).parse(list.data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesDeliverySummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/do/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/do/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div className="small muted">{x.projectName}</div>}</td><td className="small">{x.itemsPreview}</td>
-        <td className="mono small">{x.soNo ?? x.invoiceNo}</td><td className="n">{fmt(x.total)}</td>
-        <td>{x.status === 'void' ? <VoidPill /> : x.billedBy ? <Pill k="ok">ออกใบกำกับ {x.billedBy}</Pill> : x.invoiceNo ? <Pill k="mut">ส่งของฝาก</Pill> : x.projectName ? <Pill k="mut">วางบิลตามงวด</Pill> : <Pill k="warn">รอออกใบกำกับ</Pill>}</td>
+        <td className="mono small">{x.soNo ? <DocLink no={x.soNo} type="SO" /> : <DocLink no={x.invoiceNo} type="INV" />}</td><td className="n">{fmt(x.total)}</td>
+        <td>{x.status === 'void' ? <VoidPill /> : x.billedBy ? <Pill k="ok">ออกใบกำกับ <DocLink no={x.billedBy} type="INV" /></Pill> : x.invoiceNo ? <Pill k="mut">ส่งของฝาก</Pill> : x.projectName ? <Pill k="mut">วางบิลตามงวด</Pill> : <Pill k="warn">รอออกใบกำกับ</Pill>}</td>
       </tr>
     ));
   } else if (tab === 'inv') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ประเภท</th><th>ครบกำหนด</th><th className="n">ยอด</th><th>สถานะ</th></tr>;
-    rows = page(SalesInvoiceSummary).parse(list.data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesInvoiceSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/inv/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/inv/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div className="small muted">{x.projectName}</div>}</td>
@@ -133,10 +136,10 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>อ้างอิง</th><th>คืนเงิน</th><th className="n">ยอด</th><th>เหตุผล</th></tr>;
-    rows = page(SalesCreditNoteSummary).parse(list.data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesCreditNoteSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/sales/${encodeURIComponent(x.no)}`)}>
         <td className="mono"><Link to={`/sales/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td><td>{x.customer.name}</td>
-        <td className="mono small">{x.refNo}</td><td>{x.refund === 'credit' ? <Pill k="acc">ลดหนี้ลูกหนี้</Pill> : x.refund === 'cash' ? 'เงินสด' : 'โอน'}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.reason}</td>
+        <td className="mono small"><DocLink no={x.refNo} /></td><td>{x.refund === 'credit' ? <Pill k="acc">ลดหนี้ลูกหนี้</Pill> : x.refund === 'cash' ? 'เงินสด' : 'โอน'}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.reason}</td>
       </tr>
     ));
   }

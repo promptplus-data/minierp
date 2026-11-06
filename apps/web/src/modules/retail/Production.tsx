@@ -1,5 +1,7 @@
 /** M16 production (mockup VIEWS.production / moModal / outModal / bomModal): MO list, BOM versions, per-MO cost report. */
 import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { RouteLink } from '../../doclink';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bom, Mo, MoReport, MoSuggest, MoSummary, page } from '@erp/contracts';
 import { d, moUnitCost, sum, yieldPct } from '@erp/core';
@@ -39,7 +41,11 @@ function MoList() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
   const pager = useCursorPager(`${status}|${dq}`);
-  const [modal, setModal] = useState<null | { k: 'new' } | { k: 'out' | 'close' | 'view' | 'cancel'; no: string }>(null);
+  // /production/:no opens that order (document links from the stock ledger, audit log, lots)
+  const { no: routeNo } = useParams();
+  const nav = useNavigate();
+  const [modal, setModalRaw] = useState<null | { k: 'new' } | { k: 'out' | 'close' | 'view' | 'cancel'; no: string }>(routeNo ? { k: 'view', no: routeNo } : null);
+  const setModal = (m: typeof modal) => { setModalRaw(m); if (!m && routeNo) nav('/production', { replace: true }); };
   const list = useQuery({
     queryKey: ['mos', status, dq, pager.cursor],
     queryFn: () => api('GET', '/api/mos', { query: { status, q: dq, limit: 20, cursor: pager.cursor }, schema: page(MoSummary) }),
@@ -224,7 +230,7 @@ function MoDetail({ no, mode, onClose, onDone }: { no: string; mode: 'out' | 'cl
     <Modal onClose={onClose} wide label={`ใบสั่งผลิต ${no}`}>
       <div className="print-area">
         <h3>{mode === 'out' ? 'บันทึกผลผลิต' : mode === 'close' ? 'ปิดใบสั่งผลิต · รับสินค้าผลิตเสร็จเข้าสต็อก' : mode === 'cancel' ? 'ยกเลิกใบสั่งผลิต' : m.status === 'closed' ? 'ใบสั่งผลิต / ใบรับสินค้าผลิตเสร็จ' : 'ใบสั่งผลิต / ใบเบิกวัตถุดิบ'} · <span className="mono">{m.no}</span></h3>
-        <p className="small muted" style={{ margin: '4px 0 10px' }}>{m.productName} · แผน {fq(m.planQty)} {m.unitName} · สูตร v{m.bomVersion} · เบิกจาก {m.issueWarehouse.name} เมื่อ {th(m.date)} โดย {m.createdBy} · รับเข้า {m.outputWarehouse.name} <Pill k={STATUS[m.status][1]}>{STATUS[m.status][0]}</Pill></p>
+        <p className="small muted" style={{ margin: '4px 0 10px' }}><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(m.productId)}`}>{m.productName}</RouteLink> · แผน {fq(m.planQty)} {m.unitName} · สูตร v{m.bomVersion} · เบิกจาก {m.issueWarehouse.name} เมื่อ {th(m.date)} โดย {m.createdBy} · รับเข้า {m.outputWarehouse.name} <Pill k={STATUS[m.status][1]}>{STATUS[m.status][0]}</Pill></p>
         <div className="tw">
           <table className="rt-mt">
             <thead><tr><th>วัตถุดิบ</th><th className="n">ตามสูตร</th><th className="n">เบิก</th><th className="n">คืน</th>{mode === 'close' && <th className="n">คืนที่เหลือ</th>}{see && <th className="n">ทุนที่ใช้</th>}<th>ล็อตที่ใช้</th></tr></thead>

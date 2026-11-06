@@ -1,6 +1,6 @@
 /** M08 sales documents: cursor-paged list, filter by type, search. */
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DocSummary, page } from '@erp/contracts';
 import { api, errText } from '../api';
@@ -12,13 +12,17 @@ export const TYPE_TH: Record<string, string> = { ABB: 'อย่างย่อ'
 
 export default function SalesDocs() {
   const nav = useNavigate();
-  const [type, setType] = useState('');
-  const [q, setQ] = useState('');
+  const [sp] = useSearchParams();
+  const [type, setType] = useState(sp.get('type') ?? '');
+  const [q, setQ] = useState(sp.get('q') ?? '');
+  // report drill-down filters (?from&to&productId&customerId&createdBy&category), cleared with the chip
+  const filt = Object.fromEntries(['from', 'to', 'productId', 'customerId', 'createdBy', 'category'].flatMap((k) => (sp.get(k) ? [[k, sp.get(k)!]] : []))) as Record<string, string>;
+  const fkey = JSON.stringify(filt);
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(`${type}|${dq}`);
+  const pager = useCursorPager(`${type}|${dq}|${fkey}`);
   const list = useQuery({
-    queryKey: ['docs', type, dq, pager.cursor],
-    queryFn: () => api('GET', '/api/sales/docs', { query: { type, q: dq, limit: 20, cursor: pager.cursor }, schema: page(DocSummary) }),
+    queryKey: ['docs', type, dq, fkey, pager.cursor],
+    queryFn: () => api('GET', '/api/sales/docs', { query: { type, q: dq, ...filt, limit: 20, cursor: pager.cursor }, schema: page(DocSummary) }),
     placeholderData: keepPreviousData,
   });
   const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
@@ -26,6 +30,12 @@ export default function SalesDocs() {
   return (
     <div className="card">
       <h2>เอกสารขาย</h2>
+      {Object.keys(filt).length > 0 && (
+        <div className="note small row" style={{ marginBottom: 10 }} data-testid="docs-filter">
+          <span>กรองจากรายงาน{filt.from ? ` · ${th(filt.from)}${filt.to && filt.to !== filt.from ? ` – ${th(filt.to)}` : ''}` : ''}{q ? ` · "${q}"` : ''}</span>
+          <Link className="btn sm" to="/sales">ล้างตัวกรอง</Link>
+        </div>
+      )}
       <div className="steps" style={{ marginBottom: 12 }}>
         {TYPES.map(([t, l]) => (
           <span key={t} role="button" tabIndex={0} className={type === t ? 'on' : ''} onClick={() => setType(t)} onKeyDown={(e) => { if (e.key === 'Enter') setType(t); }}>{l}</span>

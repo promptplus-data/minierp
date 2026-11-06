@@ -13,6 +13,7 @@ import { useCustomers } from '../../data';
 import { fmt, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
 import { CustomerSelect, Paper, PrintModal, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
+import { DocLink, DocLinks } from '../../doclink';
 
 type Tab = 'cust' | 'inv' | 'bn' | 'rc';
 const TABS: [Tab, string][] = [['cust', 'ลูกหนี้รายลูกค้า'], ['inv', 'ใบแจ้งหนี้ค้างชำระ'], ['bn', 'ใบวางบิล'], ['rc', 'ใบเสร็จรับเงิน']];
@@ -172,7 +173,7 @@ function InvoiceTable({ q, bucket }: { q: string; bucket: AgingBucket | '' }) {
         head={<tr><th>เลขที่</th><th>ลูกค้า</th><th>วันที่</th><th>ครบกำหนด</th><th className="n">ยอด</th><th className="n">คงค้าง</th><th>สถานะ</th></tr>}>
         {items.map((x) => (
           <tr key={x.id} className="click" onClick={() => nav(`/b2b/inv/${encodeURIComponent(x.no)}`)}>
-            <td className="mono"><Link to={`/b2b/inv/${encodeURIComponent(x.no)}`}>{x.no}</Link>{x.billingNoteNo && <div className="small muted">วางบิล {x.billingNoteNo}</div>}</td>
+            <td className="mono"><Link to={`/b2b/inv/${encodeURIComponent(x.no)}`}>{x.no}</Link>{x.billingNoteNo && <div className="small muted">วางบิล <DocLink no={x.billingNoteNo} type="BN" /></div>}</td>
             <td>{x.customer.name}{x.projectName && <div className="small muted">{x.projectName}</div>}</td><td>{th(x.date)}</td><td>{th(x.dueDate)}</td>
             <td className="n">{fmt(x.total)}</td><td className="n"><b>{fmt(x.arBalance)}</b></td><td>{overduePill(x.overdueDays)}</td>
           </tr>
@@ -212,7 +213,7 @@ function RcTable({ q }: { q: string }) {
         {items.map((x) => (
           <tr key={x.id} className="click" onClick={() => nav(`/ar/rc/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
             <td className="mono"><Link to={`/ar/rc/${encodeURIComponent(x.no)}`}>{x.no}</Link> {x.status === 'void' && <VoidPill />}</td><td>{th(x.date)}</td><td>{x.customer.name}</td>
-            <td className="mono small">{x.invoices}</td><td>{RC_METHOD[x.method]}</td><td className="n">{d(x.wht).gt(0) ? fmt(x.wht) : '-'}</td><td className="n">{fmt(x.settled)}</td>
+            <td className="mono small"><DocLinks nos={x.invoices.split(/,\s*/)} type="INV" /></td><td>{RC_METHOD[x.method]}</td><td className="n">{d(x.wht).gt(0) ? fmt(x.wht) : '-'}</td><td className="n">{fmt(x.settled)}</td>
           </tr>
         ))}
       </Table>
@@ -276,7 +277,7 @@ function BillingNoteModal({ customerId: initial, onClose }: { customerId: string
               {inv.isLoading ? <SkeletonRows cols={6} rows={3} /> : items.map((x) => (
                 <tr key={x.id}>
                   <td><input type="checkbox" checked={chosen.includes(x.no)} onChange={(e) => setSel(e.target.checked ? [...chosen, x.no] : chosen.filter((n) => n !== x.no))} aria-label={`เลือก ${x.no}`} /></td>
-                  <td className="mono">{x.no}</td><td>{th(x.date)}</td><td>{th(x.dueDate)} {x.overdueDays > 0 && <Pill k="bad">เกิน {x.overdueDays} วัน</Pill>}</td><td className="n">{fmt(x.total)}</td><td className="n">{fmt(x.arBalance)}</td>
+                  <td className="mono"><DocLink no={x.no} type="INV" /></td><td>{th(x.date)}</td><td>{th(x.dueDate)} {x.overdueDays > 0 && <Pill k="bad">เกิน {x.overdueDays} วัน</Pill>}</td><td className="n">{fmt(x.total)}</td><td className="n">{fmt(x.arBalance)}</td>
                 </tr>
               ))}
               {!inv.isLoading && !items.length && <tr><td colSpan={6} className="empty">ไม่มีใบกำกับที่ยังไม่ได้วางบิล</td></tr>}
@@ -356,7 +357,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
               {inv.isLoading ? <SkeletonRows cols={5} rows={3} /> : items.map((x, i) => (
                 <tr key={x.id}>
                   <td><input type="checkbox" checked={!!on[x.no]} onChange={(e) => setOn({ ...on, [x.no]: e.target.checked })} aria-label={`เลือก ${x.no}`} /></td>
-                  <td className="mono">{x.no}{x.billingNoteNo && <div className="small muted">{x.billingNoteNo}</div>}</td><td>{th(x.dueDate)} {x.overdueDays > 0 && <Pill k="bad">เกิน {x.overdueDays} วัน</Pill>}</td>
+                  <td className="mono"><DocLink no={x.no} type="INV" />{x.billingNoteNo && <div className="small muted"><DocLink no={x.billingNoteNo} type="BN" /></div>}</td><td>{th(x.dueDate)} {x.overdueDays > 0 && <Pill k="bad">เกิน {x.overdueDays} วัน</Pill>}</td>
                   <td className="n">{fmt(x.arBalance)}</td>
                   <td className="n"><input className={`qty${d(amt[x.no] || 0).gt(d(x.arBalance)) ? ' bad' : ''}`} type="number" min="0" step="0.01" style={{ width: 110 }} data-invoice={x.no} value={amt[x.no] ?? ''} disabled={!on[x.no]} onChange={(e) => setAmt({ ...amt, [x.no]: e.target.value })} aria-label={`ยอดรับ ${x.no}`} data-testid={`rc-amt-${i}`} /></td>
                 </tr>
@@ -419,7 +420,7 @@ function StatementModal({ customerId, onClose }: { customerId: string; onClose: 
               <>
                 <tr><td colSpan={5} className="muted">ยอดยกมา</td><td className="n">{fmt(st.data.opening)}</td></tr>
                 {st.data.lines.map((l, i) => (
-                  <tr key={i}><td>{th(l.date)}</td><td className="mono">{l.no}</td><td>{ST_KIND[l.kind]}{l.ref ? ` · ${l.ref}` : ''}{l.note ? <div className="small muted">{l.note}</div> : null}</td>
+                  <tr key={i}><td>{th(l.date)}</td><td className="mono"><DocLink no={l.no} /></td><td>{ST_KIND[l.kind]}{l.ref ? <> · <DocLink no={l.ref} /></> : null}{l.note ? <div className="small muted">{l.note}</div> : null}</td>
                     <td className="n">{d(l.debit).gt(0) ? fmt(l.debit) : ''}</td><td className="n">{d(l.credit).gt(0) ? fmt(l.credit) : ''}</td><td className="n">{fmt(l.balance)}</td></tr>
                 ))}
                 <tr><td colSpan={5}><b>ยอดคงเหลือ</b></td><td className="n"><b>{fmt(st.data.closing)}</b></td></tr>
@@ -500,7 +501,7 @@ export function ReceiptDetail() {
           <span>ลูกค้า</span><span>{x.customer.name}</span>
           <span>ตัดหนี้</span><span><b data-testid="rc-settled-v">{fmt(x.settled)}</b> · รับเงินจริง {fmt(x.cash)}{d(x.wht).gt(0) ? ` · หัก ณ ที่จ่าย ${fmt(x.wht)}${x.whtRate ? ` (${d(x.whtRate).toString()}%)` : ''}` : ''}</span>
           {x.whtCertNo && <><span>หนังสือรับรอง 50 ทวิ</span><span>{x.whtCertNo}</span></>}
-          <span>ใบกำกับ</span><span>{x.lines.map((l, i) => <span key={l.invoiceNo}>{i > 0 && ', '}<Link className="mono" to={`/b2b/inv/${encodeURIComponent(l.invoiceNo)}`}>{l.invoiceNo}</Link></span>)}</span>
+          <span>ใบกำกับ</span><span>{x.lines.map((l, i) => <span key={l.invoiceNo}>{i > 0 && ', '}<DocLink no={l.invoiceNo} type="INV" /></span>)}</span>
         </div>
         <VoidedNote v={x.voided} />
       </div>
