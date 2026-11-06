@@ -48,6 +48,7 @@ public key. Tests and e2e sign with a throw-away keypair and point the verifier 
 | 30-day warning, expiry read-only, lifetime | `license.test.ts` warns 30 days; expired key |
 | Key bound to shop and edition; owner only | `license.test.ts` only the owner installs |
 | SCG Admin auth separate, lockout | `adm.test.ts` wrong password |
+| SCG admin accounts: `PATCH /api/adm/admins/:id` (super only) edits name / role, sets active or disabled, resets the password (also unlocks). Disabled = no sign-in (`details.reason` DISABLED) and live tokens stop on the next request. A super cannot disable / demote themself (409 ADM_SELF) and the last active super stays (409 LAST_SUPER). Every change is in `platform_audit` (update, activate, deactivate, reset-password). Uses the existing `platform_admins.status`, no migration | `admins.test.ts` |
 | Tenant isolation for platform context | `adm.test.ts` platform context sees no shop rows |
 | New shop + owner, terms gate | `adm.test.ts` creates shop; the new shop cannot be used |
 | Suspend / resume | `adm.test.ts` suspend |

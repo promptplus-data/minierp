@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import {
   AdmAuditEntry, AdmCentralPriceReq, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
-  AdmTenantImport, AdmTenantQuery, AdmUserCreate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
+  AdmTenantImport, AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
   HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate,
   HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall, ShareRange, ShopExportReq, SupportGrantCreate, TermsAccept, pageQuery,
 } from '@erp/contracts';
@@ -22,7 +22,7 @@ import { getBackupConfig, listBackupFiles, listBackupRuns, oauthPoll, oauthStart
 import { deriveKey, sealBox } from './box';
 import * as hr from './hr';
 import { installLicense, licenseGuard, licenseStatus } from './license';
-import { bootstrapAdmin, createAdmin, listAdmins, admLogin, makeAdmAuthed, toAdmUser } from './platform';
+import { bootstrapAdmin, createAdmin, listAdmins, updateAdmin, admLogin, makeAdmAuthed, toAdmUser } from './platform';
 import { buildSharePayload, sendShare, shareConfig, shareHistory } from './share';
 import { createGrant, listGrants, revokeGrant } from './support';
 import { acceptTerms, shopStatusGuard, termsStatus } from './terms';
@@ -202,6 +202,7 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
         reply.status(201);
         return createAdmin(tx, a, AdmUserCreate.parse(req.body));
       }));
+      app.patch('/api/adm/admins/:id', admAuthed(async (tx, a, req) => updateAdmin(tx, a, id(req), AdmUserUpdate.parse(req.body))));
 
       app.get('/api/adm/tenants', admAuthed(async (tx, _a, req) => adm.listTenants(tx, AdmTenantQuery.parse(req.query))));
       // Shop writes run in the shop's own transaction, so these handlers use the pool rather than the platform tx.

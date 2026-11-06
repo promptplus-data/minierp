@@ -7,6 +7,8 @@ const isPg = (e: unknown): e is PgError => typeof e === 'object' && e !== null &
 
 /** Maps every error to the ApiError body { code, message, details? }. */
 export function registerErrorHandler(app: FastifyInstance): void {
+  // Support quotes this id from the error dialog; it is also the id in the server log line.
+  app.addHook('onSend', async (req, reply) => { reply.header('x-request-id', req.id); });
   app.setErrorHandler((err: FastifyError | Error, req, reply) => {
     if (err instanceof AppError) {
       return reply.status(err.status).send({ code: err.code, message: err.message, ...(err.details !== undefined ? { details: err.details } : {}) });

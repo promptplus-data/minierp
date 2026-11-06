@@ -7,7 +7,7 @@
 import argon2 from 'argon2';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { withTenant, type Pool, type Tx } from '@erp/db';
-import type { AdmRole, AdmUser } from '@erp/contracts';
+import type { AdmRole, AdmUser, AdmUserUpdate } from '@erp/contracts';
 import { E, isUuid } from '../../lib/errors';
 
 export interface AdmCtx { adminId: string; name: string; username: string; role: AdmRole }
@@ -90,7 +90,7 @@ export function makeAdmAuthed(pool: Pool) {
     if (c.adm !== true || c.tid || !isUuid(c.sub)) throw E.unauthorized('SCG Admin sign-in required');
     return withPlatform(pool, async (tx) => {
       const u = (await tx.query<AdminRow>(`select * from platform_admins where id = $1`, [c.sub])).rows[0];
-      if (!u || u.status !== 'active' || u.locked_at) throw E.unauthorized('SCG Admin account is not active');
+      if (!u || u.status !== 'active' || u.locked_at) throw E.unauthorized('SCG Admin account is not active', { reason: u?.status === 'disabled' ? 'DISABLED' : 'LOCKED' });
       return handler(tx, { adminId: u.id, name: u.name, username: u.username, role: u.role }, req, reply);
     });
   };
@@ -110,6 +110,51 @@ export async function listAdmins(tx: Tx, a: AdmCtx): Promise<{ items: AdmUser[] 
   requireAdm(a, ADM_CAN.admins);
   const r = await tx.query<AdminRow>(`select * from platform_admins order by created_at, id`);
   return { items: r.rows.map(toAdmUser) };
+}
+
+/**
+ * Edit an administrator (super only): name, role, active / disabled, password reset. Rules: a super cannot disable or
+ * demote themself, and at least one active super must remain (409). A disabled admin cannot sign in and their tokens
+ * stop working on the next request (makeAdmAuthed reads the status every time). Every change is audited.
+ */
+export async function updateAdmin(tx: Tx, a: AdmCtx, targetId: string, body: AdmUserUpdate): Promise<AdmUser> {
+  requireAdm(a, ADM_CAN.admins);
+  if (!isUuid(targetId)) throw E.notFound('Administrator not found');
+  await tx.query(`select pg_advisory_xact_lock(hashtextextended('erp_platform_admins', 0))`);
+  const t = (await tx.query<AdminRow>(`select * from platform_admins where id = $1 for update`, [targetId])).rows[0];
+  if (!t) throw E.notFound('Administrator not found');
+  const role = body.role ?? t.role;
+  const status = body.status ?? t.status;
+  const wasActiveSuper = t.role === 'super' && t.status === 'active';
+  const stillActiveSuper = role === 'super' && status === 'active';
+  if (wasActiveSuper && !stillActiveSuper) {
+    const others = (await tx.query<{ n: number }>(`select count(*)::int n from platform_admins where role = 'super' and status = 'active' and id <> $1`, [t.id])).rows[0]!.n;
+    if (others === 0) throw E.conflict('At least one active super admin must remain', { reason: 'LAST_SUPER' });
+    if (t.id === a.adminId) throw E.conflict('You cannot disable or demote your own account', { reason: 'ADM_SELF' });
+  }
+  const sets: string[] = [];
+  const args: unknown[] = [t.id];
+  const set = (col: string, v: unknown) => { args.push(v); sets.push(`${col} = $${args.length}`); };
+  if (body.name !== undefined && body.name !== t.name) set('name', body.name);
+  if (body.role !== undefined && body.role !== t.role) set('role', body.role);
+  if (body.status !== undefined && body.status !== t.status) set('status', body.status);
+  if (body.password !== undefined) {
+    set('password_hash', await argon2.hash(body.password, { type: argon2.argon2id }));
+    sets.push('failed_logins = 0', 'locked_at = null');
+  }
+  const detail = (...p: (string | false)[]) => p.filter(Boolean).join(' · ');
+  if (sets.length) {
+    const r = await tx.query<AdminRow>(`update platform_admins set ${sets.join(', ')} where id = $1 returning *`, args);
+    t.name = r.rows[0]!.name;
+    t.role = r.rows[0]!.role;
+    t.status = r.rows[0]!.status;
+  }
+  if (body.name !== undefined || body.role !== undefined) {
+    await admAudit(tx, a, 'update', 'admin', t.username, detail(body.name !== undefined && `ชื่อ ${body.name}`, body.role !== undefined && `บทบาท ${body.role}`));
+  }
+  if (body.status !== undefined) await admAudit(tx, a, body.status === 'active' ? 'activate' : 'deactivate', 'admin', t.username, body.status === 'active' ? 'เปิดใช้งาน' : 'ปิดใช้งาน');
+  if (body.password !== undefined) await admAudit(tx, a, 'reset-password', 'admin', t.username, 'ตั้งรหัสผ่านใหม่และปลดล็อก');
+  return toAdmUser(t);
 }
 
 /**

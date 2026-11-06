@@ -224,6 +224,11 @@ export type AdmUser = z.infer<typeof AdmUser>;
 export const AdmLoginReq = z.object({ username: z.string().min(1), password: z.string().min(1) });
 export const AdmLoginRes = z.object({ token: z.string(), admin: AdmUser });
 export const AdmUserCreate = z.object({ username: z.string().regex(/^[a-z0-9._]{3,30}$/), name: z.string().min(1), role: AdmRole, password: z.string().min(8) });
+/** PATCH /api/adm/admins/:id (super only): edit name / role, set active or disabled, reset the password. At least one field. */
+export const AdmUserUpdate = z.object({
+  name: z.string().trim().min(1).optional(), role: AdmRole.optional(), status: z.enum(['active', 'disabled']).optional(), password: z.string().min(8).optional(),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), { message: 'Nothing to change' });
+export type AdmUserUpdate = z.infer<typeof AdmUserUpdate>;
 
 export const AdmTenant = z.object({
   id: z.string(), code: z.string(), name: z.string(), taxId: z.string(), vatRegistered: z.boolean(), edition: z.enum(['cloud', 'onprem']),
@@ -324,7 +329,7 @@ export const adminRoutes = {
   // cloud: receiver, support consent, SCG Admin
   shareReceive: 'POST /api/scg/sales-summary',
   supportGrants: 'GET /api/support-grants', supportGrantCreate: 'POST /api/support-grants', supportGrantRevoke: 'POST /api/support-grants/:id/revoke',
-  admLogin: 'POST /api/adm/auth/login', admMe: 'GET /api/adm/auth/me', admAdmins: 'GET /api/adm/admins', admAdminCreate: 'POST /api/adm/admins',
+  admLogin: 'POST /api/adm/auth/login', admMe: 'GET /api/adm/auth/me', admAdmins: 'GET /api/adm/admins', admAdminCreate: 'POST /api/adm/admins', admAdminUpdate: 'PATCH /api/adm/admins/:id',
   admTenants: 'GET /api/adm/tenants', admTenantCreate: 'POST /api/adm/tenants', admTenantSuspend: 'POST /api/adm/tenants/:id/suspend',
   admTenantResume: 'POST /api/adm/tenants/:id/resume', admTenantImport: 'POST /api/adm/tenants/import', admTenantSupport: 'POST /api/adm/tenants/:id/support',
   admKpi: 'GET /api/adm/kpi',
@@ -343,7 +348,7 @@ export const adminRouteEditions: RouteEditions<typeof adminRoutes> = {
   backupFiles: onprem, backupRestoreFiles: onprem, backupRestore: onprem,
   shareConfig: onprem, sharePreview: onprem, shareSend: onprem, shareHistory: onprem,
   shareReceive: cloud, supportGrants: cloud, supportGrantCreate: cloud, supportGrantRevoke: cloud,
-  admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud,
+  admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admAdminUpdate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud,
   admTenantResume: cloud, admTenantImport: cloud, admTenantSupport: cloud, admKpi: cloud, admCentral: cloud, admCentralCreate: cloud,
   admCentralUpdate: cloud, admCentralPrice: cloud, admCentralPush: cloud, admCentralPushes: cloud, admLicenses: cloud, admLicenseIssue: cloud,
   admLicenseRevoke: cloud, admShares: cloud, admAudit: cloud,
