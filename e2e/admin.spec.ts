@@ -165,6 +165,9 @@ test.describe('on-prem system screens (M19)', () => {
     await page.getByTestId('license-key').fill('SCG1.not-a-real.key-for-this-shop-xxxxxxxx');
     await page.getByTestId('license-install').click();
     await expect(page.getByTestId('license-error')).toBeVisible();
+    // the failed install also opens the red-header dialog with the reason; close it to carry on
+    await expect(page.getByTestId('error-dialog')).toContainText('ทำรายการไม่สำเร็จ');
+    await page.getByTestId('error-dialog-ok').click();
     await page.getByTestId('license-key').fill(key);
     await page.getByTestId('license-install').click();
     // The shop name / tax id binding may reject it; the screen then shows the reason instead of crashing.
@@ -295,5 +298,57 @@ test.describe('SCG Admin console (M14)', () => {
       await expect(page.getByRole('dialog')).toHaveCount(0);
     }
     await both(page, 'scg-licenses');
+  });
+
+  test('admin accounts: edit, deactivate (login refused with a red message), reactivate, not for yourself', async ({ page, browser }) => {
+    await page.goto('/scg');
+    await page.getByLabel('ชื่อผู้ใช้').fill('scg.admin');
+    await page.getByLabel('รหัสผ่าน').fill('1234');
+    await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click();
+    await expect(page.getByTestId('adm-who')).toBeVisible();
+    await page.goto('/scg/admins');
+    const table = page.getByTestId('adm-admins');
+    await expect(table.locator('tbody tr', { hasText: 'nok.master' })).toBeVisible();
+    await expect(page.getByTestId('adm-status-nok.master')).toHaveText('ใช้งาน');
+    await both(page, 'scg-admins');
+
+    // yourself: no toggle, with the reason
+    await expect(page.getByTestId('adm-toggle-scg.admin')).toBeDisabled();
+    await expect(table.locator('tbody tr', { hasText: 'scg.admin' })).toContainText('ปิดใช้งานไม่ได้');
+
+    // edit the name; the role of someone else stays editable
+    await page.getByTestId('adm-edit-nok.master').click();
+    await page.getByTestId('adm-edit-name').fill('');
+    await page.getByTestId('adm-edit-save').click();
+    await expect(page.getByTestId('adm-edit-name')).toHaveAttribute('aria-invalid', 'true');
+    await page.getByTestId('adm-edit-name').fill('คุณนก (Master data)');
+    await page.getByTestId('adm-edit-save').click();
+    await expect(page.getByRole('dialog', { name: 'แก้ไขผู้ดูแล' })).toHaveCount(0);
+
+    // deactivate with confirmation
+    await page.getByTestId('adm-toggle-nok.master').click();
+    await expect(page.getByRole('dialog', { name: 'ปิดใช้งานผู้ดูแล' })).toBeVisible();
+    await page.getByTestId('adm-toggle-ok').click();
+    await expect(page.getByTestId('adm-status-nok.master')).toHaveText('ปิดใช้งาน');
+    await expect(page.getByTestId('adm-toggle-nok.master')).toHaveText('เปิดใช้งาน');
+
+    // the deactivated admin cannot sign in: clear red message
+    const ctx = await browser.newContext({ baseURL: process.env.BASE_URL ?? 'http://127.0.0.1:3310', locale: 'th-TH' });
+    const other = await ctx.newPage();
+    await other.goto('/scg');
+    await other.getByLabel('ชื่อผู้ใช้').fill('nok.master');
+    await other.getByLabel('รหัสผ่าน').fill('1234');
+    await other.getByRole('button', { name: 'เข้าสู่ระบบ' }).click();
+    await expect(other.getByTestId('adm-login-error')).toContainText('ปิดใช้งาน');
+    await expect(other.getByLabel('ชื่อผู้ใช้')).toHaveAttribute('aria-invalid', 'true');
+    await other.screenshot({ path: path.join(DIR, `admin-${EDITION}-scg-login-disabled-1300.png`) });
+
+    // reactivate: sign-in works again
+    await page.getByTestId('adm-toggle-nok.master').click();
+    await page.getByTestId('adm-toggle-ok').click();
+    await expect(page.getByTestId('adm-status-nok.master')).toHaveText('ใช้งาน');
+    await other.getByRole('button', { name: 'เข้าสู่ระบบ' }).click();
+    await expect(other.getByTestId('adm-who')).toBeVisible();
+    await ctx.close();
   });
 });
