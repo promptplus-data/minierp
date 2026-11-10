@@ -2,14 +2,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  AdjustListQuery, AdjustRequestReq, CashMoveReq, CloseShiftReq, EligibleQuery, IssueReq, ManualReceiptReq, OpenShiftReq, PosSaleReq, ReturnReq,
+  AdjustListQuery, AdjustRequestReq, CashMoveReq, CloseShiftReq, EligibleQuery, IssueReq, ManualReceiptReq, OpenShiftReq, PosApprovalReq, PosPreviewReq, PosSaleReq, ReturnReq,
   TransferReq, VoidReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny, type Deps } from '../lib/context';
 import type { Authed } from '../plugins/auth';
 import { approveAdjust, balances, issue, listAdjust, lots, maskStockDoc, receipt, rejectAdjust, requestAdjust, transfer } from '../services/inventory';
 import { createReturn, eligible } from '../services/returns';
-import { getDoc, listDocs, posSale, voidDoc } from '../services/sales';
+import { getDoc, listDocs, posApprove, posPreview, posSale, voidDoc } from '../services/sales';
 import { cashMove, closeShift, currentShift, openShift } from '../services/shifts';
 import { runBackupHook } from '../backup';
 
@@ -85,6 +85,11 @@ export function opsRoutes(app: FastifyInstance, deps: Deps, authed: Authed): voi
       throw err;
     }
   });
+  app.post('/api/sales/pos/preview', authed(async (tx, ctx, req) => posPreview(tx, deps, ctx, PosPreviewReq.parse(req.body))));
+  app.post('/api/sales/pos/approvals', authed(async (tx, ctx, req, reply) => {
+    reply.status(201);
+    return posApprove(tx, deps, ctx, PosApprovalReq.parse(req.body));
+  }));
   app.get('/api/sales/docs', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['sales.doc', 'pos.sell', 'fin.ar'], { readOnly: true });
     const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();

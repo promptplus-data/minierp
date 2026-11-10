@@ -42,7 +42,7 @@ describe('F1 negative prices / discounts (R3)', () => {
 
 describe('F2 approver PIN brute force (R2)', () => {
   it('locks approvals after 5 wrong PINs for 15 minutes, audits each failure even though the sale rolls back, and unlock resets', async () => {
-    const body = () => ({ ...saleBody(env.seed, praeShift, [{ p: 'p6', qty: '1', price: '89.00', discount: { kind: 'amt', value: '10' } }], '79.00') });
+    const body = () => ({ ...saleBody(env.seed, praeShift, [{ p: 'p6', qty: '1', price: '89.00', discount: { kind: 'amt', value: '10' } }], '79.00', { discountReason: { code: 'regular' } }) });
     const auditBefore = (await env.pool.query(`select count(*)::int n from audit_log where action = 'approval-failed'`)).rows[0].n;
     const reasons: string[] = [];
     for (let i = 0; i < 6; i++) {
@@ -66,7 +66,7 @@ describe('F2 approver PIN brute force (R2)', () => {
 
 describe('F3 no self-approval (R1)', () => {
   it('manager cannot approve her own over-cap discount', async () => {
-    const body = saleBody(env.seed, sudaShift, [{ p: 'p9', qty: '1', price: '300.00', discount: { kind: 'pct', value: '30' } }], '210.00');
+    const body = saleBody(env.seed, sudaShift, [{ p: 'p9', qty: '1', price: '300.00', discount: { kind: 'pct', value: '30' } }], '210.00', { discountReason: { code: 'regular' } });
     const r = await suda.post('/api/sales/pos', { ...body, discountApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
     expect(r.status).toBe(403);
     expect(r.body.details.approvalError).toBe('SELF_APPROVAL');
