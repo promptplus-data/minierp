@@ -7,12 +7,15 @@ import {
 } from '@erp/contracts';
 import { d } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
+import { LoadMore, useLoadMore } from '../../ui/lists';
 import { checkFields, qtyMsg } from '../../errors';
 import { useAuth } from '../../auth';
-import { useCustomers, useMeta, useWarehouses } from '../../data';
+import { useMeta, useWarehouses } from '../../data';
 import { fmt, fq, Modal, Pill, ShortageModal, th, useToast, type Shortage } from '../../ui';
+import { useCustomer } from '../../ui/CustomerPicker';
+import { AddressPicker, DeliverySourceSelect, SaleTypeSelect, SalespersonSelect, WarehouseSelect } from './pickers';
 import {
-  blankLine, CustomerSelect, LineEditor, lineReq, previewTotals, TERM_TH, useGatedSave, useSalesInvalidate, useSalesSettings, type EditLine,
+  blankLine, CustomerSelect, LineEditor, lineReq, previewTotals, priceSourceText, ProfitSummary, TERM_TH, useGatedSave, useLineCheck, useSalesInvalidate, useSalesSettings, type EditLine,
 } from './shared';
 
 type Mode = 'QT' | 'SO' | 'INV';
@@ -27,20 +30,23 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const invalidate = useSalesInvalidate();
   const meta = useMeta();
   const settings = useSalesSettings();
-  const customers = useCustomers();
   const whs = useWarehouses();
   const src = edit ?? quote;
   const vatShop = meta.data?.shop.vatRegistered ?? true;
   const [customerId, setCustomerId] = useState(src?.customer.id ?? presetProject?.customerId ?? '');
   const [vatMode, setVatMode] = useState<'inc' | 'exc' | 'none'>(src?.vatMode ?? (vatShop ? meta.data?.shop.b2bVatMode ?? 'exc' : 'none'));
   const [attn, setAttn] = useState(src?.attn ?? '');
-  const [note, setNote] = useState(edit?.note ?? '');
+  const [note, setNote] = useState(edit?.note ?? quote?.note ?? '');
+  const [salespersonId, setSalespersonId] = useState(src?.salesperson?.id ?? '');
   const [validUntil, setValidUntil] = useState(edit?.validUntil ?? '');
   const [billDisc, setBillDisc] = useState(src?.billDiscount && d(src.billDiscount).gt(0) ? src.billDiscount : '');
   const [lines, setLines] = useState<EditLine[]>(() => src
     ? src.lines.map((l) => ({
       productId: l.productId ?? '', unitIdx: l.unitIdx ?? 0, name: l.name, unitName: l.unitName, qty: l.qty, unitPrice: l.unitPrice,
-      discKind: l.discount?.kind ?? 'amt', discValue: l.discount?.value ?? '', vat: l.vat, free: !quote && !l.productId, quoteLineId: quote ? l.id : undefined, priceSource: quote ? `ราคาตาม ${quote.no}` : undefined,
+      discKind: l.discount?.kind ?? 'amt', discValue: l.discount?.value ?? '', vat: l.vat, free: !quote && !l.productId, quoteLineId: quote ? l.id : undefined,
+      // QT → SO: the quoted price is the expected price of the order line; an edited quotation keeps each line's BR-05 price
+      priceSource: quote ? priceSourceText('quote', quote.no) : priceSourceText(l.priceSource, l.priceRef) || undefined,
+      listPrice: quote ? l.unitPrice : l.listPrice ?? undefined,
     }))
     : [blankLine()]);
   const [warehouseId, setWarehouseId] = useState('');
@@ -52,8 +58,9 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [pjSite, setPjSite] = useState('');
   const [pjTpl, setPjTpl] = useState<(typeof TEMPLATES)[number]>('30/40/30');
   const [pjCustom, setPjCustom] = useState('40,30,30');
+  const [pjNote, setPjNote] = useState('');
   const [short, setShort] = useState<Shortage[] | null>(null);
-  const cust = customers.data?.find((c) => c.id === customerId);
+  const cust = useCustomer(customerId || null).data;
   const credit = useQuery({
     queryKey: ['ar', 'credit', customerId], enabled: !!customerId && mode !== 'QT',
     queryFn: () => api<{ limit: string; balance: string; available: string | null; overdue: { no: string }[]; term: SalesTerm }>('GET', `/api/sales/customers/${customerId}/credit`),
@@ -65,21 +72,23 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const stockWhs = (whs.data ?? []).filter((w) => w.active);
   const wh = warehouseId || stockWhs.find((w) => !w.isPos)?.id || stockWhs[0]?.id || '';
   const t = previewTotals(lines, vatMode, billDisc);
+  const check = useLineCheck(lines, vatMode, billDisc, mode === 'QT' ? undefined : wh);
   const pcts = pjCustom.split(/[,\s/]+/).filter(Boolean);
   const pctSum = pcts.reduce((a, x) => a.plus(d(Number.isFinite(Number(x)) ? x : 0)), d(0));
 
   const body = (extra: Record<string, unknown>) => {
     const ls = lines.map(lineReq);
     const disc = billDisc && d(billDisc).gt(0) ? billDisc : '0';
-    if (mode === 'QT') return { customerId, attn, note, vatMode: vatShop ? vatMode : undefined, validUntil: validUntil || undefined, billDiscount: disc, lines: ls, status: 'draft' };
+    const sp = salespersonId || undefined;
+    if (mode === 'QT') return { customerId, attn, note, salespersonId: sp, vatMode: vatShop ? vatMode : undefined, validUntil: validUntil || undefined, billDiscount: disc, lines: ls, status: 'draft', ...extra };
     if (mode === 'SO') {
       const project = pjMode === 'new'
-        ? { mode: 'new', name: pjName, site: pjSite, template: pjTpl, ...(pjTpl === 'custom' ? { installments: pcts.map((p) => ({ pct: p })) } : {}) }
+        ? { mode: 'new', name: pjName, site: pjSite, note: pjNote, template: pjTpl, ...(pjTpl === 'custom' ? { installments: pcts.map((p) => ({ pct: p })) } : {}) }
         : pjMode ? { mode: 'existing', projectId: pjMode } : undefined;
-      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, warehouseId: wh, shipTo, note, billDiscount: disc, lines: ls, project, ...extra };
+      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...extra };
     }
     const payments = pay === 'credit' ? undefined : [{ method: pay, amount: t.total }];
-    return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, billDiscount: disc, lines: ls, payments, ...extra };
+    return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, salespersonId: sp, billDiscount: disc, lines: ls, payments, ...extra };
   };
   const save = useGatedSave(
     async (extra) => {
@@ -108,12 +117,12 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
     <Modal onClose={onClose} wide label={title}>
       <h3>{title}</h3>
       <p className="small muted" style={{ margin: 0 }}>
-        {mode === 'QT' && 'ใส่สินค้าที่ยังไม่มีในระบบได้ (พิมพ์รายการเอง) และไม่ตรวจต้นทุน จะผูกสินค้าและตรวจต้นทุนตอนแปลงเป็นใบสั่งขาย'}
-        {mode === 'SO' && 'สร้างได้เลยโดยไม่ต้องมีใบเสนอราคา · ราคาต่อหน่วยต้องไม่ต่ำกว่าต้นทุน ถ้าต่ำกว่าต้องให้เจ้าของร้านอนุมัติ · ขายเชื่อเกินวงเงินหรือมีบิลเกินกำหนดต้องอนุมัติ'}
+        {mode === 'QT' && 'ราคาตามลำดับ: ราคาลูกค้า → ราคากลุ่ม → โปรโมชัน → ราคาปลีก · ใส่สินค้าที่ยังไม่มีในระบบได้ (พิมพ์รายการเอง) · ราคาต่ำกว่าทุนต้องให้เจ้าของร้านอนุมัติ · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ'}
+        {mode === 'SO' && 'สร้างได้เลยโดยไม่ต้องมีใบเสนอราคา · ราคาต่ำกว่าทุนต้องให้เจ้าของร้านอนุมัติ · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ · ขายเชื่อเกินวงเงินหรือมีบิลเกินกำหนดต้องอนุมัติ'}
         {mode === 'INV' && 'ใบกำกับภาษีที่ตัดสต็อกทันที (ไม่ผ่านใบสั่งขาย) · ถ้าลูกค้าฝากของไว้ ออกใบส่งของภายหลังได้โดยไม่ตัดสต็อกซ้ำ'}
       </p>
       <div className="fgrid">
-        <label className="f">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" /></label>
+        <label className="f">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setShipTo(''); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" requireTaxId={mode === 'INV' && vatShop} /></label>
         {mode === 'QT' && <label className="f">เรียน (ผู้ติดต่อ)<input type="text" value={attn} onChange={(e) => setAttn(e.target.value)} placeholder="เช่น คุณอรุณ (หุ้นส่วนผู้จัดการ)" /></label>}
         {vatShop ? (
           <label className="f">ราคาในเอกสาร
@@ -125,10 +134,11 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         {mode === 'QT' && <label className="f">ยืนราคาถึง (เว้นว่าง = {settings.data?.quoteValidDays ?? 15} วัน)<input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></label>}
         {mode !== 'QT' && (
           <label className="f">{mode === 'SO' ? 'ส่งของจากคลัง' : 'ตัดสต็อกจากคลัง'}
-            <select value={wh} onChange={(e) => setWarehouseId(e.target.value)}>{stockWhs.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
+            <WarehouseSelect value={wh} onChange={setWarehouseId} testId="doc-wh" />
           </label>
         )}
-        {mode === 'SO' && <label className="f">ที่อยู่ส่งของ / หน้างาน<input type="text" value={shipTo} onChange={(e) => setShipTo(e.target.value)} placeholder="ใช้ที่ตั้งโครงการถ้าเว้นว่าง" /></label>}
+        {mode === 'SO' && <label className="f">ที่อยู่ส่งของ / หน้างาน<AddressPicker customerId={customerId} value={shipTo} onChange={setShipTo} testId="so-ship-to" /></label>}
+        <label className="f">พนักงานขาย<SalespersonSelect value={salespersonId} onChange={setSalespersonId} testId="doc-salesperson" /></label>
         {mode === 'INV' && (
           <label className="f">การชำระ
             <select value={pay} onChange={(e) => setPay(e.target.value as 'credit' | 'cash' | 'transfer')} data-testid="inv-pay">
@@ -141,11 +151,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       {mode === 'SO' && (
         <>
           <label className="f">ประเภทการขาย
-            <select value={pjMode} onChange={(e) => setPjMode(e.target.value)} data-testid="so-project">
-              <option value="">ขายส่ง/เงินเชื่อทั่วไป</option>
-              {(projects.data?.items ?? []).map((p) => <option key={p.id} value={p.id}>เพิ่มเข้าโครงการเดิม (งานเพิ่ม): {p.name}</option>)}
-              <option value="new">ขายโครงการ: สร้างโครงการ/หน้างานใหม่จากใบนี้</option>
-            </select>
+            <SaleTypeSelect value={pjMode} onChange={setPjMode} projects={projects.data?.items ?? []} />
           </label>
           {pjMode === 'new' && (
             <>
@@ -158,6 +164,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
                   </select>
                 </label>
                 {pjTpl === 'custom' && <label className="f">% แต่ละงวด (คั่นด้วยจุลภาค) <input type="text" value={pjCustom} onChange={(e) => setPjCustom(e.target.value)} /><span className={pctSum.eq(100) ? 'sum-ok' : 'sum-bad'}>รวม {fq(pctSum)}%{pctSum.eq(100) ? '' : ' (ต้องเท่ากับ 100%)'}</span></label>}
+                <label className="f">หมายเหตุโครงการ<input type="text" value={pjNote} onChange={(e) => setPjNote(e.target.value)} placeholder="เช่น เข้าหน้างานได้หลัง 8 โมง" data-testid="pj-note" /></label>
               </div>
               <div className="note small">บันทึกแล้วระบบสร้างโครงการจากใบสั่งขายนี้ (มูลค่าใบนี้ = มูลค่าสัญญา) และงวดวางบิลพร้อมวันครบกำหนด</div>
             </>
@@ -165,9 +172,12 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
           {pjMode && pjMode !== 'new' && <div className="note small">มูลค่าใบนี้จะบวกเข้ามูลค่าโครงการเดิม และส่งของเข้าหน้างานเดียวกันได้</div>}
         </>
       )}
-      <LineEditor lines={lines} setLines={setLines} customerId={customerId} vatMode={vatMode} allowFree={mode === 'QT'} />
+      <LineEditor lines={lines} setLines={setLines} customerId={customerId} vatMode={vatMode} allowFree={mode === 'QT'} check={check} warehouseId={mode === 'QT' ? undefined : wh} doc={mode === 'QT' ? 'quote' : 'order'} />
       {freeLeft && <div className="note warn small">มีรายการที่ยังไม่มีในระบบ ต้องเลือกสินค้าในระบบให้ครบทุกแถวก่อนบันทึก (ใบสั่งขายตรวจต้นทุนและตัดสต็อก)</div>}
-      {mode === 'QT' && <label className="f">หมายเหตุท้ายใบเสนอราคา<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ราคานี้รวมค่าขนส่งในเขตอำเภอ · ส่งภายใน 3 วันหลังยืนยัน" /></label>}
+      <label className="f">{mode === 'QT' ? 'หมายเหตุท้ายใบเสนอราคา' : 'หมายเหตุ'}
+        <textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} data-testid="doc-note"
+          placeholder={mode === 'QT' ? 'เช่น ราคานี้รวมค่าขนส่งในเขตอำเภอ · ส่งภายใน 3 วันหลังยืนยัน' : 'เช่น โทรแจ้งก่อนส่ง · ลงของหลังบ้าน'} />
+      </label>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <label className="f" style={{ maxWidth: 180 }}>ส่วนลดท้ายบิล (บาท)<input type="number" min="0" step="0.01" name="billDiscount" value={billDisc} onChange={(e) => setBillDisc(e.target.value)} /></label>
         <div className="tot" style={{ minWidth: 240 }}>
@@ -176,6 +186,8 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
           <span style={{ fontWeight: 600 }}>รวมทั้งสิ้น</span><span className="big" data-testid="doc-total">฿{fmt(t.total)}</span>
         </div>
       </div>
+      <ProfitSummary profit={check?.profit} />
+      {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึกต้องให้เจ้าของร้านใส่ PIN อนุมัติ</div>}
       {mode !== 'QT' && credit.data && cust && (
         <div className={`small ${credit.data.available != null && d(credit.data.balance).plus(d(t.total)).gt(d(credit.data.limit)) ? 'err' : 'muted'}`}>
           {TERM_TH(credit.data.term)} · วงเงิน {fmt(credit.data.limit)} · ค้างอยู่ {fmt(credit.data.balance)} · หลังบันทึกใบนี้ {fmt(d(credit.data.balance).plus(d(t.total)))}
@@ -200,14 +212,18 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
   const nav = useNavigate();
   const toast = useToast();
   const invalidate = useSalesInvalidate();
-  const whs = useWarehouses();
-  const src = useQuery({ queryKey: ['dlv-src'], queryFn: () => api('GET', '/api/sales/delivery-sources', { query: { limit: 50 }, schema: page(SalesDeliverySource) }) });
+  const src = useQuery({
+    queryKey: ['dlv-src', initial?.no], enabled: !!initial,
+    queryFn: () => api('GET', '/api/sales/delivery-sources', { query: { q: initial!.no, limit: 50 }, schema: page(SalesDeliverySource) }),
+  });
   const [pick, setPick] = useState(initial ? `${initial.kind}:${initial.no}` : '');
-  const s = src.data?.items.find((x) => `${x.kind}:${x.no}` === pick);
+  const [picked, setPicked] = useState<SalesDeliverySource | null>(null);
+  const s = picked && `${picked.kind}:${picked.no}` === pick ? picked : src.data?.items.find((x) => `${x.kind}:${x.no}` === pick);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [warehouseId, setWarehouseId] = useState('');
   const [shipTo, setShipTo] = useState('');
   const [vehicle, setVehicle] = useState('');
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [short, setShort] = useState<Shortage[] | null>(null);
@@ -224,7 +240,7 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/sales/deliveries', { body: { [s.kind === 'SO' ? 'soNo' : 'invoiceNo']: s.no, warehouseId: s.kind === 'SO' ? warehouseId || undefined : undefined, shipTo, vehicle, lines }, schema: SalesDelivery });
+      const r = await api('POST', '/api/sales/deliveries', { body: { [s.kind === 'SO' ? 'soNo' : 'invoiceNo']: s.no, warehouseId: s.kind === 'SO' ? warehouseId || undefined : undefined, shipTo, vehicle, note, lines }, schema: SalesDelivery });
       await invalidate();
       toast(`${r.no} ออกแล้ว${r.cutsStock ? ' · ตัดสต็อกแล้ว' : ''}`);
       onClose();
@@ -240,13 +256,10 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
     <Modal onClose={onClose} wide label="สร้างใบส่งของ">
       <h3>สร้างใบส่งของ</h3>
       <p className="small muted" style={{ margin: 0 }}>อ้างอิงใบสั่งขายหรือบิลที่ลูกค้าฝากของไว้ แล้วใส่จำนวนที่ส่งรอบนี้ ส่งหลายรอบได้จนครบ</p>
-      <label className="f">อ้างอิงใบขาย
-        <select value={pick} onChange={(e) => setPick(e.target.value)} data-testid="dlv-source">
-          <option value="">— เลือกใบขายที่ยังส่งไม่ครบ —</option>
-          {(src.data?.items ?? []).map((x) => <option key={`${x.kind}:${x.no}`} value={`${x.kind}:${x.no}`}>{x.no} · {x.kind === 'SO' ? 'ใบสั่งขาย' : 'บิลฝากของ'} · {x.customer.name}{x.project ? ` · ${x.project.name}` : ''} · {th(x.date)}</option>)}
-        </select>
+      <label className="f">อ้างอิงใบขาย (ที่ยังส่งไม่ครบ)
+        <DeliverySourceSelect value={pick} selected={s ?? null} onChange={(k, x) => { setPick(k); setPicked(x); }} />
       </label>
-      {src.isLoading && <div className="sk" />}
+      {!!initial && src.isLoading && <div className="sk" />}
       {s ? (
         <>
           <div className="tw">
@@ -263,13 +276,14 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
             </table>
           </div>
           <div className="fgrid">
-            <label className="f">ส่งที่<input type="text" value={shipTo} onChange={(e) => setShipTo(e.target.value)} placeholder={s.project?.site || 'ที่อยู่ลูกค้า'} /></label>
-            {s.kind === 'SO' && <label className="f">ตัดสต็อกจากคลัง<select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>{(whs.data ?? []).filter((w) => w.active).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
+            <label className="f">ส่งที่<AddressPicker customerId={s.customer.id ?? ''} value={shipTo} onChange={setShipTo} testId="dlv-ship-to" placeholder={s.project?.site || 'ที่อยู่ลูกค้า'} /></label>
+            {s.kind === 'SO' && <label className="f">ตัดสต็อกจากคลัง<WarehouseSelect value={warehouseId} onChange={setWarehouseId} testId="dlv-wh" /></label>}
             <label className="f">ทะเบียนรถ / คนขับ<input type="text" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="เช่น 3ฒก-4521 · ลุงแดง" /></label>
           </div>
+          <label className="f">หมายเหตุ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ลงของหน้าไซต์ ประตู 2" data-testid="dlv-note" /></label>
           {s.kind === 'INV' && <div className="note small">บิลนี้ตัดสต็อกไปแล้วตอนขาย ใบส่งของนี้เป็นหลักฐานการส่งของ ไม่ตัดสต็อกซ้ำ</div>}
         </>
-      ) : !src.isLoading && <div className="empty">เลือกใบขายที่ยังส่งไม่ครบจากรายการด้านบน</div>}
+      ) : !(initial && src.isLoading) && <div className="empty">เลือกใบขายที่ยังส่งไม่ครบจากรายการด้านบน</div>}
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={!s || busy} onClick={() => void go()} data-testid="dlv-save">ออกใบส่งของ</button></div>
       {short && <ShortageModal shortages={short} what="ใบส่งของ" onClose={() => setShort(null)} />}
@@ -282,11 +296,12 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
   const nav = useNavigate();
   const toast = useToast();
   const invalidate = useSalesInvalidate();
-  const list = useQuery({ queryKey: ['deliveries', 'unbilled'], queryFn: () => api('GET', '/api/sales/deliveries', { query: { status: 'unbilled', limit: 100 }, schema: page(SalesDeliverySummary) }) });
+  const list = useLoadMore(['deliveries', 'unbilled'], '/api/sales/deliveries', SalesDeliverySummary, { status: 'unbilled' }, 20);
   const [sel, setSel] = useState<string[]>(preselect ? [preselect] : []);
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const items = list.data?.items ?? [];
+  const items = list.rows;
   const cust = items.find((x) => sel.includes(x.no))?.customer.id;
   const shown = cust ? items.filter((x) => x.customer.id === cust) : items;
   const total = items.filter((x) => sel.includes(x.no)).reduce((a, x) => a.plus(d(x.total)), d(0));
@@ -294,7 +309,7 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel }, schema: SalesInvoice });
+      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel, note }, schema: SalesInvoice });
       await invalidate();
       toast(`${r.doc.no} ออกแล้ว · ครบกำหนด ${th(r.dueDate)}`);
       onClose();
@@ -323,6 +338,8 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
           </tbody>
         </table>
       </div>
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} />
+      <label className="f">หมายเหตุในใบกำกับ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น อ้างอิงใบสั่งซื้อลูกค้า PO-778" data-testid="inv-note" /></label>
       <div className="small muted">เลือก {sel.length} ใบ · มูลค่าตามใบส่งของ {fmt(total)} (ก่อน VAT เมื่อเอกสารราคาไม่รวม VAT) · ออกเป็นเงินเชื่อ รับชำระที่หน้าลูกหนี้</div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={!sel.length || busy} onClick={() => void go()} data-testid="inv-from-do-save">ออกใบกำกับภาษี</button></div>
@@ -360,7 +377,7 @@ export function AbbInvoiceModal({ onClose }: { onClose: () => void }) {
       <h3>ออกใบกำกับภาษีเต็มรูปแทนใบกำกับอย่างย่อ</h3>
       <p className="small muted" style={{ margin: 0 }}>ลูกค้าขอใบกำกับเต็มรูปภายหลัง: ระบบยกเลิกใบกำกับอย่างย่อเดิม (ระบุเหตุผลอ้างเลขใบใหม่) และออกใบกำกับเต็มรูปที่อ้างอิงเลขเดิม สต็อกและยอดกะไม่เปลี่ยน</p>
       <label className="f">เลขที่ใบกำกับอย่างย่อ<input type="text" value={abbNo} onChange={(e) => setAbbNo(e.target.value)} placeholder="เช่น ABB2610-0012" data-testid="abb-no" /></label>
-      <label className="f">ลูกค้า (ต้องมีเลขประจำตัวผู้เสียภาษี)<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="abb-customer" /></label>
+      <label className="f">ลูกค้า (ต้องมีเลขประจำตัวผู้เสียภาษี)<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="abb-customer" requireTaxId /></label>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={!abbNo.trim() || !customerId || busy || !(can('sales.doc') || can('pos.sell'))} onClick={() => void go()} data-testid="abb-save">ออกใบกำกับเต็มรูป</button></div>
     </Modal>

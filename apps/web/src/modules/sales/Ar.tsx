@@ -1,7 +1,7 @@
 /** M10 ลูกหนี้ / รับชำระ: aging, open invoices, billing notes (BN print), receipts with WHT (RE print), statement. */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { z } from 'zod';
 import {
   ArAging, ArBillingNote, ArBillingNoteSummary, ArDueSoon, ArOpenInvoice, ArReceipt, ArReceiptSummary, ArStatement, page,
@@ -9,8 +9,9 @@ import {
 import { AGING_BUCKETS, AGING_LABEL_TH, d, receiptTotals, type AgingBucket } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { useCustomers } from '../../data';
-import { fmt, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
+import { fmt, Modal, Pill, SkeletonRows, th, useDebounced, useToast } from '../../ui';
+import { useCustomer } from '../../ui/CustomerPicker';
+import { LoadMore } from '../../ui/lists';
 import { CustomerSelect, Paper, PrintModal, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocLinks } from '../../doclink';
@@ -96,17 +97,19 @@ export default function Ar() {
   );
 }
 
-function useList<T>(key: string, url: string, schema: z.ZodType<{ items: T[]; nextCursor: string | null }, z.ZodTypeDef, unknown>, query: Record<string, unknown>) {
-  const pager = useCursorPager(`${key}|${JSON.stringify(query)}`);
-  const list = useQuery({
-    queryKey: ['ar', key, query, pager.cursor],
-    queryFn: () => api('GET', url, { query: { ...query, limit: 20, cursor: pager.cursor }, schema }),
-    placeholderData: keepPreviousData,
+/** 20 rows at a time; the next page loads when the footer scrolls into view (or on tap). */
+function useList<P extends { items: unknown[]; nextCursor: string | null }>(key: string, url: string, schema: z.ZodType<P, z.ZodTypeDef, unknown>, query: Record<string, unknown>) {
+  const list = useInfiniteQuery({
+    queryKey: ['ar', key, query],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api('GET', url, { query: { ...query, limit: 20, cursor: pageParam }, schema }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
-  const items = list.data?.items ?? [];
-  const pagerEl = <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />;
-  return { list, loading, items, pagerEl };
+  const loading = list.isLoading;
+  const items: P['items'][number][] = list.data?.pages.flatMap((p) => p.items as P['items'][number][]) ?? [];
+  const first = list.data?.pages[0];
+  const pagerEl = <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={items.length} testId={`ar-more-${key}`} />;
+  return { list: { ...list, data: first }, loading, items, pagerEl };
 }
 
 function Table({ testId, head, cols, loading, empty, children, error }: { testId: string; head: ReactNode; cols: number; loading: boolean; empty: boolean; children: ReactNode; error?: unknown }) {
@@ -311,6 +314,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
   const [whtMode, setWhtMode] = useState<'none' | '1' | '3' | 'amount'>('none');
   const [whtAmt, setWhtAmt] = useState('');
   const [cert, setCert] = useState('');
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const lines = items.filter((x) => on[x.no] && d(amt[x.no] || 0).gt(0));
@@ -330,7 +334,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
       const r = await api('POST', '/api/ar/receipts', {
         body: {
           customerId, method, lines: lines.map((x) => ({ invoiceNo: x.no, amount: amt[x.no] })), wht, ...(method === 'cheque' ? { cheque } : {}),
-          ...(cert.trim() ? { whtCertNo: cert.trim() } : {}),
+          ...(cert.trim() ? { whtCertNo: cert.trim() } : {}), note,
         },
         schema: ArReceipt,
       });
@@ -392,6 +396,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
         <span style={{ fontWeight: 600 }}>รับเงินจริง</span><span className="big" data-testid="rc-cash">฿{fmt(t?.cash ?? '0')}</span>
       </div>
       {whtMode !== 'none' && <div className="note small">ขอหนังสือรับรองการหักภาษี ณ ที่จ่าย (50 ทวิ) จากลูกค้า · เงินที่รับ + ภาษีที่ถูกหัก = ยอดที่ตัดหนี้</div>}
+      <label className="f">หมายเหตุ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น โอนเข้าบัญชีกสิกร เวลา 10:30" data-testid="rc-note" /></label>
       {over && <div className="err">{over.no}: ยอดรับมากกว่ายอดคงค้าง</div>}
       {tErr && <div className="err">{tErr}</div>}
       {err && <div className="err" role="alert">{err}</div>}
@@ -402,11 +407,11 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
 
 const ST_KIND: Record<string, string> = { INV: 'ใบกำกับ', CN: 'ลดหนี้', RC: 'รับชำระ', WHT: 'หัก ณ ที่จ่าย', VOID: 'ยกเลิก' };
 function StatementModal({ customerId, onClose }: { customerId: string; onClose: () => void }) {
-  const cs = useCustomers();
+  const cust = useCustomer(customerId);
   const [from, setFrom] = useState(addDays(today(), -90));
   const [to, setTo] = useState(today());
   const st = useQuery({ queryKey: ['ar', 'statement', customerId, from, to], queryFn: () => api('GET', '/api/ar/statement', { query: { customerId, from, to }, schema: ArStatement }) });
-  const name = cs.data?.find((c) => c.id === customerId)?.name ?? '';
+  const name = cust.data?.name ?? '';
   return (
     <Modal onClose={onClose} wide label="รายการเดินบัญชีลูกหนี้">
       <h3>รายการเดินบัญชี · {name}</h3>

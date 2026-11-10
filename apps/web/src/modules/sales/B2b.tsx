@@ -1,11 +1,11 @@
-/** M08 ขายส่ง / เงินเชื่อ: tabs ใบเสนอราคา / ใบสั่งขาย / ใบส่งของ / ใบกำกับภาษี / ใบลดหนี้, cursor paged with skeletons (NFR-12). */
+/** M08 ขายส่ง / เงินเชื่อ: tabs ใบเสนอราคา / ใบสั่งขาย / ใบส่งของ / ใบกำกับภาษี / ใบลดหนี้, 20 rows at a time (load more on scroll), skeletons (NFR-12). */
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { SalesCreditNoteSummary, SalesDeliverySummary, SalesInvoiceSummary, SalesOrderSummary, SalesQuoteSummary, page } from '@erp/contracts';
-import { api, errText } from '../../api';
+import { z } from 'zod';
+import { SalesCreditNoteSummary, SalesDeliverySummary, SalesInvoiceSummary, SalesOrderSummary, SalesQuoteSummary } from '@erp/contracts';
 import { useAuth } from '../../auth';
-import { fmt, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../../ui';
+import { fmt, Pill, SkeletonRows, th, useDebounced } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
 import { AbbInvoiceModal, DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } from './Forms';
 import { balPill, DLV_STATUS, QT_STATUS, SalesSettingsModal, SOURCE_TH, StatusPill, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
@@ -82,22 +82,17 @@ export default function B2b() {
 
 function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
   const nav = useNavigate();
-  const pager = useCursorPager(`${tab}|${status}|${q}`);
-  const list = useQuery({
-    queryKey: [tab === 'qt' ? 'quotes' : tab === 'so' ? 'orders' : tab === 'do' ? 'deliveries' : tab === 'inv' ? 'invoices' : 'credit-notes', status, q, pager.cursor],
-    queryFn: () => api<{ items: unknown[]; nextCursor: string | null }>('GET', URL[tab], { query: { status, q, limit: 20, cursor: pager.cursor } }),
-    placeholderData: keepPreviousData,
-  });
-  // the previous tab's page stays as placeholder data while the next tab loads: never parse it with this tab's schema
-  const data = list.isPlaceholderData ? undefined : list.data;
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore([tab === 'qt' ? 'quotes' : tab === 'so' ? 'orders' : tab === 'do' ? 'deliveries' : tab === 'inv' ? 'invoices' : 'credit-notes', 'list', tab], URL[tab], z.unknown(), { status, q }, 20);
+  const data = { items: list.rows, nextCursor: null };
+  const loading = list.isLoading;
+  const page = <T,>(item: z.ZodType<T, z.ZodTypeDef, unknown>) => ({ parse: (x: { items: unknown[] }) => ({ items: x.items.map((r) => item.parse(r)) }) });
   const open = (path: string) => nav(path);
   let head: ReactNode;
   let rows: ReactNode[] = [];
   const cols = 7;
   if (tab === 'qt') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ยืนราคาถึง</th><th className="n">ยอด</th><th>สถานะ</th><th>โดย</th></tr>;
-    rows = page(SalesQuoteSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesQuoteSummary).parse(data).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/qt/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/qt/${encodeURIComponent(x.no)}`}>{x.no}</Link>{x.revision > 1 && <span className="small muted"> rev {x.revision}</span>}</td>
         <td>{th(x.date)}</td><td>{x.customer.name}{x.freeLines > 0 && <div><Pill k="warn">นอกระบบ {x.freeLines}</Pill></div>}</td><td>{th(x.validUntil)}</td>
@@ -106,7 +101,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else if (tab === 'so') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th className="n">ยอด</th><th>สถานะ</th><th>อ้างอิง</th></tr>;
-    rows = page(SalesOrderSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesOrderSummary).parse(data).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/so/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/so/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div><Pill k="acc">โครงการ: {x.projectName}</Pill></div>}</td><td className="small">{x.itemsPreview}</td>
@@ -116,7 +111,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else if (tab === 'do') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th>อ้างอิง</th><th className="n">มูลค่า</th><th>สถานะ</th></tr>;
-    rows = page(SalesDeliverySummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesDeliverySummary).parse(data).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/do/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/do/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div className="small muted">{x.projectName}</div>}</td><td className="small">{x.itemsPreview}</td>
@@ -126,7 +121,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else if (tab === 'inv') {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>ประเภท</th><th>ครบกำหนด</th><th className="n">ยอด</th><th>สถานะ</th></tr>;
-    rows = page(SalesInvoiceSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesInvoiceSummary).parse(data).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/b2b/inv/${encodeURIComponent(x.no)}`)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
         <td className="mono"><Link to={`/b2b/inv/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td>
         <td>{x.customer.name}{x.projectName && <div className="small muted">{x.projectName}</div>}</td>
@@ -136,7 +131,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
     ));
   } else {
     head = <tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>อ้างอิง</th><th>คืนเงิน</th><th className="n">ยอด</th><th>เหตุผล</th></tr>;
-    rows = page(SalesCreditNoteSummary).parse(data ?? { items: [], nextCursor: null }).items.map((x) => (
+    rows = page(SalesCreditNoteSummary).parse(data).items.map((x) => (
       <tr key={x.id} className="click" onClick={() => open(`/sales/${encodeURIComponent(x.no)}`)}>
         <td className="mono"><Link to={`/sales/${encodeURIComponent(x.no)}`}>{x.no}</Link></td><td>{th(x.date)}</td><td>{x.customer.name}</td>
         <td className="mono small"><DocLink no={x.refNo} /></td><td>{x.refund === 'credit' ? <Pill k="acc">ลดหนี้ลูกหนี้</Pill> : x.refund === 'cash' ? 'เงินสด' : 'โอน'}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.reason}</td>
@@ -155,7 +150,7 @@ function DocTable({ tab, status, q }: { tab: Tab; status: string; q: string }) {
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={rows.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={rows.length} testId={`b2b-more-${tab}`} />
     </>
   );
 }

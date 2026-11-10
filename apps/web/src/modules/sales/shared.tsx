@@ -1,12 +1,13 @@
 /** Shared pieces of the sales screens: settings, status pills, A4 paper (mockup drawPrint), line editor, void + approval flows. */
-import { useMemo, useState, type ReactNode } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { SalesSettings, type SalesTerm } from '@erp/contracts';
+import { useState, type ReactNode } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { SalesLineCheck, SalesPrice, SalesSettings, type SalesTerm } from '@erp/contracts';
 import { bahtText, d, termLabel } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { useCatalog, useCustomers } from '../../data';
-import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useToast, type ApprovalInput } from '../../ui';
+import { useCatalog } from '../../data';
+import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useDebounced, useToast, type ApprovalInput } from '../../ui';
+import { ProductPicker, useStockInfo } from '../../ui/ProductPicker';
 import './sales.css';
 
 export const useSalesSettings = () => useQuery({ queryKey: ['sales-settings'], queryFn: () => api('GET', '/api/sales/settings', { schema: SalesSettings }), staleTime: 5 * 60_000 });
@@ -146,19 +147,10 @@ export function PrintModal({ onClose, children, title }: { onClose: () => void; 
 }
 
 // ---------- pickers ----------
-export function CustomerSelect({ value, onChange, noCash, testId }: { value: string; onChange: (id: string) => void; noCash?: boolean; testId?: string }) {
-  const cs = useCustomers();
-  const list = (cs.data ?? []).filter((c) => !noCash || c.code !== 'C00000');
-  return (
-    <select name="customerId" value={value} onChange={(e) => onChange(e.target.value)} data-testid={testId} aria-label="ลูกค้า">
-      <option value="">— เลือกลูกค้า —</option>
-      {list.map((c) => <option key={c.id} value={c.id}>{c.name} · {c.code}{c.taxId ? '' : ' (ไม่มีเลขผู้เสียภาษี)'}</option>)}
-    </select>
-  );
-}
+export { CustomerSelect } from './pickers';
 
 // ---------- line editor (quotation / sales order / direct invoice) ----------
-export interface EditLine { productId: string; unitIdx: number; name: string; unitName: string; qty: string; unitPrice: string; discKind: 'amt' | 'pct'; discValue: string; vat: 'v7' | 'exempt'; quoteLineId?: string; priceSource?: string; free?: boolean }
+export interface EditLine { productId: string; unitIdx: number; name: string; unitName: string; qty: string; unitPrice: string; discKind: 'amt' | 'pct'; discValue: string; vat: 'v7' | 'exempt'; quoteLineId?: string; priceSource?: string; listPrice?: string; free?: boolean }
 export const blankLine = (productId = ''): EditLine => ({ productId, unitIdx: 0, name: '', unitName: '', qty: '1', unitPrice: '', discKind: 'amt', discValue: '', vat: 'v7' });
 
 export function lineNet(l: EditLine): string {
@@ -184,18 +176,52 @@ export const lineReq = (l: EditLine) => ({
   ...(l.quoteLineId ? { quoteLineId: l.quoteLineId } : {}),
 });
 
-export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, belowCost }: {
-  lines: EditLine[]; setLines: (f: (ls: EditLine[]) => EditLine[]) => void; customerId: string; vatMode: 'inc' | 'exc' | 'none'; allowFree?: boolean; belowCost?: Set<string>;
+/** BR-05 source label shown under a line price (and on detail pages). */
+export function priceSourceText(source: string | null | undefined, ref: string | null | undefined): string {
+  switch (source) {
+    case 'quote': return `ราคาตาม ${ref ?? 'ใบเสนอราคา'}`;
+    case 'customerList': return `ราคาลูกค้า ${ref ?? ''}`.trim();
+    case 'groupList': return `ราคากลุ่มลูกค้า ${ref ?? ''}`.trim();
+    case 'promo': return `โปรโมชัน ${ref ?? ''}`.trim();
+    case 'retail': return 'ราคาปลีก';
+    case 'manual': return 'พิมพ์ราคาเอง';
+    default: return '';
+  }
+}
+
+/**
+ * Live server check of the lines being edited (POST /api/sales/line-check, debounced): below cost per line for
+ * everyone; FIFO unit cost and profit per line and for the document only for data.cost users.
+ */
+export function useLineCheck(lines: EditLine[], vatMode: 'inc' | 'exc' | 'none', billDisc: string, warehouseId: string | undefined, enabled = true) {
+  const { can } = useAuth();
+  const body = {
+    vatMode, billDiscount: billDisc && d(billDisc).gt(0) ? billDisc : '0', warehouseId: warehouseId || undefined,
+    lines: lines.map((l) => ({ productId: l.productId && !l.free ? l.productId : undefined, unitIdx: l.unitIdx, qty: l.qty && d(l.qty).gt(0) ? l.qty : '0', unitPrice: l.unitPrice || '0', ...(l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}) })),
+  };
+  const key = useDebounced(JSON.stringify(body), 350);
+  const q = useQuery({
+    queryKey: ['line-check', key], enabled: enabled && can('sales.doc') === 1 && body.lines.some((l) => l.productId), placeholderData: keepPreviousData, staleTime: 10_000,
+    queryFn: () => api('POST', '/api/sales/line-check', { body: JSON.parse(key), schema: SalesLineCheck, silent: true }),
+  });
+  return q.data && q.data.lines.length === lines.length ? q.data : null;
+}
+
+export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, check, warehouseId, doc }: {
+  lines: EditLine[]; setLines: (f: (ls: EditLine[]) => EditLine[]) => void; customerId: string; vatMode: 'inc' | 'exc' | 'none'; allowFree?: boolean;
+  check?: SalesLineCheck | null; warehouseId?: string; doc: 'quote' | 'order';
 }) {
   const cat = useCatalog();
-  const products = useMemo(() => (cat.data ?? []).filter((p) => p.active), [cat.data]);
+  const { can } = useAuth();
+  const seeCost = can('data.cost') === 1;
+  const stock = useStockInfo(warehouseId);
   const set = (i: number, patch: Partial<EditLine>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   /** BR-05: fetch the price for the customer whenever product / unit / qty changes and the user did not type a price. */
   const fetchPrice = async (i: number, l: EditLine) => {
     if (!l.productId) return;
     try {
-      const r = await api<{ unitPrice: string; source: string; ref: string | null }>('GET', '/api/sales/price', { query: { customerId: customerId || undefined, productId: l.productId, unitIdx: l.unitIdx, qty: l.qty || '1', vatMode } });
-      set(i, { unitPrice: r.unitPrice, priceSource: r.source === 'quote' ? `ราคาตาม ${r.ref}` : r.source === 'customerList' ? `ราคาลูกค้า ${r.ref}` : r.source === 'groupList' ? `ราคากลุ่ม ${r.ref}` : 'ราคาปลีก' });
+      const r = await api('GET', '/api/sales/price', { query: { customerId: customerId || undefined, productId: l.productId, unitIdx: l.unitIdx, qty: l.qty || '1', vatMode, doc }, schema: SalesPrice, silent: true });
+      set(i, { unitPrice: r.unitPrice, listPrice: r.unitPrice, priceSource: priceSourceText(r.source, r.ref) });
     } catch {
       // keep the typed price
     }
@@ -204,33 +230,50 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
   return (
     <>
       <div className="tw">
-        <table className="lines" data-testid="line-editor">
-          <thead><tr><th>สินค้า / รายการ</th><th>หน่วย</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย{label}</th><th className="n">ส่วนลด</th><th className="n">รวม</th><th /></tr></thead>
+        <table className="lines sales-lines" data-testid="line-editor">
+          <thead>
+            <tr>
+              <th>สินค้า / รายการ</th><th>หน่วย</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย{label}</th><th className="n">ส่วนลด</th><th className="n">รวม</th>
+              {seeCost && <th className="n">กำไร</th>}<th />
+            </tr>
+          </thead>
           <tbody>
             {lines.map((l, i) => {
               const p = l.productId ? cat.byId.get(l.productId) : undefined;
+              const chk = check?.lines[i];
+              const below = !!chk?.belowCost;
+              const lowered = !!(l.listPrice && l.unitPrice && d(l.unitPrice).lt(d(l.listPrice)));
+              const info = p ? stock.data?.get(p.id) : undefined;
+              const factor = p && !l.free ? d(p.units[l.unitIdx]?.factor ?? 1) : d(1);
+              const avail = info ? d(info.available ?? info.qty) : d(0);
+              const short = !!p && p.kind === 'stock' && !l.free && d(l.qty || 0).times(factor).gt(avail);
               return (
-                <tr key={i}>
+                <tr key={i} className={below ? 'line-below' : undefined} data-testid={`line-row-${i}`}>
                   <td>
                     {!(allowFree && l.free) ? (
-                      <select data-field={`lines.${i}.productId`} value={l.productId} aria-label={`สินค้าแถว ${i + 1}`} data-testid={`line-product-${i}`} style={{ maxWidth: 260 }} onChange={(e) => {
-                        if (e.target.value === '__free') return set(i, { productId: '', name: '', unitName: 'งาน', unitPrice: '0', free: true });
-                        if (l.quoteLineId) return set(i, { productId: e.target.value, unitIdx: 0 }); // keep the quoted price
-                        const nl = { ...l, productId: e.target.value, unitIdx: 0, unitPrice: '' };
-                        set(i, nl);
-                        void fetchPrice(i, nl);
-                      }}>
-                        <option value="">— เลือกสินค้า —</option>
-                        {products.map((x) => <option key={x.id} value={x.id}>{x.name} · {x.sku}</option>)}
-                        {allowFree && <option value="__free">✎ พิมพ์รายการเอง (ยังไม่มีในระบบ)</option>}
-                      </select>
+                      <>
+                        <ProductPicker value={l.productId || null} warehouseId={warehouseId} testId={`line-product-${i}`} ariaLabel={`สินค้าแถว ${i + 1}`} name={`lines.${i}.productId`} style={{ minWidth: 220 }}
+                          onChange={(id) => {
+                            if (l.quoteLineId) return set(i, { productId: id ?? '', unitIdx: 0 }); // keep the quoted price
+                            const nl = { ...l, productId: id ?? '', unitIdx: 0, unitPrice: '', listPrice: undefined, priceSource: undefined };
+                            set(i, nl);
+                            void fetchPrice(i, nl);
+                          }} />
+                        {allowFree && !l.productId && <button type="button" className="btn sm" style={{ marginTop: 4 }} onClick={() => set(i, { productId: '', name: '', unitName: 'งาน', unitPrice: '0', free: true, priceSource: 'พิมพ์ราคาเอง' })} data-testid={`line-free-${i}`}>✎ พิมพ์รายการเอง</button>}
+                        {p && p.kind === 'stock' && !l.free && (
+                          <div className={`small line-stock${short ? ' bad' : ''}`} data-testid={`line-stock-${i}`}>
+                            {warehouseId ? 'ในคลังนี้' : 'ทุกคลัง'} คงเหลือ {fq(info?.qty ?? 0)}{info?.available != null ? ` · พร้อมขาย ${fq(info.available)}` : ''} {p.units[0]?.name}
+                            {short && ' · ไม่พอสำหรับจำนวนนี้'}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <>
                         <input type="text" data-field={`lines.${i}.name`} value={l.name} placeholder="พิมพ์ชื่อรายการ เช่น ประตูไม้สักบานคู่" aria-label={`ชื่อรายการแถว ${i + 1}`} data-testid={`line-name-${i}`} onChange={(e) => set(i, { name: e.target.value })} style={{ width: '100%', minWidth: 180 }} />
                         <div className="row small" style={{ gap: 6, marginTop: 4 }}>
                           <Pill k="warn">นอกระบบ · ไม่มีต้นทุน</Pill>
                           {vatMode !== 'none' && <select value={l.vat} onChange={(e) => set(i, { vat: e.target.value as 'v7' | 'exempt' })} aria-label="ภาษีรายการ"><option value="v7">VAT 7%</option><option value="exempt">ยกเว้น / 0%</option></select>}
-                          <button className="btn sm" onClick={() => set(i, { productId: '', unitIdx: 0, free: false })}>เลือกจากสินค้าในระบบ</button>
+                          <button className="btn sm" onClick={() => set(i, { productId: '', unitIdx: 0, free: false, priceSource: undefined })}>เลือกจากสินค้าในระบบ</button>
                         </div>
                       </>
                     )}
@@ -243,11 +286,12 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
                       </select>
                     ) : !l.free ? null : <input type="text" value={l.unitName} onChange={(e) => set(i, { unitName: e.target.value })} placeholder="หน่วย" style={{ width: 70 }} aria-label="หน่วย" />}
                   </td>
-                  <td className="n" data-l="จำนวน"><input className="qty" type="number" min="0" step="any" data-field={`lines.${i}.qty`} value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} onBlur={() => { if (l.productId && !l.quoteLineId) void fetchPrice(i, l); }} aria-label={`จำนวนแถว ${i + 1}`} data-testid={`line-qty-${i}`} /></td>
+                  <td className="n" data-l="จำนวน"><input className={`qty${short ? ' bad' : ''}`} type="number" min="0" step="any" data-field={`lines.${i}.qty`} value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} onBlur={() => { if (l.productId && !l.quoteLineId) void fetchPrice(i, l); }} aria-label={`จำนวนแถว ${i + 1}`} data-testid={`line-qty-${i}`} /></td>
                   <td className="n" data-l="ราคา/หน่วย">
-                    <input className={`qty${belowCost?.has(l.productId) ? ' bad' : ''}`} type="number" min="0" step="0.01" data-field={`lines.${i}.unitPrice`} value={l.unitPrice} onChange={(e) => set(i, { unitPrice: e.target.value, priceSource: 'แก้ราคาเอง' })} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} data-testid={`line-price-${i}`} />
-                    {l.priceSource && <div className="small muted">{l.priceSource}</div>}
-                    {belowCost?.has(l.productId) && <div className="small" style={{ color: 'var(--bad)' }}>ต่ำกว่าทุน</div>}
+                    <input className={`qty${below ? ' bad' : ''}`} type="number" min="0" step="0.01" data-field={`lines.${i}.unitPrice`} value={l.unitPrice} onChange={(e) => set(i, { unitPrice: e.target.value })} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} data-testid={`line-price-${i}`} aria-invalid={below || undefined} />
+                    {l.priceSource && <div className="small muted" data-testid={`line-source-${i}`}>{l.priceSource}{lowered ? ` · แก้จาก ${fmt(l.listPrice!)}` : ''}</div>}
+                    {lowered && <div className="small warn-text">ต่ำกว่าราคาตามระบบ · ต้องอนุมัติ</div>}
+                    {below && <div className="small bad-text" data-testid={`line-below-${i}`}>ต่ำกว่าทุน{seeCost && chk?.unitCost ? ` (ทุน ${fmt(chk.unitCost)})` : ''}</div>}
                   </td>
                   <td className="n" data-l="ส่วนลด">
                     <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
@@ -256,6 +300,12 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
                     </span>
                   </td>
                   <td className="n" data-l="รวม">{fmt(lineNet(l))}</td>
+                  {seeCost && (
+                    <td className="n" data-l="กำไร" data-testid={`line-profit-${i}`}>
+                      {chk?.profit != null ? <span className={d(chk.profit).lt(0) ? 'bad-text' : ''}>{fmt(chk.profit)}</span> : <span className="muted">-</span>}
+                      {chk?.unitCost != null && <div className="small muted">ทุน {fmt(chk.unitCost)}</div>}
+                    </td>
+                  )}
                   <td><button className="btn sm bad" onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))} aria-label={`ลบแถว ${i + 1}`} title="ลบแถว">✕</button></td>
                 </tr>
               );
@@ -265,23 +315,37 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, be
       </div>
       <div className="row">
         <button className="btn sm" onClick={() => setLines((ls) => [...ls, blankLine()])} data-testid="line-add">+ เพิ่มสินค้า</button>
-        {allowFree && <button className="btn sm" onClick={() => setLines((ls) => [...ls, { ...blankLine(), unitName: 'งาน', unitPrice: '', free: true }])} data-testid="line-add-free">+ รายการพิมพ์เอง (ไม่มีในระบบ)</button>}
+        {allowFree && <button className="btn sm" onClick={() => setLines((ls) => [...ls, { ...blankLine(), unitName: 'งาน', unitPrice: '', free: true, priceSource: 'พิมพ์ราคาเอง' }])} data-testid="line-add-free">+ รายการพิมพ์เอง (ไม่มีในระบบ)</button>}
       </div>
     </>
   );
 }
 
-// ---------- approvals for BR-08 / BR-16 on save ----------
-export type Gate = { kind: 'credit' | 'belowCost'; text: ReactNode } | null;
+/** Document cost / profit summary for data.cost users. */
+export function ProfitSummary({ profit, testId = 'doc-profit' }: { profit: { cost: string; revenue: string; profit: string; marginPct: string } | null | undefined; testId?: string }) {
+  const { can } = useAuth();
+  if (can('data.cost') !== 1 || !profit) return null;
+  return (
+    <div className={`small profit-sum${d(profit.profit).lt(0) ? ' bad-text' : ''}`} data-testid={testId}>
+      ต้นทุน {fmt(profit.cost)} · ยอดขายก่อน VAT {fmt(profit.revenue)} · กำไร {fmt(profit.profit)} ({profit.marginPct}%)
+    </div>
+  );
+}
+
+// ---------- approvals on save: BR-08 credit, BR-16 below cost, price / discount ----------
+type GateKind = 'credit' | 'belowCost' | 'price';
+const GATE_FIELD: Record<GateKind, string> = { credit: 'creditApproval', belowCost: 'belowCostApproval', price: 'priceApproval' };
 
 /**
- * Runs a save; when the server asks for a credit approval (BR-08, 403 need=creditApproval) or below-cost approval
- * (BR-16, 409 BELOW_COST) it opens the PIN modal and retries with the approval attached.
+ * Runs a save; when the server asks for a credit approval (BR-08, 403 need=creditApproval), a below-cost approval
+ * (BR-16, 409 BELOW_COST) or a price / discount approval (403 need=priceApproval: price below the BR-05 price or
+ * discount over the role cap; a reason is required) it opens the PIN modal and retries with the approval attached.
  */
 export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promise<T>, onDone: (r: T) => void, onError?: (e: ApiFail) => boolean) {
-  const [gate, setGate] = useState<{ kind: 'credit' | 'belowCost'; text: ReactNode; extra: Record<string, unknown> } | null>(null);
+  const [gate, setGate] = useState<{ kind: GateKind; text: ReactNode; extra: Record<string, unknown> } | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState('');
   const run = async (extra: Record<string, unknown> = {}): Promise<string | null> => {
     setBusy(true);
     setErr('');
@@ -301,10 +365,24 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
         });
         return null;
       }
+      if (e instanceof ApiFail && e.detail('need') === 'priceApproval') {
+        e.claim();
+        const x = e.details as { pct: string; cap: number; overCap: boolean; priceChanged: boolean; lines: { line: number; name: string; unitPrice: string; listPrice: string }[] };
+        setGate({
+          kind: 'price', extra,
+          text: (
+            <div className="note warn" data-testid="price-need">
+              {x.overCap && <div>ส่วนลดรวม {x.pct}% เกินสิทธิ์ของคุณ ({x.cap}%)</div>}
+              {x.priceChanged && x.lines.map((l) => <div key={l.line}>แถว {l.line} {l.name}: {fmt(l.unitPrice)} (ราคาตามระบบ {fmt(l.listPrice)})</div>)}
+            </div>
+          ),
+        });
+        return null;
+      }
       if (e instanceof ApiFail && e.code === 'BELOW_COST') {
         e.claim();
         const lines = (e.detail<{ name: string; sell?: string; cost?: string }[]>('lines') ?? []);
-        setGate({ kind: 'belowCost', extra, text: <div className="note bad">ขายต่ำกว่าทุน: {lines.map((l) => l.name + (l.sell ? ` (ขาย ${fmt(l.sell)} < ทุน ${fmt(l.cost!)})` : '')).join(', ')}</div> });
+        setGate({ kind: 'belowCost', extra, text: <div className="note bad" data-testid="below-need">ขายต่ำกว่าทุน: {lines.map((l) => l.name + (l.sell ? ` (ขาย ${fmt(l.sell)} < ทุน ${fmt(l.cost!)})` : '')).join(', ')}</div> });
         return null;
       }
       setGate(null);
@@ -315,8 +393,20 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
     }
   };
   const modal = gate && (
-    <ApprovalModal ownerOnly={gate.kind === 'belowCost'} title={gate.kind === 'credit' ? 'เกินวงเงิน / มีบิลเกินกำหนด · ต้องอนุมัติ' : undefined} label={gate.text}
-      onClose={() => setGate(null)} onSubmit={(a: ApprovalInput) => run({ ...gate.extra, [gate.kind === 'credit' ? 'creditApproval' : 'belowCostApproval']: a })} />
+    <ApprovalModal
+      ownerOnly={gate.kind === 'belowCost'}
+      title={gate.kind === 'credit' ? 'เกินวงเงิน / มีบิลเกินกำหนด · ต้องอนุมัติ' : gate.kind === 'price' ? 'แก้ราคา / ส่วนลดเกินสิทธิ์ · ต้องให้ผู้จัดการอนุมัติ' : undefined}
+      label={gate.kind === 'price' ? (
+        <>
+          {gate.text}
+          <label className="f">เหตุผล (บังคับ)<input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เช่น ราคาโครงการตามที่ตกลง / ลูกค้าประจำซื้อจำนวนมาก" data-testid="apv-reason" /></label>
+        </>
+      ) : gate.text}
+      onClose={() => setGate(null)}
+      onSubmit={(a: ApprovalInput) => {
+        if (gate.kind === 'price' && !reason.trim()) return Promise.resolve('ใส่เหตุผลก่อนอนุมัติ');
+        return run({ ...gate.extra, [GATE_FIELD[gate.kind]]: gate.kind === 'price' ? { ...a, reason: reason.trim() } : a });
+      }} />
   );
   return { run, err, busy, modal, setErr };
 }

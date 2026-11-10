@@ -1,12 +1,14 @@
 /** M09 ขายโครงการ: project list, project page (installments, deposits, delivery rounds, variation orders) and the "set up as project" modal. */
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { SalesOrderSummary, SalesProject, SalesProjectSummary, page, type SalesDeposit, type SalesOrder } from '@erp/contracts';
 import { d } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { ApprovalModal, fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput } from '../../ui';
+import { ApprovalModal, fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast, type ApprovalInput } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { SearchSelect } from '../../ui/SearchSelect';
 import { DeliveryModal, DocFormModal } from './Forms';
 import { DLV_STATUS, METHOD_TH, Paper, PrintModal, SOURCE_TH, StatusPill, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
@@ -48,6 +50,7 @@ export function ProjectSetupModal({ so, onClose }: { so: Pick<SalesOrder, 'no' |
   const [name, setName] = useState(`งาน${so.customer.name.replace(/^(หจก\.|บจก\.)\s*/, '')}`);
   const [site, setSite] = useState(so.shipTo);
   const [contact, setContact] = useState('');
+  const [note, setNote] = useState('');
   const [tpl, setTpl] = useState<Template>('30/40/30');
   const [custom, setCustom] = useState('40,30,30');
   const [err, setErr] = useState('');
@@ -57,7 +60,7 @@ export function ProjectSetupModal({ so, onClose }: { so: Pick<SalesOrder, 'no' |
     setErr('');
     try {
       const r = await api('POST', '/api/sales/projects', {
-        body: { soNo: so.no, name: name.trim(), site, contact, template: tpl, ...(tpl === 'custom' ? { installments: customPcts(custom).map((pct) => ({ pct })) } : {}) }, schema: SalesProject,
+        body: { soNo: so.no, name: name.trim(), site, contact, note, template: tpl, ...(tpl === 'custom' ? { installments: customPcts(custom).map((pct) => ({ pct })) } : {}) }, schema: SalesProject,
       });
       await invalidate();
       toast(`ตั้งโครงการ ${r.name} แล้ว`);
@@ -79,6 +82,7 @@ export function ProjectSetupModal({ so, onClose }: { so: Pick<SalesOrder, 'no' |
         <TemplateFields tpl={tpl} setTpl={setTpl} custom={custom} setCustom={setCustom} />
         {so.total && <div><div className="small muted">มูลค่าสัญญา (จากใบสั่งขาย)</div><b>฿{fmt(so.total)}</b></div>}
       </div>
+      <label className="f">หมายเหตุโครงการ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} data-testid="pj-note" /></label>
       <div className="note small">แก้ % และชื่องวดได้ภายหลังที่หน้าโครงการ · รับมัดจำได้หลังตั้งโครงการ</div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy || !name.trim() || !customOk(tpl, custom)} onClick={() => void go()} data-testid="pj-save">ตั้งโครงการ</button></div>
@@ -104,14 +108,9 @@ export default function Projects() {
   const [status, setStatus] = useState(sp.get('q') ? '' : 'active');
   const [m, setM] = useState(false);
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(`${dq}|${status}`);
-  const list = useQuery({
-    queryKey: ['projects', 'list', dq, status, pager.cursor],
-    queryFn: () => api('GET', '/api/sales/projects', { query: { q: dq, status, limit: 20, cursor: pager.cursor }, schema: page(SalesProjectSummary) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
-  const items = list.data?.items ?? [];
+  const list = useLoadMore(['projects', 'list'], '/api/sales/projects', SalesProjectSummary, { q: dq, status }, 20);
+  const loading = list.isLoading;
+  const items = list.rows;
   const canPj = can('sales.project') === 1;
   return (
     <>
@@ -146,7 +145,7 @@ export default function Projects() {
             </tbody>
           </table>
         </div>
-        <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+        <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={items.length} testId="pj-more" />
         <FlowMap />
       </div>
       {m && <NewProjectModal onClose={() => setM(false)} />}
@@ -179,9 +178,9 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
           {sos.isLoading ? <div className="sk" /> : free.length ? (
             <>
               <label className="f">ใบสั่งขายที่ยังไม่ผูกโครงการ
-                <select value={sel?.no ?? ''} onChange={(e) => setPick(e.target.value)} data-testid="pj-pick-so">
-                  {free.map((o) => <option key={o.no} value={o.no}>{o.no} · {o.customer.name} · ฿{fmt(o.total)}</option>)}
-                </select>
+                <SearchSelect<SalesOrderSummary> value={sel?.no ?? null} onChange={(no) => setPick(no ?? '')} items={free} getId={(o) => o.no}
+                  getLabel={(o) => `${o.no} · ${o.customer.name}`} getSub={(o) => `฿${fmt(o.total)} · ${o.itemsPreview}`} getSearch={(o) => o.itemsPreview}
+                  testId="pj-pick-so" ariaLabel="ใบสั่งขายที่ยังไม่ผูกโครงการ" />
               </label>
               <button className="btn" style={{ marginTop: 8 }} onClick={() => sel && setWay(sel)} data-testid="pj-way-so">ตั้งเป็นโครงการ</button>
             </>
@@ -231,6 +230,7 @@ export function ProjectDetail() {
           <div><div className="small muted">ใบสั่งขาย (สัญญางาน)</div>{p.mainSoNo ? <Link className="mono" to={`/b2b/so/${encodeURIComponent(p.mainSoNo)}`}>{p.mainSoNo}</Link> : '-'}
             {p.orders.filter((o) => !o.isMain).length > 0 && <div className="small">งานเพิ่ม: {p.orders.filter((o) => !o.isMain).map((o) => o.no).join(', ')}</div>}</div>
           <div><div className="small muted">มูลค่าตามใบสั่งขาย</div><b data-testid="pj-value">฿{fmt(f.value)}</b></div>
+          {p.note && <div><div className="small muted">หมายเหตุ</div><span data-testid="pj-note-view">{p.note}</span></div>}
         </div>
         <div className="grid" style={{ marginTop: 14, gap: 10 }}>
           {bars.map(([l, v]) => (
@@ -257,7 +257,7 @@ export function ProjectDetail() {
                   {p.deposits.map((x) => (
                     <tr key={x.id}>
                       <td className="mono">{x.no}{x.invoiceNo && <div className="small"><Link to={`/b2b/inv/${encodeURIComponent(x.invoiceNo)}`}>{x.invoiceNo}</Link></div>}</td>
-                      <td>{x.type === 'advance' ? 'รับชำระค่าสินค้าล่วงหน้า' : 'มัดจำประกันสัญญา'}<div className="small muted">{METHOD_TH[x.method] ?? x.method} · {th(x.date)}</div></td>
+                      <td>{x.type === 'advance' ? 'รับชำระค่าสินค้าล่วงหน้า' : 'มัดจำประกันสัญญา'}<div className="small muted">{METHOD_TH[x.method] ?? x.method} · {th(x.date)}</div>{x.note && <div className="small">หมายเหตุ: {x.note}</div>}</td>
                       <td className="n">{fmt(x.amount)}</td><td className="n">{fmt(x.remaining)}</td>
                       <td>{x.status === 'active' ? (x.type === 'advance' ? <Pill k="ok">ออกใบกำกับแล้ว</Pill> : <Pill k="mut">ยังไม่เกิด VAT</Pill>) : x.status === 'forfeited' ? <Pill k="warn">ริบแล้ว {x.forfeitNo}</Pill> : x.status === 'refunded' ? <Pill k="mut">คืนแล้ว</Pill> : <VoidPill />}</td>
                       <td>
@@ -371,7 +371,7 @@ function depositPaper(p: SalesProject, x: SalesDeposit) {
     refs: [['โครงการ', p.name], ...(p.mainSoNo ? [['ใบสั่งขาย', p.mainSoNo]] : []), ['รับโดย', METHOD_TH[x.method] ?? x.method]] as [string, ReactNode][],
     cols: 'amt' as const, rows: [{ name: `เงินมัดจำประกันสัญญา ${pctOf(x.amount, p.figures.value)}% ของมูลค่างาน`, amt: x.amount }],
     totals: [['รวม', fmt(x.amount), true]] as [string, string, boolean?][], baht: x.amount,
-    note: 'เงินมัดจำประกันสัญญายังไม่ถือเป็นรายได้ จึงไม่มีภาษีมูลค่าเพิ่ม', sign: ['ผู้รับเงิน', 'ผู้จ่ายเงิน'],
+    note: [x.note, 'เงินมัดจำประกันสัญญายังไม่ถือเป็นรายได้ จึงไม่มีภาษีมูลค่าเพิ่ม'].filter(Boolean).join(' · '), sign: ['ผู้รับเงิน', 'ผู้จ่ายเงิน'],
   };
 }
 
@@ -484,13 +484,14 @@ function DepositModal({ p, onClose }: { p: SalesProject; onClose: () => void }) 
   const [type, setType] = useState<'advance' | 'guarantee'>(existing ?? 'advance');
   const [amount, setAmount] = useState(d(p.figures.value).times('0.2').toFixed(2));
   const [method, setMethod] = useState<'transfer' | 'cash' | 'promptpay' | 'card'>('transfer');
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', `/api/sales/projects/${encodeURIComponent(p.id)}/deposits`, { body: { type, amount, method }, schema: SalesProject });
+      const r = await api('POST', `/api/sales/projects/${encodeURIComponent(p.id)}/deposits`, { body: { type, amount, method, note }, schema: SalesProject });
       await invalidate();
       const x = r.deposits[0];
       toast(`${x?.no ?? ''} ${type === 'advance' ? 'ใบกำกับภาษี (รับล่วงหน้า)' : 'ใบรับเงินมัดจำ'} ออกแล้ว`);
@@ -512,6 +513,7 @@ function DepositModal({ p, onClose }: { p: SalesProject; onClose: () => void }) 
         <label className="f">จำนวนเงิน<input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} data-testid="dep-amount" /></label>
         <label className="f">รับโดย<select value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>{(['transfer', 'cash', 'promptpay', 'card'] as const).map((k) => <option key={k} value={k}>{METHOD_TH[k]}</option>)}</select></label>
       </div>
+      <label className="f">หมายเหตุ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} data-testid="dep-note" /></label>
       {existing && <div className="note small">โครงการนี้รับมัดจำแบบ{existing === 'advance' ? 'รับชำระล่วงหน้า' : 'ประกันสัญญา'}ไว้แล้ว · หนึ่งโครงการใช้มัดจำได้ประเภทเดียว</div>}
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy || !d(amount || 0).gt(0)} onClick={() => void go()} data-testid="dep-save">บันทึกและออกเอกสาร</button></div>

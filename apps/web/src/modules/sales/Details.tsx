@@ -12,7 +12,7 @@ import { DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } fro
 import { ProjectSetupModal } from './Projects';
 import { DocLink, DocLinks, RouteLink } from '../../doclink';
 import {
-  balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
+  balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, priceSourceText, ProfitSummary, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
 } from './shared';
 
 const Loading = () => <div className="card"><div className="sk" /><div className="sk" /><div className="sk" /></div>;
@@ -65,11 +65,19 @@ export function QuoteDetail() {
           <span>วันที่ / ยืนราคาถึง</span><span>{th(x.date)} – {th(x.validUntil)}</span>
           <span>เงื่อนไขชำระ</span><span>{TERM_TH(x.term)}</span>
           <span>พนักงานขาย</span><span>{x.salesperson?.name ?? '-'}</span>
-          <span>ใบสั่งขาย</span><span><Refs items={x.orders.map((o) => ({ ...o, to: `/b2b/so/${encodeURIComponent(o.no)}` }))} /></span>
+          <span>ใบสั่งขาย</span><span data-testid="qt-orders"><Refs items={x.orders.map((o) => ({ ...o, to: `/b2b/so/${encodeURIComponent(o.no)}` }))} /></span>
+          <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
         </div>
+        {x.priceApproval && <div className="note small" style={{ marginTop: 10 }} data-testid="price-approval">อนุมัติราคา/ส่วนลด: {x.priceApproval.detail}</div>}
+        {x.belowCostApproval && <div className="note warn small" style={{ marginTop: 6 }} data-testid="below-approval">{x.belowCostApproval.detail}</div>}
         {free > 0 && live && x.editable && <div className="note warn small" style={{ marginTop: 10 }}>มีรายการที่ยังไม่มีในระบบ {free} รายการ · ตอนแปลงเป็นใบสั่งขายต้องเลือกสินค้าในระบบให้ครบ (ถ้ายังไม่มี ให้เพิ่มสินค้าที่หน้า "สินค้าและหน่วยนับ" ก่อน)</div>}
         {err && <div className="err">{err}</div>}
         <VoidedNote v={x.voided} />
+      </div>
+      <div className="card">
+        <h2>รายการ · ที่มาของราคา</h2>
+        <LinesTable lines={x.lines} />
+        <ProfitSummary profit={x.profit} />
       </div>
       <div className="card"><Paper {...quotePaper(x)} /></div>
       {m === 'edit' && <DocFormModal mode="QT" edit={x} onClose={() => setM(null)} />}
@@ -108,6 +116,7 @@ export function OrderDetail() {
   const x = q.data;
   const live = x.status === 'active';
   const canDeliver = can('sales.doc') === 1 || can('inv.receive') === 1;
+  const seeCost = can('data.cost') === 1;
   return (
     <>
       <div className="card">
@@ -128,22 +137,27 @@ export function OrderDetail() {
           {x.quoteNo && <><span>จากใบเสนอราคา</span><span className="mono"><DocLink no={x.quoteNo} type="QT" /></span></>}
           {x.project && <><span>โครงการ</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink> {x.project.isMain ? <Pill k="acc">สัญญางาน</Pill> : <Pill k="mut">งานเพิ่ม</Pill>}</span></>}
           {x.shipTo && <><span>ส่งที่</span><span>{x.shipTo}</span></>}
+          <span>พนักงานขาย</span><span>{x.salesperson?.name ?? '-'}</span>
+          <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
           <span>ใบส่งของ</span><span><Refs items={x.deliveries.map((v) => ({ ...v, to: `/b2b/do/${encodeURIComponent(v.no)}`, extra: v.invoiceNo ? <span className="small muted"> → <DocLink no={v.invoiceNo} type="INV" /></span> : null }))} /></span>
           <span>ใบกำกับภาษี</span><span><Refs items={x.invoices.map((v) => ({ ...v, to: `/b2b/inv/${encodeURIComponent(v.no)}` }))} /></span>
         </div>
         {x.creditApproval && <div className="note small" style={{ marginTop: 10 }} data-testid="credit-approval">อนุมัติขายเชื่อ: {x.creditApproval.detail}</div>}
-        {x.belowCostApproval && <div className="note warn small" style={{ marginTop: 6 }}>{x.belowCostApproval.detail}</div>}
+        {x.belowCostApproval && <div className="note warn small" style={{ marginTop: 6 }} data-testid="below-approval">{x.belowCostApproval.detail}</div>}
+        {x.priceApproval && <div className="note small" style={{ marginTop: 6 }} data-testid="price-approval">อนุมัติราคา/ส่วนลด: {x.priceApproval.detail}</div>}
         <VoidedNote v={x.voided} />
       </div>
       <div className="card">
         <h2>รายการและยอดคงค้างส่ง</h2>
         <div className="tw">
           <table>
-            <thead><tr><th>สินค้า</th><th className="n">สั่ง</th><th className="n">ราคา/หน่วย</th><th className="n">จำนวนเงิน</th><th className="n">ส่งแล้ว</th><th className="n">ค้างส่ง</th></tr></thead>
+            <thead><tr><th>สินค้า</th><th className="n">สั่ง</th><th className="n">ราคา/หน่วย</th><th className="n">จำนวนเงิน</th>{seeCost && <th className="n">กำไร</th>}<th className="n">ส่งแล้ว</th><th className="n">ค้างส่ง</th></tr></thead>
             <tbody>
               {x.lines.map((l) => (
                 <tr key={l.id}>
-                  <td>{l.name}<div className="small muted mono">{l.sku}</div></td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fmt(l.unitPrice)}</td><td className="n">{fmt(l.net)}</td>
+                  <td>{l.name}<div className="small muted mono">{l.sku}</div></td><td className="n">{fq(l.qty)} {l.unitName}</td>
+                  <td className="n">{fmt(l.unitPrice)}<PriceSrc l={l} /></td><td className="n">{fmt(l.net)}</td>
+                  {seeCost && <td className="n"><Profit l={l} /></td>}
                   <td className="n">{fq(l.deliveredQty)}</td><td className="n">{d(l.remainingQty).gt(0) ? <b>{fq(l.remainingQty)}</b> : <Pill k="ok">ครบ</Pill>}</td>
                 </tr>
               ))}
@@ -153,12 +167,42 @@ export function OrderDetail() {
         <div className="tot" style={{ maxWidth: 360, marginLeft: 'auto' }}>
           {taxRows(x.totals, x.vatMode).map(([k, v, b]) => <TotLine key={k} k={k} v={v} b={b} />)}
         </div>
+        <ProfitSummary profit={x.profit} />
       </div>
       {m === 'deliver' && <DeliveryModal initial={{ kind: 'SO', no: x.no }} onClose={() => setM(null)} />}
       {m === 'project' && <ProjectSetupModal so={x} onClose={() => setM(null)} />}
       {m === 'print' && <PrintModal title={x.no} onClose={() => setM(null)}><Paper {...orderPaper(x)} /></PrintModal>}
       {m === 'void' && <VoidDocModal what={x.no} url={`/api/sales/orders/${encodeURIComponent(x.no)}/void`} total={x.totals.total} onClose={() => setM(null)} onDone={() => void invalidate()} />}
     </>
+  );
+}
+const PriceSrc = ({ l }: { l: SalesQuote['lines'][number] }) => {
+  const t = priceSourceText(l.priceSource, l.priceRef);
+  const lowered = l.listPrice != null && d(l.unitPrice).lt(d(l.listPrice));
+  return t || lowered ? <div className="small muted">{t}{lowered ? ` · แก้จาก ${fmt(l.listPrice!)}` : ''}</div> : null;
+};
+const Profit = ({ l }: { l: SalesQuote['lines'][number] }) =>
+  l.profit != null ? <><span className={d(l.profit).lt(0) ? 'bad-text' : ''}>{fmt(l.profit)}</span>{l.unitCost != null && <div className="small muted">ทุน {fmt(l.unitCost)}</div>}</> : <span className="muted">-</span>;
+
+/** Internal view of quotation lines: price, BR-05 source, profit for data.cost users. */
+function LinesTable({ lines }: { lines: SalesQuote['lines'] }) {
+  const { can } = useAuth();
+  const seeCost = can('data.cost') === 1;
+  return (
+    <div className="tw">
+      <table data-testid="qt-lines">
+        <thead><tr><th>รายการ</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย</th><th className="n">จำนวนเงิน</th>{seeCost && <th className="n">กำไร</th>}</tr></thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.id}>
+              <td>{l.name}{l.free && <> <Pill k="warn">นอกระบบ</Pill></>}{l.sku && <div className="small muted mono">{l.sku}</div>}</td>
+              <td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fmt(l.unitPrice)}<PriceSrc l={l} /></td><td className="n">{fmt(l.net)}</td>
+              {seeCost && <td className="n"><Profit l={l} /></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 const TotLine = ({ k, v, b }: { k: string; v: string; b?: boolean }) => <><span className={b ? '' : 'muted'} style={b ? { fontWeight: 600 } : undefined}>{k}</span><span className={b ? 'big' : ''}>{b ? `฿${v}` : v}</span></>;
@@ -204,6 +248,7 @@ export function DeliveryDetail() {
           {x.project && <><span>โครงการ / หน้างาน</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink>{x.project.site ? ` · ${x.project.site}` : ''}</span></>}
           <span>ส่งที่</span><span>{x.shipTo || '-'}</span>
           <span>รถ / คนขับ</span><span>{x.vehicle || '-'}</span>
+          <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
           <span>สต็อก</span><span>{x.cutsStock ? `ตัดสต็อก FIFO จาก ${x.warehouse?.name}` : 'ไม่ตัดสต็อก (ตัดแล้วตอนออกใบกำกับ)'}</span>
           <span>ใบกำกับภาษี</span><span><Refs items={x.invoiceNos.map((n) => ({ no: n, status: 'active' as const, to: `/b2b/inv/${encodeURIComponent(n)}` }))} /></span>
         </div>
@@ -266,6 +311,7 @@ export function InvoiceDetail() {
           {x.deliveries.length > 0 && <><span>ใบส่งของ</span><span><Refs items={x.deliveries.map((n) => ({ no: n, status: 'active' as const, to: `/b2b/do/${encodeURIComponent(n)}` }))} /></span></>}
           {x.soNo && <><span>ใบสั่งขาย</span><span className="mono"><DocLink no={x.soNo} type="SO" /></span></>}
           {x.project && <><span>โครงการ</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink>{x.installment ? ` · งวดที่ ${x.installment.n} (${x.installment.pct}%)` : ''}</span></>}
+          <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
           <span>ใบวางบิล</span><span><Refs items={x.billingNotes.map((v) => ({ ...v, to: `/ar/bn/${encodeURIComponent(v.no)}` }))} /></span>
           <span>ใบเสร็จรับเงิน</span><span><Refs items={x.receipts.map((v) => ({ ...v, to: `/ar/rc/${encodeURIComponent(v.no)}`, extra: <span className="small muted"> {fmt(v.settled)}</span> }))} /></span>
           <span>ใบลดหนี้</span><span><Refs items={x.creditNotes.map((v) => ({ ...v, to: `/sales/${encodeURIComponent(v.no)}`, extra: <span className="small muted"> {fmt(v.total)}{v.refund === 'credit' ? ' ลดหนี้' : ''}</span> }))} /></span>
