@@ -1,6 +1,6 @@
 /** Browser flows against a freshly seeded shop. Serial: later tests use bills made by earlier ones. */
 import { expect, test } from '@playwright/test';
-import { EDITION, PP, apiToken, approve, login } from './helpers';
+import { EDITION, PP, apiToken, approve, login, pick } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -213,7 +213,7 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await page.getByTestId('btn-gr').click();
   await page.getByTestId('gr-dn').fill('DO-E2E-1');
   await page.getByTestId('gr-inv').fill(`IV-E2E-${EDITION}`);
-  await page.getByTestId('gr-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'gr-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('gr-q0').fill('10');
   await page.getByTestId('gr-c0').fill('1000');
   await page.getByTestId('gr-bd').fill('500');
@@ -221,13 +221,13 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await expect(page.getByText(/รับเข้าสต็อก GR\d{4}-\d{4} แล้ว/)).toBeVisible();
 
   await page.getByTestId('btn-tr').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('2');
   await page.getByTestId('sf-save').click();
   await expect(page.getByText(/บันทึก TR\d{4}-\d{4} แล้ว/)).toBeVisible();
 
   await page.getByTestId('btn-iss').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('500');
   await page.getByTestId('sf-save').click();
   await expect(page.getByTestId('shortage-table')).toContainText('สีรองพื้นปูนใหม่ 9 ลิตร');
@@ -237,7 +237,7 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await page.getByRole('button', { name: 'ยกเลิก' }).click();
 
   await page.getByTestId('btn-adj').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('-1');
   await page.getByTestId('sf-save').click();
   await expect(page.getByText(/ส่งขออนุมัติปรับยอด/)).toBeVisible();

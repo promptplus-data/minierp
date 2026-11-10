@@ -39,3 +39,12 @@ export async function apiToken(request: APIRequestContext, username: string): Pr
 }
 
 export const PP = /prompt[\s_-]*plus/i;
+
+/** SearchSelect / ProductPicker: type into the picker and click the first row whose label contains `label`. */
+export async function pick(page: Page, testId: string, label: string, search = label) {
+  const input = page.getByTestId(`${testId}-input`);
+  await input.click();
+  await input.fill(search);
+  await page.getByTestId(`${testId}-list`).locator('li[role="option"]', { has: page.locator('.ss-l', { hasText: label }) }).first().click();
+  await expect(input).toHaveValue(label);
+}
