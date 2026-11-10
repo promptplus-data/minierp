@@ -8,7 +8,7 @@ import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 
 interface ShiftRow { id: string; no: string; user_id: string; device_id: string; opened_at: Date; closed_at: Date | null; float: string; counted: string | null; expected: string | null; diff: string | null; summary: Summary | null }
-interface Summary { cashSales: string; cashRefunds: string; cashIn: string; cashOut: string; byMethod: Record<string, string>; bills: number; voids: number }
+interface Summary { cashSales: string; cashRefunds: string; cashIn: string; cashOut: string; byMethod: Record<string, string>; creditSales?: string; bills: number; voids: number }
 
 const SHIFT_COLS = `id, no, user_id, device_id, opened_at, closed_at, float::text, counted::text, expected::text, diff::text, summary`;
 
@@ -23,7 +23,14 @@ async function summarize(tx: Tx, shiftId: string): Promise<Summary> {
     [shiftId],
   );
   const by: Record<string, ReturnType<typeof d>> = {};
-  for (const s of sales.rows.filter((x) => x.status === 'active')) for (const p of s.payments) by[p.method] = (by[p.method] ?? d(0)).plus(d(p.amount));
+  // POS credit sales (เงินเชื่อ) are receivables: never in the drawer nor in the takings by method.
+  let credit = d(0);
+  for (const s of sales.rows.filter((x) => x.status === 'active')) {
+    for (const p of s.payments) {
+      if (p.method === 'credit') credit = credit.plus(d(p.amount));
+      else by[p.method] = (by[p.method] ?? d(0)).plus(d(p.amount));
+    }
+  }
   const refunds = await tx.query<{ t: string | null }>(`select sum(total)::text t from docs where shift_id = $1 and type = 'CN' and status = 'active' and refund = 'cash'`, [shiftId]);
   const moves = await tx.query<{ type: 'in' | 'out'; amount: string }>(`select type, amount::text from shift_moves where shift_id = $1`, [shiftId]);
   return {
@@ -32,6 +39,7 @@ async function summarize(tx: Tx, shiftId: string): Promise<Summary> {
     cashIn: money(sum(moves.rows.filter((m) => m.type === 'in').map((m) => m.amount))),
     cashOut: money(sum(moves.rows.filter((m) => m.type === 'out').map((m) => m.amount))),
     byMethod: Object.fromEntries(Object.entries(by).map(([k, v]) => [k, money(v)])),
+    creditSales: money(credit),
     bills: sales.rows.filter((x) => x.status === 'active').length,
     voids: sales.rows.filter((x) => x.status === 'void').length,
   };
@@ -43,6 +51,7 @@ async function toShift(tx: Tx, r: ShiftRow): Promise<Shift> {
     id: r.id, no: r.no, userId: r.user_id, deviceId: r.device_id, openedAt: r.opened_at.toISOString(), closedAt: r.closed_at?.toISOString() ?? null,
     float: money(r.float), cashSales: s.cashSales, cashRefunds: s.cashRefunds, cashIn: s.cashIn, cashOut: s.cashOut,
     expected: r.expected ?? shiftExpected({ float: r.float, ...s }), counted: r.counted, diff: r.diff, byMethod: s.byMethod,
+    creditSales: s.creditSales ?? '0.00',
   };
 }
 

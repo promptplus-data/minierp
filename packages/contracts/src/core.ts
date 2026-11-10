@@ -130,6 +130,8 @@ export const Shift = z.object({
   id: z.string(), no: z.string(), userId: z.string(), deviceId: z.string(), openedAt: z.string(), closedAt: z.string().nullable(),
   float: Dec, cashSales: Dec, cashRefunds: Dec, cashIn: Dec, cashOut: Dec, expected: Dec, counted: Dec.nullable(), diff: Dec.nullable(),
   byMethod: z.record(Dec),
+  /** POS credit sales (เงินเชื่อ) of the shift: receivables, not in the drawer nor in byMethod. */
+  creditSales: Dec.default('0.00'),
 });
 export type Shift = z.infer<typeof Shift>;
 
@@ -137,6 +139,11 @@ export type Shift = z.infer<typeof Shift>;
 export const Discount = z.object({ kind: z.enum(['pct', 'amt']), value: DecNN })
   .refine((x) => x.kind !== 'pct' || Number(x.value) <= 100, { message: 'percent discount must be 0..100', path: ['value'] });
 export const PaymentMethod = z.enum(['cash', 'transfer', 'promptpay', 'card']);
+/** POS adds เงินเชื่อ (credit): the whole bill becomes a receivable of a named credit-term customer (docs.ar_balance). */
+export const PosPaymentMethod = z.enum(['cash', 'transfer', 'promptpay', 'card', 'credit']);
+export type PosPaymentMethod = z.infer<typeof PosPaymentMethod>;
+/** Reason chip required whenever a POS bill has a manual discount or a changed price; 'other' needs text. */
+export const DiscReason = z.object({ code: z.enum(['regular', 'defect', 'bulk', 'competitor', 'other']), text: z.string().max(200).optional() });
 export const PosSaleReq = z.object({
   idempotencyKey: z.string().uuid(),
   shiftId: z.string(), warehouseId: z.string(),
@@ -148,9 +155,16 @@ export const PosSaleReq = z.object({
   /** M15 bundle sets sold at the promo's set price (BR-17: every component cut FIFO, revenue split pro-rata). */
   bundles: z.array(z.object({ promoId: z.string(), sets: Dec })).optional(),
   billDiscount: DecNN.default('0'),
-  payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).min(1),
+  payments: z.array(z.object({ method: PosPaymentMethod, amount: DecNN })).min(1),
   belowCostApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(), // BR-16 owner only
-  discountApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),  // over role cap
+  /** Manager override token from POST /api/sales/pos/approvals (discount over the role cap / changed price). */
+  discountToken: z.string().optional(),
+  /** Legacy inline PIN for the same override (kept for API clients; the POS screen uses discountToken). */
+  discountApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),
+  discountReason: DiscReason.optional(),
+  /** Credit sale over the customer's limit / with overdue bills: owner or manager PIN (self-approved by them). */
+  creditApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),
+  note: z.string().max(500).optional(),
 });
 export type PosSaleReq = z.infer<typeof PosSaleReq>;
 export const DocLine = z.object({
@@ -169,18 +183,46 @@ export const SalesDoc = z.object({
   customer: z.object({ id: z.string().nullable(), name: z.string(), phone: z.string().nullable() }),
   vatMode: z.enum(['inc', 'exc', 'none']), lines: z.array(DocLine),
   totals: z.object({ gross: Dec, lineDisc: Dec, billDisc: Dec, base7: Dec, exempt: Dec, vat: Dec, total: Dec }),
-  payments: z.array(z.object({ method: PaymentMethod, amount: Dec })), status: z.enum(['active', 'void']),
+  payments: z.array(z.object({ method: PosPaymentMethod, amount: Dec })), status: z.enum(['active', 'void']),
   voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(), createdBy: z.string(), ref: z.string().nullable(),
   /** ABB only: POS ID of the machine (module C registry, REQ-M01-07 / REQ-M07-04). */
   posId: z.string().nullable().optional(),
   /** Documents made from this one (credit note, full tax invoice, billing note, receipt, delivery), so the source lists its downstream docs. */
   related: z.array(z.object({ no: z.string(), kind: z.enum(['CN', 'INV', 'BN', 'RE', 'DO']), status: z.enum(['active', 'void']) })).optional(),
+  /** Free note (POS bill note) and the POS discount reason. */
+  note: z.string().optional(),
+  discReason: z.string().nullable().optional(),
+  /** Outstanding receivable (POS credit sale / B2B credit invoice). */
+  arBalance: Dec.optional(),
+  /** The `ref` document has a B2B invoice page (sales_invoices); false = a POS bill, opened at /sales/:no. */
+  refB2b: z.boolean().optional(),
 });
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });
 export type DocSummary = z.infer<typeof DocSummary>;
 /** PIN approval by another user (manager / owner), e.g. for a cashier's return. */
 export const Approval = z.object({ approverUserId: z.string(), pin: z.string() });
+
+// ---------- POS manager override + live cost preview (M07) ----------
+export const PosPriceChange = z.object({ productId: z.string(), unitIdx: z.number().int().min(0), price: DecNN });
+/** Asked as soon as the cashier enters a discount / price over the role cap; returns a short-lived single-use token. */
+export const PosApprovalReq = z.object({
+  shiftId: z.string(), approval: Approval, maxAmount: DecNN, maxPct: DecNN, prices: z.array(PosPriceChange).max(200).default([]), reason: DiscReason.optional(),
+});
+export const PosApproval = z.object({
+  token: z.string(), approver: z.object({ id: z.string(), name: z.string() }), maxAmount: Dec, maxPct: Dec, prices: z.array(PosPriceChange), expiresAt: z.string(),
+});
+export type PosApproval = z.infer<typeof PosApproval>;
+export type PosApprovalReq = z.infer<typeof PosApprovalReq>;
+export const PosPreviewReq = PosSaleReq.pick({ warehouseId: true, customerId: true, lines: true, bundles: true, billDiscount: true });
+export type PosPreviewReq = z.infer<typeof PosPreviewReq>;
+/** Per line / bundle: below-cost flag for everyone; cost, revenue ex VAT and margin only for data.cost. */
+const PreviewRow = z.object({ belowCost: z.boolean(), cost: Dec.nullable().optional(), revenue: Dec.optional(), margin: Dec.nullable().optional(), marginPct: Dec.nullable().optional() });
+export const PosPreview = z.object({
+  showCost: z.boolean(), lines: z.array(PreviewRow), bundles: z.array(PreviewRow), belowCost: z.boolean(),
+  cost: Dec.optional(), revenue: Dec.optional(), profit: Dec.optional(), profitPct: Dec.nullable().optional(),
+});
+export type PosPreview = z.infer<typeof PosPreview>;
 export const VoidReq = z.object({ reason: z.string().min(1), approverUserId: z.string().optional(), pin: z.string().optional() });
 
 // ---------- returns (M08-06) ----------
@@ -222,7 +264,7 @@ export const coreRoutes = {
   stock: 'GET /api/stock', lots: 'GET /api/stock/lots', receipt: 'POST /api/stock/receipts', transfer: 'POST /api/stock/transfers', issue: 'POST /api/stock/issues',
   adjustRequest: 'POST /api/stock/adjust-requests', adjustRequests: 'GET /api/stock/adjust-requests', adjustApprove: 'POST /api/stock/adjust-requests/:id/approve',
   shiftCurrent: 'GET /api/shifts/current', shiftOpen: 'POST /api/shifts/open', shiftMove: 'POST /api/shifts/:id/cash-moves', shiftClose: 'POST /api/shifts/:id/close',
-  posSale: 'POST /api/sales/pos', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
+  posSale: 'POST /api/sales/pos', posPreview: 'POST /api/sales/pos/preview', posApproval: 'POST /api/sales/pos/approvals', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
   returnsEligible: 'GET /api/returns/eligible', returnCreate: 'POST /api/returns',
   audit: 'GET /api/audit-log', auditVerify: 'GET /api/audit-log/verify',
   vendors: 'GET /api/vendors', vendorCreate: 'POST /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', adjustDecide: 'POST /api/stock/adjust-requests/:id/decide', userUnlock: 'POST /api/users/:id/unlock',

@@ -17,7 +17,7 @@ export const QT_STATUS: Record<string, [string, 'ok' | 'warn' | 'bad' | 'acc' | 
   draft: ['ร่าง', 'mut'], sent: ['ส่งแล้ว · รอลูกค้า', 'acc'], accepted: ['ลูกค้ายอมรับ', 'ok'], lost: ['ไม่ได้งาน', 'mut'], expired: ['หมดอายุ', 'warn'], void: ['ยกเลิก', 'bad'],
 };
 export const DLV_STATUS: Record<string, [string, 'ok' | 'warn' | 'mut']> = { open: ['รอส่ง', 'warn'], partial: ['ส่งบางส่วน', 'warn'], delivered: ['ส่งครบแล้ว', 'ok'] };
-export const SOURCE_TH: Record<string, string> = { delivery: 'จากใบส่งของ', direct: 'ขายตรง', installment: 'งวดโครงการ', deposit: 'รับล่วงหน้า', forfeit: 'ริบมัดจำ', abb: 'แทนใบกำกับอย่างย่อ' };
+export const SOURCE_TH: Record<string, string> = { delivery: 'จากใบส่งของ', direct: 'ขายตรง', installment: 'งวดโครงการ', deposit: 'รับล่วงหน้า', forfeit: 'ริบมัดจำ', abb: 'แทนใบกำกับอย่างย่อ', pos: 'ขายเชื่อหน้าร้าน' };
 export const METHOD_TH: Record<string, string> = { cash: 'เงินสด', transfer: 'โอนเงิน', cheque: 'เช็ค', promptpay: 'พร้อมเพย์', card: 'บัตร', credit: 'ลดหนี้' };
 
 export const StatusPill = ({ map, k }: { map: Record<string, [string, 'ok' | 'warn' | 'bad' | 'acc' | 'mut']>; k: string }) => {

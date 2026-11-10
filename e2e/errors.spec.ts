@@ -98,8 +98,7 @@ test('the shortage modal and the owner PIN flow do not double up with the generi
   await openPos(page);
   await page.getByTestId('tile-SCG-CEM-T50').click();
   await page.getByTestId('ldisc-0').fill('30');
-  await page.getByTestId('pay').click();
-  await page.getByTestId('pay-confirm').click();
+  await page.getByTestId('ldisc-0').press('Enter');
   await expect(page.getByRole('heading', { name: 'ส่วนลดเกินสิทธิ์' })).toBeVisible();
   await expect(page.getByTestId('apv-by').locator('option').first()).toBeAttached();
   await page.getByTestId('apv-pin').fill('9999');

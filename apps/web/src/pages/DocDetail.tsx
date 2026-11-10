@@ -36,10 +36,13 @@ export default function DocDetail() {
         <div className="kv">
           <span>วันที่</span><span>{th(doc.date)}</span>
           <span>ลูกค้า</span><span>{doc.customer.name}{doc.customer.phone ? ` · ${doc.customer.phone}` : ''}</span>
-          {doc.ref && <><span>อ้างอิง</span><span className="mono" data-testid="doc-ref"><DocLink no={doc.ref} /></span></>}
+          {doc.ref && <><span>อ้างอิง</span><span className="mono" data-testid="doc-ref">{/* a POS full tax invoice has no B2B page: open it here instead of probing /b2b/inv (404) */}<DocLink no={doc.ref} type={doc.refB2b === false && doc.ref.startsWith('INV') ? 'ABB' : undefined} /></span></>}
           {!!doc.related?.length && <><span>เอกสารต่อเนื่อง</span><span className="mono" data-testid="doc-related">{doc.related.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}><DocLink no={x.no} type={x.kind} /></span></span>)}</span></>}
           <span>ภาษี</span><span>{doc.vatMode === 'inc' ? 'ราคารวม VAT 7%' : doc.vatMode === 'exc' ? 'ราคาไม่รวม VAT' : 'ร้านไม่จด VAT'}</span>
           <span>ชำระโดย</span><span>{doc.payments.map((p) => `${METHOD_TH[p.method] ?? p.method} ${fmt(p.amount)}`).join(' + ') || '-'}</span>
+          {doc.payments.some((p) => p.method === 'credit') && <><span>ค้างชำระ (ลูกหนี้)</span><span data-testid="doc-ar">{d(doc.arBalance ?? '0').gt(0) ? <Pill k="warn">฿{fmt(doc.arBalance ?? '0')}</Pill> : <Pill k="ok">ชำระครบแล้ว</Pill>}</span></>}
+          {doc.discReason && <><span>เหตุผลส่วนลด</span><span data-testid="doc-disc-reason">{doc.discReason}</span></>}
+          {doc.note && <><span>หมายเหตุ</span><span data-testid="doc-note">{doc.note}</span></>}
         </div>
         {doc.voided && <div className="note bad small" style={{ marginTop: 12 }} data-testid="voided">ยกเลิกเมื่อ {thTime(doc.voided.at)} · เหตุผล: {doc.voided.reason}</div>}
       </div>
@@ -60,7 +63,7 @@ export default function DocDetail() {
           </table>
         </div>
         <div className="tot" style={{ maxWidth: 360, marginLeft: 'auto' }}>
-          <span className="muted">รวมเป็นเงิน</span><span>{fmt(t.gross)}</span>
+          <span className="muted">รวมเป็นเงิน (ก่อนส่วนลด)</span><span>{fmt(t.gross)}</span>
           {d(t.lineDisc).gt(0) && <><span className="muted">ส่วนลดรายการ</span><span>−{fmt(t.lineDisc)}</span></>}
           {d(t.billDisc).gt(0) && <><span className="muted">ส่วนลดท้ายบิล</span><span>−{fmt(t.billDisc)}</span></>}
           {doc.vatMode !== 'none' && <><span className="muted">มูลค่าก่อนภาษี</span><span>{fmt(d(t.base7).plus(d(t.exempt)))}</span><span className="muted">ภาษีมูลค่าเพิ่ม 7%</span><span>{fmt(t.vat)}</span></>}

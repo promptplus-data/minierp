@@ -21,10 +21,10 @@ const METHOD_TH: Record<string, string> = { cash: 'เงินสด', transfer
 /** Open (unpaid) invoices of one customer, locked for the caller's transaction. */
 interface InvLock { id: string; no: string; date: string; customer_id: string | null; status: string; total: string; vat: string; ar_balance: string; due_date: string | null }
 async function lockInvoices(tx: Tx, nos: string[]): Promise<Map<string, InvLock>> {
-  await tx.query(`select id from docs where no = any($1::text[]) and type = 'INV' order by id for update`, [nos]);
+  await tx.query(`select id from docs where no = any($1::text[]) and type in ('INV','ABB','RC') order by id for update`, [nos]);
   const r = await tx.query<InvLock>(
     `select x.id, x.no, x.date::text, x.customer_id, x.status, x.total::text, x.vat::text, x.ar_balance::text, si.due_date::text
-       from docs x left join sales_invoices si on si.doc_id = x.id where x.no = any($1::text[]) and x.type = 'INV'`,
+       from docs x left join sales_invoices si on si.doc_id = x.id where x.no = any($1::text[]) and x.type in ('INV','ABB','RC')`,
     [nos],
   );
   const m = new Map(r.rows.map((x) => [x.no, x]));
@@ -207,7 +207,8 @@ export async function listReceipts(tx: Tx, q: SalesPageQuery) {
 }
 
 // ---------- aging / open invoices / due soon ----------
-const OPEN = `x.type = 'INV' and x.status = 'active' and x.ar_balance > 0`;
+// POS credit bills (ABB / RC with a sales_invoices row, source 'pos') are receivables too.
+const OPEN = `x.type in ('INV','ABB','RC') and x.status = 'active' and x.ar_balance > 0`;
 const BUCKET_SQL = (asOf: string) => `case when si.due_date >= ${asOf} then 'notDue' when ${asOf} - si.due_date <= 30 then 'd1_30' when ${asOf} - si.due_date <= 60 then 'd31_60'
   when ${asOf} - si.due_date <= 90 then 'd61_90' else 'over90' end`;
 

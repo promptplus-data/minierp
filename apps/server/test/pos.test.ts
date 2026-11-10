@@ -99,7 +99,7 @@ describe('POS sale (M07)', () => {
 
 describe('discount cap (OQ-10)', () => {
   it('cashier (cap 0%) needs a manager/owner PIN for any discount', async () => {
-    const body = () => saleBody(env.seed, praeShift, [{ p: 'p6', qty: '1', price: '89.00' }], '84.00', { billDiscount: '5' });
+    const body = () => saleBody(env.seed, praeShift, [{ p: 'p6', qty: '1', price: '89.00' }], '84.00', { billDiscount: '5', discountReason: { code: 'regular' } });
     const blocked = await prae.post('/api/sales/pos', body());
     expect(blocked.status).toBe(403);
     expect(blocked.body.details).toMatchObject({ need: 'discountApproval', cap: 0 });
@@ -122,7 +122,7 @@ describe('discount cap (OQ-10)', () => {
 
 describe('below cost (BR-16)', () => {
   // p1 at 120 inc VAT = 112.15 ex VAT per bag, next FIFO lot in WH1 costs 124.44
-  const body = () => saleBody(env.seed, sudaShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00');
+  const body = () => saleBody(env.seed, sudaShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00', { discountReason: { code: 'regular' } });
 
   it('blocks a manager without approval and lists the lines', async () => {
     const r = await suda.post('/api/sales/pos', body());
@@ -132,7 +132,7 @@ describe('below cost (BR-16)', () => {
   });
 
   it('rejects a manager PIN (owner only), and nobody approves their own sale', async () => {
-    const bySuda = { ...saleBody(env.seed, praeShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00'), discountApproval: { approverUserId: env.seed.users.suda, pin: '1234' } };
+    const bySuda = { ...saleBody(env.seed, praeShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00', { discountReason: { code: 'regular' } }), discountApproval: { approverUserId: env.seed.users.suda, pin: '1234' } };
     const r = await prae.post('/api/sales/pos', { ...bySuda, belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
     expect(r.status).toBe(409);
     expect(r.body.details.approvalError).toBe('ROLE_NOT_ALLOWED');
@@ -154,7 +154,7 @@ describe('below cost (BR-16)', () => {
 
   it('owner selling himself is allowed but logged', async () => {
     const ownerShift = await openShift(owner, '0.00', 'POS-3');
-    const r = await owner.post('/api/sales/pos', saleBody(env.seed, ownerShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00'));
+    const r = await owner.post('/api/sales/pos', saleBody(env.seed, ownerShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00', { discountReason: { code: 'regular' } }));
     expect(r.status).toBe(201);
     const log = await env.pool.query(`select user_name, detail from audit_log where object = 'below-cost' order by chain_seq desc limit 1`);
     expect(log.rows[0].detail).toContain('ยืนยันเอง');

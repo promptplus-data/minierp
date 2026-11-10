@@ -84,14 +84,20 @@ test('number pad edits the POS qty and the payment amount; quick cash; the sale 
   await page.getByTestId('ldisc-0').tap();
   await keys(page, '10');
   await pad(page).getByTestId('numpad-ok').tap();
-  await expect(page.getByTestId('ldisc-0')).toHaveValue('10');
-  await page.getByTestId('ldisc-0').tap();
-  await pad(page).getByRole('button', { name: 'ล้างค่า' }).tap();
-  await pad(page).getByTestId('numpad-ok').tap();
+  // a cashier's discount asks for the manager PIN right away; cancelling puts the bill back
+  await expect(page.getByTestId('override-what')).toBeVisible();
+  await page.getByRole('dialog', { name: 'ขออนุมัติ' }).getByRole('button', { name: 'ยกเลิก' }).tap();
   await expect(page.getByTestId('ldisc-0')).toHaveValue('');
+  await expect(qty).toHaveValue('4');
 
   const total = ((await page.getByTestId('total').innerText()).replace(/[^\d.]/g, ''));
   await page.getByTestId('pay').tap();
+  await expect(page.getByTestId('pa-0')).toBeVisible();
+  if (await page.getByTestId('kind-full').isChecked()) {
+    // this machine may issue full tax invoices only (POS ID registry): a full tax invoice needs a customer with a tax ID
+    await page.getByTestId('pay-cust-input').fill('รุ่งเรือง');
+    await page.getByTestId('pay-cust-list').getByRole('option', { name: /รุ่งเรืองก่อสร้าง/ }).tap();
+  }
   const amount = page.getByTestId('pa-0');
   await expect(amount).toHaveValue(/\d/);
   await amount.tap();

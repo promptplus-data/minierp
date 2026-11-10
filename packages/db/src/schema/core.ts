@@ -201,6 +201,10 @@ export const docs = pgTable('docs', {
   cnNote: text('cn_note'),
   /** Lower-cased haystack for the returns bill picker (pg_trgm GIN index). */
   searchText: text('search_text').notNull().default(''),
+  /** Free note on the document (POS bill note, 0610). */
+  note: text('note').notNull().default(''),
+  /** POS: reason chip (+ text) for a manual discount or changed price (0610). */
+  discReason: text('disc_reason'),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex('docs_tenant_no').on(t.tenantId, t.no),

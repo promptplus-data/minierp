@@ -136,7 +136,8 @@ test('price list: the contractor price applies at the POS once the customer is c
   await page.getByTestId('tile-SCG-AAC-75').click();
   await page.getByTestId('qty-0').fill('100');
   await expect(page.getByTestId('total')).toHaveText('฿2,400.00');
-  await page.getByTestId('pos-cust').selectOption({ label: 'หจก. รุ่งเรืองก่อสร้าง' });
+  await page.getByTestId('pos-cust-input').fill('รุ่งเรือง');
+  await page.getByTestId('pos-cust-list').getByRole('option', { name: /หจก\. รุ่งเรืองก่อสร้าง/ }).click();
   await expect(page.getByTestId('cline-0')).toContainText('ราคาลูกค้า');
   await expect(page.getByTestId('total')).toHaveText('฿2,250.00');
   await page.getByTestId('pay').click();
@@ -224,6 +225,8 @@ test('POS machines: register, approve with POS ID; a pending machine issues full
   await page.getByTestId('tile-PVC-4-85').click();
   await page.getByTestId('pay').click();
   await expect(page.getByTestId('abb-off')).toContainText('ออกได้เฉพาะใบกำกับภาษีเต็มรูป');
+  await page.getByTestId('pay-cust-input').fill('รุ่งเรือง');
+  await page.getByTestId('pay-cust-list').getByRole('option', { name: /รุ่งเรืองก่อสร้าง/ }).click();
   await page.getByTestId('pay-confirm').click();
   await expect(page.getByTestId('sale-no')).toHaveText(/^INV/);
   await page.getByTestId('next-bill').click();
