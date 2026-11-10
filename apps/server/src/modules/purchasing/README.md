@@ -87,3 +87,13 @@ commit. Screenshots: `e2e/screenshots/purchasing-<edition>-*.png`.
 | REQ-M18-04 | partial | Aging buckets and "due within 7 days" card on the AP screen; home-page card waits for the home dashboard (`ApDueCard`) |
 | REQ-M19-08 | done | Generic CSV/Excel delivery file (OQ-19: shop maps columns), one draft per DN, DN dedupe, stock on confirm only, BR-10 |
 | BR-07, BR-09, BR-10, BR-19, BR-21 | done | See the rules table |
+
+## Cross-cutting: pickers, notes, lazy lists
+
+| REQ | Status | Notes |
+| --- | --- | --- |
+| Searchable entity pickers | done | Vendor (`VendorPicker`, partial Thai search, "+ สร้างผู้ขายใหม่" → `POST /api/vendors`, `data.master`), product (`ProductPicker` with stock) in manual receipt, delivery import, draft confirm (line mapping). Small enums stay `<select>` |
+| Document note (หมายเหตุ) | done | GR (manual + draft confirm; stored in `stock_docs.reason`), AP bill (copied from GR, `PATCH /api/ap/bills/:no` `{ note }` with `fin.ap`, audited), PV, vendor return, import batch (Import Hub + delivery file). Migration `0640_document_notes.sql`. Shown on list rows and detail pages |
+| Lazy lists | done | Drafts, receipts, AP bills, PVs, vendor returns, discounts, import history, profiles, aliases: 10–20 rows per page with `LoadMore` (infinite scroll) |
+
+Tests: `apps/server/test/notes-pickers.test.ts`; e2e `e2e/pickers.spec.ts` (vendor partial search, GR → AP note, bill note edit).

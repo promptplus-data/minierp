@@ -6,7 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { EDITION, PP, approve, login, logout } from './helpers';
+import { EDITION, PP, approve, login, logout, pick } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -40,7 +40,7 @@ test('owner creates a discount promo and a bundle; the manager needs the owner f
   await page.getByTestId('promo-new').click();
   await page.getByTestId('pm-name').fill(`กระเบื้องลด 10% ${RUN}`);
   await page.getByTestId('pm-value').fill('10');
-  await page.locator('.rt-pick label', { hasText: 'กระเบื้องหลังคาลอนคู่' }).click();
+  await pick(page, 'pm-add-item', 'กระเบื้องหลังคาลอนคู่', 'กระเบื้องหลังคา');
   await expect(page.locator('.md table')).toContainText('46.80'); // 52 − 10%
   await page.getByTestId('pm-save').click();
   await expect(row(page, 'promo-table', `กระเบื้องลด 10% ${RUN}`)).toContainText('กำลังใช้');
@@ -48,9 +48,9 @@ test('owner creates a discount promo and a bundle; the manager needs the owner f
   await page.getByTestId('promo-new').click();
   await page.getByTestId('pm-name').fill(`ชุดปูกระเบื้อง ${RUN}`);
   await page.getByTestId('pm-kind').selectOption('bundle');
-  await page.getByLabel('สินค้าในชุด 1').selectOption({ label: 'กาวซีเมนต์ปูกระเบื้อง 20 กก.' });
+  await pick(page, 'pm-comp0', 'กาวซีเมนต์ปูกระเบื้อง 20 กก.');
   await page.getByLabel('จำนวนต่อชุด 1').fill('2');
-  await page.getByLabel('สินค้าในชุด 2').selectOption({ label: 'ปูนซีเมนต์ตราเสือ 50 กก.' });
+  await pick(page, 'pm-comp1', 'ปูนซีเมนต์ตราเสือ 50 กก.');
   await page.getByLabel('จำนวนต่อชุด 2').fill('1');
   await page.getByTestId('pm-setprice').fill('520');
   await page.getByLabel('SKU ชุดโปร (ถ้ามี)').fill(BUNDLE_SKU);
@@ -65,7 +65,7 @@ test('owner creates a discount promo and a bundle; the manager needs the owner f
   await page.getByTestId('pm-name').fill(`ท่อ PVC ล้างสต็อก ${RUN}`);
   await page.getByTestId('pm-mode').selectOption('fixed');
   await page.getByTestId('pm-value').fill('70');
-  await page.locator('.rt-pick label', { hasText: 'ท่อ PVC 4 หุน' }).click();
+  await pick(page, 'pm-add-item', 'ท่อ PVC 4 หุน');
   await expect(page.getByTestId('pm-below')).toBeVisible();
   await page.getByTestId('pm-save').click();
   await approve(page, 'คุณเจริญ');
@@ -124,7 +124,7 @@ test('price list: the contractor price applies at the POS once the customer is c
   await page.getByTestId('pl-new').click();
   await page.getByTestId('pl-name').fill(`ราคาผู้รับเหมา ${RUN}`);
   await page.getByTestId('pl-add').click();
-  await page.getByLabel('สินค้าแถว 1').selectOption({ label: 'อิฐมวลเบา 7.5 ซม.' });
+  await pick(page, 'pl-p0', 'อิฐมวลเบา 7.5 ซม.');
   await page.getByLabel('ซื้อตั้งแต่ แถว 1').fill('100');
   await page.getByLabel('ราคา แถว 1').fill('22.50');
   await page.getByTestId('pl-save').click();
@@ -150,10 +150,10 @@ test('production: BOM, open an MO (FIFO issue), record output twice, close into 
   await page.getByRole('link', { name: /การผลิต/ }).click();
   await page.getByTestId('tab-bom').click();
   await page.getByTestId('bom-new').click();
-  await page.getByTestId('bom-product').selectOption({ label: 'ท่อคอนกรีต (วงบ่อ) ⌀80 ซม.' });
+  await pick(page, 'bom-product', 'ท่อคอนกรีต (วงบ่อ) ⌀80 ซม.', 'ท่อคอนกรีต');
   for (const [i, name, q] of [[1, 'ปูนซีเมนต์ตราเสือ 50 กก.', '0.6'], [2, 'ทรายหยาบ', '0.05'], [3, 'หิน 3/4', '0.07'], [4, 'เหล็กเส้นกลม RB9 ยาว 10 ม.', '0.6']] as const) {
     await page.getByTestId('bom-add').click();
-    await page.getByLabel(`วัตถุดิบ ${i}`).selectOption({ label: name });
+    await pick(page, `bom-m${i - 1}`, name);
     await page.getByLabel(`ใช้ต่อหน่วย ${i}`).fill(q);
   }
   await page.getByLabel('ค่าแรง / ค่าใช้จ่ายการผลิตต่อหน่วย (บาท)').fill('20');

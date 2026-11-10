@@ -1,4 +1,4 @@
-import { expect, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
 export const EDITION = (process.env.EDITION ?? 'cloud') as 'cloud' | 'onprem';
 
@@ -39,3 +39,23 @@ export async function apiToken(request: APIRequestContext, username: string): Pr
 }
 
 export const PP = /prompt[\s_-]*plus/i;
+
+/**
+ * SearchSelect pickers (vendor, product, customer, employee…): focus the input, type `query`, click the option whose
+ * text contains `text`. `target` is the picker's testId (input is `${testId}-input`) or the input locator itself.
+ */
+export async function pick(page: Page, target: string | Locator, text: string, query: string = text) {
+  const input = typeof target === 'string' ? page.getByTestId(`${target}-input`) : target;
+  await input.click();
+  await input.fill(query);
+  const list = input.locator('xpath=..').getByRole('listbox');
+  await list.getByRole('option', { name: text }).first().click();
+  await expect(list).toBeHidden();
+}
+
+/** Picks the n-th option (0-based) of a picker without typing. */
+export async function pickIndex(page: Page, testId: string, index: number) {
+  const input = page.getByTestId(`${testId}-input`);
+  await input.click();
+  await page.getByTestId(`${testId}-list`).getByRole('option').nth(index).click();
+}

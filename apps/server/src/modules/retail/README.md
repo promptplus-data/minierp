@@ -75,3 +75,13 @@ e2e: `e2e/retail.spec.ts` (both editions), screenshots `e2e/screenshots/retail-*
 
 - Photo storage is in the database (256 KB cap); object storage is not wired.
 - Quotation-price step of BR-05 belongs to group A.
+
+## Cross-cutting: pickers, notes, lazy lists
+
+| REQ | Status | Notes |
+| --- | --- | --- |
+| Searchable entity pickers | done | Price list customer (`CustomerPicker`) and items (`ProductPicker`); promo targets (picker adds removable chips) and bundle items; BOM product and materials; MO product (server-searched BOM picker) |
+| Document note (หมายเหตุ) | done | Promo and price list `note` (create / update, audited diff), MO note shown on the MO paper. Migration `0640_document_notes.sql` |
+| Lazy lists | done | Promos, price lists, price list items (20 at a time in the editor), MOs, BOMs, product photos: `LoadMore` |
+
+Tests: `apps/server/test/notes-pickers.test.ts`; e2e `e2e/retail.spec.ts` uses the pickers.

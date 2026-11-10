@@ -85,3 +85,14 @@ public key. Tests and e2e sign with a throw-away keypair and point the verifier 
 | REQ-M19-09 cloud backup | partial | S3 done and tested; Drive / OneDrive sign-in by device flow done, file upload is a stub marked TODO until SCG registers OAuth client ids |
 | REQ-M19-10 manual sales summary | done | |
 | REQ-M19-11 license | done | |
+
+## Cross-cutting: pickers, notes, lazy lists, payslip publish
+
+| REQ | Status | Notes |
+| --- | --- | --- |
+| Payslip before publish | done | Owner decision: slip buttons (payroll run, per line, employees list, my slips) are disabled with tooltip "รอเผยแพร่รอบเงินเดือน" until the run is paid. `GET /api/hr/payslip-periods[?period=]` (never 404) tells the UI; `/payslip/:period` checks it first and never calls `/slips` early. Runs carry `published` |
+| Document note (หมายเหตุ) | done | Leave request `note`, payroll run `note` (create + `PATCH /api/hr/payroll/:period`, audited). Migration `0640_document_notes.sql` |
+| Searchable pickers | done | Leave employee picker; SCG console license form "ต่ออายุให้ร้านเดิม" (licensed shops searched on the server) |
+| Lazy lists | done | Employees, leave, payroll runs, backup runs, share history; SCG shops, licenses, sales shares, audit, central products, pushes (`useAdmLoadMore`) |
+
+Tests: `apps/server/test/notes-pickers.test.ts`; e2e `e2e/pickers.spec.ts` (payslip disabled before publish, no slips request).

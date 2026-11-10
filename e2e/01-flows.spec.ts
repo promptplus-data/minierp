@@ -1,6 +1,6 @@
 /** Browser flows against a freshly seeded shop. Serial: later tests use bills made by earlier ones. */
 import { expect, test } from '@playwright/test';
-import { EDITION, PP, apiToken, approve, login } from './helpers';
+import { EDITION, PP, apiToken, approve, login, pick } from './helpers';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -211,9 +211,10 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await expect(page.getByTestId('stock-table').locator('tbody tr').first()).toBeVisible();
 
   await page.getByTestId('btn-gr').click();
+  await pick(page, 'gr-vendor', 'ทวีพัฒนา', 'ทวี');
   await page.getByTestId('gr-dn').fill('DO-E2E-1');
   await page.getByTestId('gr-inv').fill(`IV-E2E-${EDITION}`);
-  await page.getByTestId('gr-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'gr-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('gr-q0').fill('10');
   await page.getByTestId('gr-c0').fill('1000');
   await page.getByTestId('gr-bd').fill('500');
@@ -273,18 +274,14 @@ test('products: create, search and cursor pagination (20 per page)', async ({ pa
     expect(r.status()).toBe(201);
   }
   await page.reload();
-  await expect(rows).toHaveCount(20);
-  await expect(page.getByText('หน้า 1')).toBeVisible();
-  await page.getByRole('button', { name: 'ถัดไป ›' }).click();
-  await expect(rows).toHaveCount(2);
-  await expect(page.getByText('หน้า 2')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'ถัดไป ›' })).toBeDisabled();
-  await page.getByRole('button', { name: '‹ ก่อนหน้า' }).click();
-  await expect(rows).toHaveCount(20);
+  // lazy list: 20 rows, the rest load when the footer scrolls into view
+  await expect(rows.nth(19)).toBeVisible();
+  await page.getByTestId('products-more').scrollIntoViewIfNeeded();
+  await expect(rows).toHaveCount(22);
+  await expect(page.getByTestId('products-more')).toContainText('แสดงครบ 22 รายการ');
 
   await page.getByTestId('product-search').fill('E2E-0');
   await expect(rows).toHaveCount(10);
-  await expect(page.getByText('หน้า 1')).toBeVisible();
   await page.getByTestId('product-search').fill('ไม่มีสินค้านี้');
   await expect(page.getByTestId('product-table')).toContainText('ไม่พบสินค้า');
 });

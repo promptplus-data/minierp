@@ -51,3 +51,9 @@ Contract: `packages/contracts/src/modules/reports.ts`. Migrations: `0500_reports
 | M12-04 history | done | only-new, changed-after warnings |
 | M12-05 auto-split | done | <= 1,000 rows per PEAK file |
 | M12-06 shop settings GL | done | |
+
+## Lazy report tables
+
+Sales, stock and VAT tables load 20 rows at a time (`useReportPages` + `LoadMore`). KPIs and the total row come from
+the server totals of the first page (computed over the whole period), never from summing loaded rows. Export run
+history, products and audit log are lazy lists too.

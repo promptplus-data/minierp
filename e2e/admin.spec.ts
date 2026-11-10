@@ -16,7 +16,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createPrivateKey } from 'node:crypto';
 import { signLicense } from '../apps/server/src/modules/admin/license';
-import { EDITION, login } from './helpers';
+import { EDITION, login, pickIndex } from './helpers';
 
 const DIR = path.join(__dirname, 'screenshots');
 const ROOT = path.join(__dirname, '..');
@@ -117,8 +117,7 @@ test.describe.serial('HR, payroll and leave (M17)', () => {
     await page.goto('/leave');
     await expect(page.getByTestId('balance-table')).toBeVisible();
     await page.getByTestId('leave-new').click();
-    const emp = page.getByTestId('leave-emp');
-    await emp.selectOption({ index: 1 });
+    await pickIndex(page, 'leave-emp', 1);
     await page.getByTestId('leave-type').selectOption('personal');
     const d = new Date();
     d.setUTCDate(d.getUTCDate() + 14);
