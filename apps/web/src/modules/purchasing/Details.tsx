@@ -5,10 +5,12 @@
  */
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApBillDetail, ApPayment, GrDetail, VendorReturn } from '@erp/contracts';
 import { d } from '@erp/core';
 import { api } from '../../api';
+import { useAuth } from '../../auth';
+import { EditableNote, NoteText } from '../../ui/NoteField';
 import { DocLink, DocLinks } from '../../doclink';
 import { useWarehouses } from '../../data';
 import { ErrorBanner } from '../../errors';
@@ -50,6 +52,7 @@ export function GrDetailPage() {
             <span>บิลเจ้าหนี้</span><span className="mono"><DocLink no={g.apBillNo} type="AP" /></span>
             <span>ใบส่งคืนผู้ขาย</span><span className="mono"><DocLinks nos={g.returns.map((r) => r.no)} type="PR" /></span>
             <span>รับโดย</span><span>{g.createdBy}</span>
+            <span>หมายเหตุ</span><NoteText note={g.note} dash />
             {g.total != null && <><span>ยอดรวม</span><span><b>{fmt(g.total)}</b>{g.billDiscount && d(g.billDiscount).gt(0) ? ` · ส่วนลดท้ายบิล ${fmt(g.billDiscount)}` : ''}</span></>}
           </div>
           <h3 style={{ marginTop: 14 }}>รายการ</h3>
@@ -75,6 +78,8 @@ export function GrDetailPage() {
 
 export function ApBillDetailPage() {
   const { no = '' } = useParams();
+  const { can } = useAuth();
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ['pu', 'bill', no], queryFn: () => api('GET', `/api/ap/bills/${encodeURIComponent(no)}`, { schema: ApBillDetail }) });
   const b = q.data;
   return (
@@ -88,6 +93,12 @@ export function ApBillDetailPage() {
             <span>วันที่ / ครบกำหนด</span><span>{th(b.date)} / {th(b.dueDate)} ({b.termLabel})</span>
             <span>ใบสำคัญจ่าย</span><span className="mono"><DocLinks nos={b.payments.map((p) => p.no)} type="PV" /></span>
             <span>ใบส่งคืนผู้ขาย</span><span className="mono"><DocLinks nos={b.returns.map((r) => r.no)} type="PR" /></span>
+            <span>หมายเหตุ</span>
+            <EditableNote note={b.note} canEdit={can('fin.ap') === 1} testId="bill-note-edit" onSave={async (note) => {
+              const out = await api('PATCH', `/api/ap/bills/${encodeURIComponent(no)}`, { body: { note }, schema: ApBillDetail });
+              qc.setQueryData(['pu', 'bill', no], out);
+              void qc.invalidateQueries({ queryKey: ['pu', 'bills'] });
+            }} />
           </div>
           <div className="tot" style={{ maxWidth: 360, marginLeft: 'auto', marginTop: 12 }}>
             <span className="muted">มูลค่าก่อน VAT</span><span>{fmt(b.base)}</span>
@@ -127,7 +138,7 @@ export function PvDetailPage() {
             <span>ยอดจ่าย</span><span>{fmt(p.amount)}</span>
             {d(p.wht).gt(0) && <><span>หัก ณ ที่จ่าย {fq(p.whtRate)}%</span><span>{fmt(p.wht)}</span></>}
             <span>โอนสุทธิ</span><span><b>{fmt(p.net)}</b></span>
-            {p.note && <><span>หมายเหตุ</span><span>{p.note}</span></>}
+            <span>หมายเหตุ</span><NoteText note={p.note} dash />
             <span>ทำโดย</span><span>{p.createdBy}</span>
           </div>
           <h3 style={{ marginTop: 14 }}>จ่ายบิลเจ้าหนี้</h3>
@@ -158,6 +169,7 @@ export function VendorReturnDetailPage() {
             <span>บิลเจ้าหนี้ที่ลด</span><span className="mono"><DocLink no={r.apBillNo} type="AP" /></span>
             <span>เหตุผล</span><span>{r.reason}</span>
             {r.vendorCnNo && <><span>ใบลดหนี้ผู้ขาย</span><span className="mono">{r.vendorCnNo}</span></>}
+            <span>หมายเหตุ</span><NoteText note={r.note} dash />
             <span>มูลค่าสินค้า + VAT</span><span>{fmt(r.base)} + {fmt(r.vat)} = <b>{fmt(r.total)}</b></span>
             <span>ลดเจ้าหนี้แล้ว</span><span>{fmt(r.apApplied)}{d(r.unapplied).gt(0) ? ` · ส่วนที่เกินยอดค้างของบิล ${fmt(r.unapplied)}` : ''}</span>
             <span>ทำโดย</span><span>{r.createdBy}</span>

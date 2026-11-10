@@ -4,16 +4,17 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
-  BackupConfig, BackupOauthPolled, BackupOauthStarted, BackupRun, LicenseStatus, ShareConfig, SharePayload, ShareSent, page,
+  BackupConfig, BackupOauthPolled, BackupOauthStarted, BackupRun, LicenseStatus, ShareConfig, SharePayload, ShareSent,
   type BackupProvider,
 } from '@erp/contracts';
 import { addDays } from '@erp/core';
 import { api, getToken } from '../../api';
 import { useAuth } from '../../auth';
-import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useToast } from '../../ui';
+import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
 import { LICENSE_STATE, admErr, todayYmd } from './common';
 import { useLicense } from './Gate';
 import { ErrorBanner } from '../../errors';
@@ -238,29 +239,25 @@ function Backup() {
 }
 
 function BackupRuns() {
-  const pager = useCursorPager('runs');
-  const runs = useQuery({
-    queryKey: ['backup-runs', pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/backup/runs', { query: { limit: 10, cursor: pager.cursor }, schema: page(BackupRun) }),
-  });
+  const runs = useLoadMore(['backup-runs'], '/api/backup/runs', BackupRun, {}, 10);
   return (
     <>
       <div className="tw" style={{ marginTop: 10 }}>
         <table data-testid="backup-runs">
           <thead><tr><th>เวลา</th><th>ปลายทาง</th><th>รอบ</th><th className="n">ขนาด</th><th>ผล</th></tr></thead>
           <tbody>
-            {runs.isLoading ? <SkeletonRows cols={5} rows={3} /> : (runs.data?.items ?? []).map((r) => (
+            {runs.isLoading ? <SkeletonRows cols={5} rows={3} /> : runs.rows.map((r) => (
               <tr key={r.id}>
                 <td className="small">{thTime(r.at)}</td><td className="small">{r.provider}</td><td className="small">{r.trigger === 'manual' ? 'กดเอง' : 'อัตโนมัติ'}</td>
                 <td className="n small">{r.bytes ? `${fq(r.bytes / 1024)} KB` : '-'}</td>
                 <td>{r.status === 'ok' ? <Pill k="ok">สำเร็จ</Pill> : <span title={r.error ?? ''}><Pill k="bad">ล้มเหลว</Pill></span>}</td>
               </tr>
             ))}
-            {runs.data && !runs.data.items.length && <tr><td colSpan={5} className="empty">ยังไม่เคยสำรองข้อมูล</td></tr>}
+            {runs.data && !runs.rows.length && <tr><td colSpan={5} className="empty">ยังไม่เคยสำรองข้อมูล</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!runs.data?.nextCursor} count={runs.data?.items.length} loading={runs.isFetching} onPrev={pager.prev} onNext={() => pager.next(runs.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!runs.hasNextPage} loading={runs.isFetchingNextPage} onMore={() => void runs.fetchNextPage()} count={runs.rows.length} />
     </>
   );
 }
@@ -387,11 +384,7 @@ function Share() {
 }
 
 function ShareHistory() {
-  const pager = useCursorPager('h');
-  const h = useQuery({
-    queryKey: ['share-history', pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/share/history', { query: { limit: 10, cursor: pager.cursor }, schema: page(ShareSent) }),
-  });
+  const h = useLoadMore(['share-history'], '/api/share/history', ShareSent, {}, 10);
   return (
     <>
       <h4 className="sec" style={{ marginTop: 16 }}>ประวัติการส่ง</h4>
@@ -399,17 +392,17 @@ function ShareHistory() {
         <table data-testid="share-history">
           <thead><tr><th>ส่งเมื่อ</th><th>ช่วงข้อมูล</th><th className="n">ยอดรวม</th><th>โดย</th><th>ผล</th></tr></thead>
           <tbody>
-            {h.isLoading ? <SkeletonRows cols={5} rows={2} /> : (h.data?.items ?? []).map((x) => (
+            {h.isLoading ? <SkeletonRows cols={5} rows={2} /> : h.rows.map((x) => (
               <tr key={x.id}>
                 <td className="small">{thTime(x.sentAt)}</td><td className="small">{th(x.from)} – {th(x.to)}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.sentBy}</td>
                 <td>{x.status === 'sent' ? <Pill k="ok">ส่งแล้ว · {x.receiptId}</Pill> : <span title={x.error ?? ''}><Pill k="bad">ไม่สำเร็จ</Pill></span>}</td>
               </tr>
             ))}
-            {h.data && !h.data.items.length && <tr><td colSpan={5} className="empty">ยังไม่เคยส่ง</td></tr>}
+            {h.data && !h.rows.length && <tr><td colSpan={5} className="empty">ยังไม่เคยส่ง</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!h.data?.nextCursor} count={h.data?.items.length} loading={h.isFetching} onPrev={pager.prev} onNext={() => pager.next(h.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!h.hasNextPage} loading={h.isFetchingNextPage} onMore={() => void h.fetchNextPage()} count={h.rows.length} />
     </>
   );
 }

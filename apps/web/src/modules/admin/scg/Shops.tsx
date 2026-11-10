@@ -4,13 +4,14 @@
  */
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { AdmImportResult, AdmSupportView, AdmTenant, page } from '@erp/contracts';
+import { AdmImportResult, AdmSupportView, AdmTenant } from '@erp/contracts';
 import { ROLE_TH } from '../../../auth';
-import { Modal, Pager, Pill, SkeletonRows, fmt, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
+import { Modal, Pill, SkeletonRows, fmt, th, thTime, useDebounced, useToast } from '../../../ui';
+import { LoadMore } from '../../../ui/lists';
 import { admErr } from '../common';
-import { admApi, admCan, useAdm } from './admApi';
+import { admApi, useAdmLoadMore, admCan, useAdm } from './admApi';
 import { ErrorBanner, checkFields, requiredMsg } from '../../../errors';
 
 const REGIONS = ['ภาคเหนือ', 'ภาคกลาง', 'ภาคตะวันออกเฉียงเหนือ', 'ภาคตะวันออก', 'ภาคตะวันตก', 'ภาคใต้', 'กรุงเทพและปริมณฑล'];
@@ -22,14 +23,10 @@ export default function Shops() {
   const [q, setQ] = useState(sp.get('q') ?? '');
   const [status, setStatus] = useState<'' | 'active' | 'suspended'>('');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(`${dq}|${status}`);
-  const list = useQuery({
-    queryKey: ['scg', 'tenants', dq, status, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/tenants', { query: { q: dq, status: status || undefined, limit: 20, cursor: pager.cursor }, schema: page(AdmTenant) }),
-  });
+  const list = useAdmLoadMore(['scg', 'tenants'], '/api/adm/tenants', AdmTenant, { q: dq, status: status || undefined });
   const [modal, setModal] = useState<null | { kind: 'new' } | { kind: 'import' } | { kind: 'status'; t: AdmTenant } | { kind: 'support'; t: AdmTenant }>(null);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['scg'] }); };
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   const write = admCan(admin, 'shopsWrite');
 
   return (
@@ -50,7 +47,7 @@ export default function Shops() {
         <table data-testid="shops-table">
           <thead><tr><th>รหัส</th><th>ร้าน</th><th>ภาค</th><th>Edition</th><th>สถานะ</th><th className="n">ผู้ใช้</th><th className="n">บิล 30 วัน</th><th className="n">ยอดขายเดือนนี้</th><th>บิลล่าสุด</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={10} /> : (list.data?.items ?? []).map((t) => (
+            {loading ? <SkeletonRows cols={10} /> : list.rows.map((t) => (
               <tr key={t.id}>
                 <td className="mono small">{t.code}</td>
                 <td>{t.name}<div className="small muted">{t.taxId}{t.vatRegistered ? ' · จด VAT' : ''}{t.customerCode ? ` · ลูกค้า ${t.customerCode}` : ''}</div></td>
@@ -67,11 +64,11 @@ export default function Shops() {
                 </td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={10} className="empty">ไม่พบร้าน</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={10} className="empty">ไม่พบร้าน</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
       <p className="small muted">ยอดขายเป็นยอดรวมของร้าน ไม่แสดงข้อมูลส่วนบุคคลของลูกค้าร้าน · การเข้าดูแบบ support ต้องได้รับอนุญาตจากเจ้าของร้านและบันทึกใน log ของร้าน</p>
       {modal?.kind === 'new' && <NewShop onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
       {modal?.kind === 'import' && <ImportShop onClose={() => setModal(null)} onDone={refresh} />}

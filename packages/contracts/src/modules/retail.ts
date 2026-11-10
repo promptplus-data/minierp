@@ -28,6 +28,7 @@ export const PromoInput = z.object({
   start: IsoDate,
   end: IsoDate,
   draft: z.boolean().default(false),
+  note: z.string().max(500).optional(),
   /** REQ-M15-03: a promo priced below cost needs the owner's PIN when it is saved (owner saving it confirms it). */
   belowCostApproval: Approval.optional(),
 });
@@ -50,6 +51,7 @@ export const Promo = z.object({
   closedBy: z.string().nullable(), closedAt: z.string().nullable(),
   /** Bundles: whole sets the POS warehouse can make right now. */
   setsAvailable: z.number().int().nullable(),
+  note: z.string().default(''),
   stats: z.object({ bills: z.number().int(), qty: Dec, sales: Dec }),
 });
 export type Promo = z.infer<typeof Promo>;
@@ -102,6 +104,7 @@ export const PriceListInput = z.object({
   validTo: IsoDate.nullable().optional(),
   active: z.boolean().default(true),
   items: z.array(PriceListItemIn).default([]),
+  note: z.string().max(500).optional(),
 });
 export const PriceListUpdate = PriceListInput.partial();
 export const PriceListItem = PriceListItemIn.extend({ name: z.string(), sku: z.string(), unitName: z.string(), retailPrice: Dec });
@@ -109,6 +112,7 @@ export const PriceList = z.object({
   id: z.string(), name: z.string(), customer: z.object({ id: z.string(), name: z.string() }).nullable(), customerGroup: CustomerGroupZ.nullable(),
   vatIncluded: z.boolean(), validFrom: z.string().nullable(), validTo: z.string().nullable(), active: z.boolean(),
   itemCount: z.number().int(), items: z.array(PriceListItem).optional(), createdBy: z.string(), createdAt: z.string(),
+  note: z.string().default(''),
 });
 export type PriceList = z.infer<typeof PriceList>;
 export const PriceResolveQuery = z.object({ customerId: z.string().optional(), productId: z.string(), unitIdx: z.coerce.number().int().min(0).default(0), qty: Dec.default('1'), date: IsoDate.optional(), channel: PromoChannel.default('pos') });

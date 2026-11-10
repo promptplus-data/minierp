@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { EDITION, PP, login, logout } from './helpers';
+import { EDITION, PP, login, logout, pick } from './helpers';
 
 const DIR = path.join(__dirname, 'screenshots');
 const SAMPLE = path.join(__dirname, '..', 'docs', 'integrations', 'samples', 'delivery-sample.csv');
@@ -42,7 +42,7 @@ test.describe.serial('purchasing', () => {
     // the first draft opens: DN 8100234561 with two unmapped codes
     await expect(page.getByRole('dialog', { name: 'ตรวจรับของ' })).toBeVisible();
     await expect(page.getByTestId('draft-confirm')).toBeDisabled();
-    await page.getByTestId('draft-p-SCG-ROOF-DL-GY').selectOption({ label: 'SCG-ROOF-LK · กระเบื้องหลังคาลอนคู่ 50×120 ซม. สีเทา' });
+    await pick(page, 'draft-p-SCG-ROOF-DL-GY', 'กระเบื้องหลังคาลอนคู่ 50×120 ซม. สีเทา', 'SCG-ROOF-LK');
     await page.getByTestId('draft-new-SCG-RIDGE-C').click();
     await page.getByTestId('np-save').click();
     await expect(page.getByTestId('draft-confirm')).toBeEnabled();

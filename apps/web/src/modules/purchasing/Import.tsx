@@ -4,11 +4,13 @@
  * delivery-file mappings and product-code aliases (spec §3.5).
  */
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { IMPORT_KINDS, ImportBatch, ImportPreview, ImportProfile, ProductAlias, page, type ImportKind } from '@erp/contracts';
+import { useQueryClient } from '@tanstack/react-query';
+import { IMPORT_KINDS, ImportBatch, ImportPreview, ImportProfile, ProductAlias, type ImportKind } from '@erp/contracts';
 import { ApiFail, api, errText, getToken } from '../../api';
 import { useAuth } from '../../auth';
-import { Modal, Pager, Pill, SkeletonRows, thTime, useCursorPager, useDebounced, useToast } from '../../ui';
+import { Modal, Pill, SkeletonRows, thTime, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField } from '../../ui/NoteField';
 import { downloadErrorRows, readAsBase64, saveBlob, STATUS_PILL, STATUS_TH } from './shared';
 
 const KIND_TH: Record<ImportKind, string> = {
@@ -47,6 +49,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
   const [onlyValid, setOnlyValid] = useState(true);
   const [updateExisting, setUpdateExisting] = useState(false);
   const [saveMapping, setSaveMapping] = useState(true);
+  const [note, setNote] = useState('');
   const [done, setDone] = useState<ImportBatch | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -76,7 +79,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/import/commit', { body: { ...body(mapping), onlyValid, updateExisting, saveMapping }, schema: ImportBatch });
+      const r = await api('POST', '/api/import/commit', { body: { ...body(mapping), onlyValid, updateExisting, saveMapping, note: note.trim() || undefined }, schema: ImportBatch });
       setDone(r);
       setStep(4);
       toast(`นำเข้า${KIND_TH[kind]}แล้ว ${r.rowsCreated + r.rowsUpdated} แถว`);
@@ -87,7 +90,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
       setBusy(false);
     }
   };
-  const reset = () => { setStep(1); setFile(null); setPv(null); setMapping({}); setDone(null); setErr(''); };
+  const reset = () => { setStep(1); setFile(null); setPv(null); setMapping({}); setDone(null); setErr(''); setNote(''); };
   const errorRows = pv?.rows.filter((r) => r.status === 'error') ?? [];
   const importable = pv ? (onlyValid ? pv.counts.ok + pv.counts.warn + (updateExisting ? pv.counts.exists : 0) : pv.rows.length) : 0;
 
@@ -163,6 +166,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
             <label className="row small"><input type="radio" checked={!onlyValid} onChange={() => setOnlyValid(false)} /> บันทึกทั้งไฟล์ (ต้องไม่มีแถวผิด)</label>
             {(kind === 'products' || kind === 'customers' || kind === 'vendors') && <label className="row small"><input type="checkbox" checked={updateExisting} onChange={(e) => setUpdateExisting(e.target.checked)} /> อัปเดตรายการที่มีอยู่แล้ว</label>}
           </div>
+          <NoteField value={note} onChange={setNote} testId="imp-note" placeholder="เช่น ยอดยกมาจาก Express ณ 31 ต.ค." />
           <p className="small muted" style={{ margin: '6px 0' }}>แถวที่ผิดจะไม่ถูกนำเข้า แก้ในไฟล์แล้วอัปโหลดใหม่ได้ · ทั้งไฟล์บันทึกใน transaction เดียว ถ้าผิดพลาดจะไม่มีข้อมูลค้างครึ่งทาง</p>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={() => setStep(2)}>ย้อนกลับ</button>
@@ -176,6 +180,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
             <div style={{ fontSize: 28 }}>✓</div>
             <b>นำเข้า{KIND_TH[kind]}แล้ว · สร้าง {done.rowsCreated} · อัปเดต {done.rowsUpdated}</b><br />
             <span className="small muted">ข้าม {done.rowsSkipped} แถว · ผิด {done.rowsError} แถว · เลขที่ {done.no}</span>
+            {done.note && <><br /><span className="small muted">หมายเหตุ: {done.note}</span></>}
           </div>
           <div className="row" style={{ justifyContent: 'center' }}><button className="btn pri" onClick={reset}>นำเข้าข้อมูลอื่น</button></div>
         </>
@@ -186,9 +191,8 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
 }
 
 function History() {
-  const pager = useCursorPager('');
-  const r = useQuery({ queryKey: ['pu', 'batches', pager.cursor], queryFn: () => api('GET', '/api/import/batches', { query: { cursor: pager.cursor }, schema: page(ImportBatch) }), placeholderData: keepPreviousData });
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const r = useLoadMore(['pu', 'batches'], '/api/import/batches', ImportBatch, {}, 10);
+  const loading = r.isLoading;
   const kindTh = (k: string) => (k === 'delivery' ? 'ใบส่งของ' : KIND_TH[k as ImportKind] ?? k);
   return (
     <div className="card">
@@ -197,17 +201,17 @@ function History() {
         <table data-testid="imp-history">
           <thead><tr><th>วันที่</th><th>เลขที่</th><th>ข้อมูล</th><th>ที่มา</th><th>ไฟล์</th><th className="n">แถว</th><th className="n">สร้าง / อัปเดต / ข้าม / ผิด</th><th>โดย</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={8} rows={3} /> : (r.data?.items ?? []).map((b) => (
+            {loading ? <SkeletonRows cols={8} rows={3} /> : r.rows.map((b) => (
               <tr key={b.id}>
-                <td className="small">{thTime(b.createdAt)}</td><td className="mono">{b.no}</td><td>{kindTh(b.kind)}</td><td className="small">{b.source}</td><td className="small pu-cell-wrap">{b.fileName}</td>
+                <td className="small">{thTime(b.createdAt)}</td><td className="mono">{b.no}</td><td>{kindTh(b.kind)}</td><td className="small">{b.source}</td><td className="small pu-cell-wrap">{b.fileName}{b.note && <div className="muted">หมายเหตุ: {b.note}</div>}</td>
                 <td className="n">{b.rowsTotal}</td><td className="n small">{b.rowsCreated} / {b.rowsUpdated} / {b.rowsSkipped} / {b.rowsError}</td><td className="small">{b.createdBy}</td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={8} className="empty">ยังไม่มีการนำเข้า</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={8} className="empty">ยังไม่มีการนำเข้า</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="batches-more" />
     </div>
   );
 }
@@ -216,10 +220,8 @@ function Remembered() {
   const toast = useToast();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
-  const pp = useCursorPager('');
-  const ap = useCursorPager(dq);
-  const profiles = useQuery({ queryKey: ['pu', 'profiles', pp.cursor], queryFn: () => api('GET', '/api/import/profiles', { query: { cursor: pp.cursor }, schema: page(ImportProfile) }), placeholderData: keepPreviousData });
-  const aliases = useQuery({ queryKey: ['pu', 'aliases', dq, ap.cursor], queryFn: () => api('GET', '/api/import/aliases', { query: { q: dq, cursor: ap.cursor }, schema: page(ProductAlias) }), placeholderData: keepPreviousData });
+  const profiles = useLoadMore(['pu', 'profiles'], '/api/import/profiles', ImportProfile, {}, 10);
+  const aliases = useLoadMore(['pu', 'aliases'], '/api/import/aliases', ProductAlias, { q: dq }, 20);
   const [confirm, setConfirm] = useState<{ path: string; label: string } | null>(null);
   const kindTh = (k: string) => (k === 'delivery' ? 'ไฟล์ใบส่งของ' : KIND_TH[k as ImportKind] ?? k);
   const disable = async () => {
@@ -240,28 +242,28 @@ function Remembered() {
         <table>
           <thead><tr><th>ชื่อ</th><th>ข้อมูล</th><th className="n">คอลัมน์</th><th>แก้ล่าสุด</th><th /></tr></thead>
           <tbody>
-            {profiles.isLoading ? <SkeletonRows cols={5} rows={2} /> : (profiles.data?.items ?? []).map((p) => (
+            {profiles.isLoading ? <SkeletonRows cols={5} rows={2} /> : profiles.rows.map((p) => (
               <tr key={p.id}><td>{p.name}</td><td>{kindTh(p.kind)}</td><td className="n">{Object.keys(p.mapping).length}</td><td className="small">{thTime(p.updatedAt)}</td><td><button className="btn sm bad" onClick={() => setConfirm({ path: `/api/import/profiles/${p.id}/disable`, label: p.name })}>ลบ</button></td></tr>
             ))}
-            {!profiles.isLoading && !profiles.data?.items.length && <tr><td colSpan={5} className="empty">ยังไม่มี</td></tr>}
+            {!profiles.isLoading && !profiles.rows.length && <tr><td colSpan={5} className="empty">ยังไม่มี</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pp.page} hasNext={!!profiles.data?.nextCursor} onPrev={pp.prev} onNext={() => pp.next(profiles.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!profiles.hasNextPage} loading={profiles.isFetchingNextPage} onMore={() => void profiles.fetchNextPage()} count={profiles.rows.length} testId="profiles-more" />
       <h4 className="sec">รหัสสินค้าในไฟล์ที่ผูกกับสินค้าของร้าน</h4>
       <input type="search" placeholder="ค้นหารหัสในไฟล์ หรือสินค้า" value={q} onChange={(e) => setQ(e.target.value)} aria-label="ค้นหารหัสที่ผูกไว้" style={{ width: '100%', margin: '10px 0' }} />
       <div className="tw">
         <table>
           <thead><tr><th>รหัสในไฟล์</th><th>สินค้าของร้าน</th><th>หน่วยที่จำไว้</th><th /></tr></thead>
           <tbody>
-            {aliases.isLoading ? <SkeletonRows cols={4} rows={2} /> : (aliases.data?.items ?? []).map((a) => (
+            {aliases.isLoading ? <SkeletonRows cols={4} rows={2} /> : aliases.rows.map((a) => (
               <tr key={a.id}><td className="mono">{a.externalCode}</td><td>{a.productName}</td><td className="small">{Object.keys(a.unitMap).join(', ') || '-'}</td><td><button className="btn sm bad" onClick={() => setConfirm({ path: `/api/import/aliases/${a.id}/disable`, label: a.externalCode })}>ลบ</button></td></tr>
             ))}
-            {!aliases.isLoading && !aliases.data?.items.length && <tr><td colSpan={4} className="empty">ยังไม่มี</td></tr>}
+            {!aliases.isLoading && !aliases.rows.length && <tr><td colSpan={4} className="empty">ยังไม่มี</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={ap.page} hasNext={!!aliases.data?.nextCursor} onPrev={ap.prev} onNext={() => ap.next(aliases.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!aliases.hasNextPage} loading={aliases.isFetchingNextPage} onMore={() => void aliases.fetchNextPage()} count={aliases.rows.length} testId="aliases-more" />
       {confirm && (
         <Modal onClose={() => setConfirm(null)} label="ยืนยันการลบ">
           <h3>ลบ "{confirm.label}"?</h3>

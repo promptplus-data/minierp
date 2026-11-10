@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import {
-  ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
+  ApBillUpdate, ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
   GrListQuery, ImportCommitReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettings, StockCountEntryReq,
   StockCountOpenReq, StockCountQuery, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
@@ -34,6 +34,7 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   // ---------- AP (M18) ----------
   app.get('/api/ap/bills', authed(async (tx, ctx, req) => ap.listBills(tx, deps, ctx, ApBillQuery.parse(req.query))));
   app.get('/api/ap/bills/:no', authed(async (tx, ctx, req) => ap.getBill(tx, deps, ctx, params(req).no)));
+  app.patch('/api/ap/bills/:no', authed(async (tx, ctx, req) => ap.updateBill(tx, deps, ctx, params(req).no, ApBillUpdate.parse(req.body))));
   app.get('/api/ap/aging', authed(async (tx, ctx) => ap.aging(tx, deps, ctx)));
   app.get('/api/ap/payments', authed(async (tx, ctx, req) => ap.listPayments(tx, ctx, pageQuery.parse(req.query))));
   app.post('/api/ap/payments', authed(async (tx, ctx, req, reply) => {

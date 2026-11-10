@@ -41,18 +41,18 @@ export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode: Bi
 // ---------- confirmed goods receipts ----------
 interface GrRow {
   id: string; no: string; date: string; vendor_id: string | null; vendor_name: string | null; vendor_invoice_no: string | null; delivery_no: string | null;
-  warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; created_by: string; returnable: boolean; created_at: Date; discount: string | null;
+  warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; created_by: string; returnable: boolean; created_at: Date; discount: string | null; note: string | null;
 }
 const GR_SELECT = `
   select s.id, s.no, to_char(s.date,'YYYY-MM-DD') date, s.vendor_id, v.name vendor_name, s.vendor_invoice_no, s.delivery_no, s.warehouse_id, s.total::text,
-         b.no ap_no, b.discount::text discount, u.name created_by, s.created_at,
+         b.no ap_no, b.discount::text discount, u.name created_by, s.created_at, s.reason note,
          (select string_agg(p.name || ' × ' || trim_scale(g.qty)::text || ' ' || g.unit_name, ', ' order by g.line_no) from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = s.id) preview,
          exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty) returnable
     from stock_docs s left join vendors v on v.id = s.vendor_id left join ap_bills b on b.gr_doc_id = s.id join users u on u.id = s.created_by`;
 const toGr = (r: GrRow, ctx: Ctx): GrSummary => ({
   id: r.id, no: r.no, date: r.date, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, deliveryNo: r.delivery_no,
   warehouseId: r.warehouse_id, total: r.total != null && seeCost(ctx) ? money(r.total) : null, apBillNo: r.ap_no, itemsPreview: r.preview ?? '',
-  createdBy: r.created_by, returnable: r.returnable,
+  createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '',
 });
 
 export async function listReceipts(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; returnable?: boolean }) {
@@ -101,18 +101,18 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
 // ---------- AP bills ----------
 interface BillRow {
   id: string; no: string; source: 'gr' | 'opening'; vendor_id: string; vendor_name: string; term: PaymentTerm | null; vendor_invoice_no: string; gr_no: string | null;
-  date: string; due_date: string; base: string; discount: string; discount_mode: BillDiscountMode; vat: string; total: string; paid: string; returned: string; created_by: string; created_at: Date;
+  date: string; due_date: string; base: string; discount: string; discount_mode: BillDiscountMode; vat: string; total: string; paid: string; returned: string; created_by: string; created_at: Date; note: string;
 }
 const BILL_SELECT = `
   select b.id, b.no, b.source, b.vendor_id, v.name vendor_name, v.term, b.vendor_invoice_no, b.gr_no, to_char(b.date,'YYYY-MM-DD') date, to_char(b.due_date,'YYYY-MM-DD') due_date,
-         b.base::text, b.discount::text, b.discount_mode, b.vat::text, b.total::text, b.paid::text, b.returned::text, u.name created_by, b.created_at
+         b.base::text, b.discount::text, b.discount_mode, b.vat::text, b.total::text, b.paid::text, b.returned::text, u.name created_by, b.created_at, b.note
     from ap_bills b join vendors v on v.id = b.vendor_id join users u on u.id = b.created_by`;
 const balanceOf = (r: { total: string; paid: string; returned: string }) => money(d(r.total).minus(d(r.paid)).minus(d(r.returned)));
 const toBill = (r: BillRow, today: string): ApBill => ({
   id: r.id, no: r.no, source: r.source, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, grNo: r.gr_no,
   date: r.date, dueDate: r.due_date, termLabel: r.source === 'opening' ? 'ยอดยกมา' : termLabel(r.term), base: money(r.base), discount: money(r.discount),
   discountMode: r.discount_mode, vat: money(r.vat), total: money(r.total), paid: money(r.paid), returned: money(r.returned), balance: balanceOf(r),
-  overdueDays: Math.max(0, apDaysOverdue(r.due_date, today)), createdBy: r.created_by,
+  overdueDays: Math.max(0, apDaysOverdue(r.due_date, today)), createdBy: r.created_by, note: r.note,
 });
 
 export async function listBills(tx: Tx, deps: Deps, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; vendorId?: string; status: 'open' | 'all' }) {
@@ -160,6 +160,20 @@ export async function getBill(tx: Tx, deps: Deps, ctx: Ctx, no: string): Promise
     payments: pays.rows.map((x) => ({ no: x.no, date: x.date, amount: money(x.amount) })),
     returns: rets.rows.map((x) => ({ no: x.no, date: x.date, total: money(x.total), apApplied: money(x.ap_applied) })),
   };
+}
+
+/** หมายเหตุ on an AP bill (the note copied from its goods receipt can be corrected later). */
+export async function updateBill(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { note: string }): Promise<ApBillDetail> {
+  requirePerm(ctx, 'fin.ap');
+  const r = await tx.query<{ id: string; note: string }>(`select id, note from ap_bills where no = $1 for update`, [no]);
+  const b = r.rows[0];
+  if (!b) throw E.notFound(`ไม่พบบิลเจ้าหนี้ ${no}`);
+  const note = body.note.trim();
+  if (note !== b.note) {
+    await tx.query(`update ap_bills set note = $2 where id = $1`, [b.id, note]);
+    await writeAudit(tx, ctx, [{ action: 'update', object: 'ap-bill', ref: no, detail: `หมายเหตุ: ${b.note || '-'} → ${note || '-'}` }]);
+  }
+  return getBill(tx, deps, ctx, no);
 }
 
 export async function aging(tx: Tx, deps: Deps, ctx: Ctx) {
@@ -294,9 +308,9 @@ export async function createPayment(
 
 // ---------- vendor returns ----------
 async function loadReturn(tx: Tx, ctx: Ctx, where: string, arg: string): Promise<VendorReturn | null> {
-  const r = await tx.query<{ id: string; no: string; date: string; vendor_id: string; vendor_name: string; gr_no: string; ap_no: string | null; reason: string; vendor_cn_no: string | null; base: string; vat: string; total: string; ap_applied: string; unapplied: string; cogs: string; created_by: string }>(
+  const r = await tx.query<{ id: string; no: string; date: string; vendor_id: string; vendor_name: string; gr_no: string; ap_no: string | null; reason: string; vendor_cn_no: string | null; base: string; vat: string; total: string; ap_applied: string; unapplied: string; cogs: string; created_by: string; note: string }>(
     `select r.id, r.no, to_char(r.date,'YYYY-MM-DD') date, r.vendor_id, v.name vendor_name, r.gr_no, b.no ap_no, r.reason, r.vendor_cn_no, r.base::text, r.vat::text, r.total::text,
-            r.ap_applied::text, r.unapplied::text, r.cogs::text, u.name created_by
+            r.ap_applied::text, r.unapplied::text, r.cogs::text, u.name created_by, r.note
        from vendor_returns r join vendors v on v.id = r.vendor_id left join ap_bills b on b.id = r.ap_bill_id join users u on u.id = r.created_by where ${where}`, [arg]);
   const x = r.rows[0];
   if (!x) return null;
@@ -306,7 +320,7 @@ async function loadReturn(tx: Tx, ctx: Ctx, where: string, arg: string): Promise
   return {
     id: x.id, no: x.no, date: x.date, vendorId: x.vendor_id, vendorName: x.vendor_name, grNo: x.gr_no, apBillNo: x.ap_no, reason: x.reason, vendorCnNo: x.vendor_cn_no,
     base: money(x.base), vat: money(x.vat), total: money(x.total), apApplied: money(x.ap_applied), unapplied: money(x.unapplied),
-    cogs: seeCost(ctx) ? money(x.cogs) : null, createdBy: x.created_by,
+    cogs: seeCost(ctx) ? money(x.cogs) : null, createdBy: x.created_by, note: x.note,
     lines: l.rows.map((y) => ({ productId: y.product_id, name: y.name, unitName: y.unit_name, qty: qty4(y.qty), unitPrice: qty4(y.unit_price), amount: money(y.amount) })),
   };
 }
@@ -342,7 +356,7 @@ export async function listReturns(tx: Tx, ctx: Ctx, q: { q?: string; limit: numb
 }
 
 export async function createReturn(
-  tx: Tx, deps: Deps, ctx: Ctx, req: { grNo: string; lines: { grLineId: string; qty: string }[]; reason: string; vendorCnNo?: string },
+  tx: Tx, deps: Deps, ctx: Ctx, req: { grNo: string; lines: { grLineId: string; qty: string }[]; reason: string; vendorCnNo?: string; note?: string },
 ): Promise<VendorReturn> {
   requirePerm(ctx, 'fin.ap');
   const gr = await tx.query<{ id: string; no: string; vendor_id: string | null }>(`select id, no, vendor_id from stock_docs where type = 'GR' and no = $1`, [req.grNo]);
@@ -388,9 +402,9 @@ export async function createReturn(
   }
   const cogs = money(sum([...cogsByLine.values()]));
   await tx.query(
-    `insert into vendor_returns (id, tenant_id, no, date, vendor_id, gr_doc_id, gr_no, ap_bill_id, reason, vendor_cn_no, base, vat, total, ap_applied, unapplied, cogs, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-    [retId, ctx.tenantId, no, deps.today(), g.vendor_id, g.id, g.no, b?.id ?? null, req.reason, req.vendorCnNo?.trim() || null, amt.base, amt.vat, amt.total, amt.applied, amt.unapplied, cogs, ctx.userId]);
+    `insert into vendor_returns (id, tenant_id, no, date, vendor_id, gr_doc_id, gr_no, ap_bill_id, reason, vendor_cn_no, base, vat, total, ap_applied, unapplied, cogs, created_by, note)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+    [retId, ctx.tenantId, no, deps.today(), g.vendor_id, g.id, g.no, b?.id ?? null, req.reason, req.vendorCnNo?.trim() || null, amt.base, amt.vat, amt.total, amt.applied, amt.unapplied, cogs, ctx.userId, req.note?.trim() ?? '']);
   for (const l of lines) {
     await tx.query(
       `insert into vendor_return_lines (tenant_id, return_id, gr_line_id, product_id, qty, base_qty, unit_price, amount, cogs) values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,

@@ -30,6 +30,7 @@ export const apBills = pgTable('ap_bills', {
   base: money('base').notNull(), discount: money('discount').notNull().default('0'), discountMode: text('discount_mode').notNull().default('sep'),
   vat: money('vat').notNull().default('0'), total: money('total').notNull(), paid: money('paid').notNull().default('0'), returned: money('returned').notNull().default('0'),
   status: text('status').notNull().default('active'), createdBy: uuid('created_by').notNull(), createdAt: createdAt(),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const apPayments = pgTable('ap_payments', {
@@ -48,6 +49,7 @@ export const vendorReturns = pgTable('vendor_returns', {
   grDocId: uuid('gr_doc_id').notNull(), grNo: text('gr_no').notNull(), apBillId: uuid('ap_bill_id'), reason: text('reason').notNull(), vendorCnNo: text('vendor_cn_no'),
   base: money('base').notNull(), vat: money('vat').notNull(), total: money('total').notNull(), apApplied: money('ap_applied').notNull(), unapplied: money('unapplied').notNull().default('0'),
   cogs: money('cogs').notNull(), createdBy: uuid('created_by').notNull(), createdAt: createdAt(),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const vendorReturnLines = pgTable('vendor_return_lines', {
@@ -73,6 +75,7 @@ export const importBatches = pgTable('import_batches', {
   rowsCreated: integer('rows_created').notNull().default(0), rowsUpdated: integer('rows_updated').notNull().default(0),
   rowsSkipped: integer('rows_skipped').notNull().default(0), rowsError: integer('rows_error').notNull().default(0),
   createdBy: uuid('created_by').notNull(), createdAt: createdAt(),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const importKeys = pgTable('import_keys', {

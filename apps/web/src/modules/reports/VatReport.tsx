@@ -1,10 +1,9 @@
 /** M11-03 monthly output / input VAT report (Revenue Department layout): ABB daily summary per POS, voids at 0. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ReportVat } from '@erp/contracts';
-import { api, errText } from '../../api';
-import { fmt, Pager, SkeletonRows, th, useCursorPager } from '../../ui';
-import { DownloadButtons, Field, SourceNotes, monthTh, thisMonth } from './shared';
+import { fmt, SkeletonRows, th } from '../../ui';
+import { LoadMore } from '../../ui/lists';
+import { DownloadButtons, Field, SourceNotes, monthTh, thisMonth, useReportPages } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink } from '../../doclink';
 
@@ -18,13 +17,9 @@ export default function VatReport() {
   const [month, setMonth] = useState(thisMonth());
   const [kind, setKind] = useState<'sales' | 'purchase'>('sales');
   const filt = { month, kind };
-  const pager = useCursorPager(JSON.stringify(filt));
-  const r = useQuery({
-    queryKey: ['rp', 'vat', filt, pager.cursor], enabled: /^\d{4}-\d{2}$/.test(month), placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/reports/vat', { query: { ...filt, cursor: pager.cursor }, schema: ReportVat }),
-  });
+  const r = useReportPages('vat', '/api/reports/vat', filt, ReportVat, /^\d{4}-\d{2}$/.test(month));
   const data = r.data;
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const loading = r.isLoading;
   const t = data?.totals;
   const sales = kind === 'sales';
   return (
@@ -61,7 +56,7 @@ export default function VatReport() {
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(data?.nextCursor ?? null)} count={data?.rows.length} loading={loading} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={data?.rows.length} testId="vat-more" />
       <p className="small muted" style={{ marginTop: 8 }}>
         {sales ? 'ใบกำกับภาษีอย่างย่อ (POS) สรุปรายวันต่อเครื่อง · ใบที่ยกเลิกแสดงยอด 0 พร้อมเหตุผล · ใบลดหนี้แสดงเป็นยอดติดลบ' : 'ภาษีซื้อจากใบตั้งเจ้าหนี้ (AP) ที่เกิดจากการรับสินค้า คิดจากยอดหลังหักส่วนลดท้ายบิล'}
       </p>

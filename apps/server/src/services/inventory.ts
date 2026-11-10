@@ -114,7 +114,7 @@ export async function lots(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string
 
 export async function receipt(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string })[]; billDiscount: string },
+  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string })[]; billDiscount: string; note?: string },
 ): Promise<StockDoc> {
   requirePerm(ctx, 'inv.receive');
   if (!isUuid(req.vendorId) || !(await tx.query(`select 1 from vendors where id = $1`, [req.vendorId])).rowCount) throw E.validation('Unknown vendor');
@@ -149,8 +149,9 @@ export async function receipt(
   const total = money(sum(amounts).minus(d(req.billDiscount)));
   const doc = await insertStockDocWithId(tx, ctx, docId, {
     no, type: 'GR', date: deps.today(), warehouseId: wh.id, vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, deliveryNo: req.deliveryNo, lines: out, total,
+    reason: req.note?.trim() || undefined, // GR note (หมายเหตุ) lives in stock_docs.reason
   });
-  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines }); // REQ-M18-01
+  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '' }); // REQ-M18-01
   await deps.hooks.beforeCommit?.('receipt', tx);
   await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
   return doc;

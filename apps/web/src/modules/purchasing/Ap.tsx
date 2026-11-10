@@ -3,14 +3,15 @@
  * part of a bill with WHT (REQ-M18-02), vendor returns against a goods receipt (REQ-M18-03), purchase discounts (BR-19).
  */
 import { useMemo, useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApAging, ApBill, ApPayment, GrDetail, GrSummary, PurchaseDiscount, VendorReturn, page } from '@erp/contracts';
 import { d, sum } from '@erp/core';
-import { z } from 'zod';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useMeta, useVendors } from '../../data';
-import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
+import { fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField } from '../../ui/NoteField';
 import { ApDueCard } from './shared';
 import { DocLink, DocLinks } from '../../doclink';
 
@@ -69,13 +70,8 @@ function BillList() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'open' | 'all'>('open');
   const dq = useDebounced(q.trim());
-  const pager = useCursorPager(`${dq}|${status}`);
-  const r = useQuery({
-    queryKey: ['pu', 'bills', dq, status, pager.cursor],
-    queryFn: () => api('GET', '/api/ap/bills', { query: { q: dq, status, cursor: pager.cursor }, schema: page(ApBill) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const r = useLoadMore(['pu', 'bills'], '/api/ap/bills', ApBill, { q: dq, status }, 20);
+  const loading = r.isLoading;
   return (
     <div className="card">
       <h2>ใบแจ้งหนี้ผู้ขาย</h2>
@@ -87,39 +83,31 @@ function BillList() {
         <table data-testid="ap-bills">
           <thead><tr><th>เลขที่</th><th>ผู้ขาย</th><th>ใบกำกับผู้ขาย</th><th>ใบรับสินค้า</th><th>วันที่</th><th>ครบกำหนด</th><th className="n">ยอด</th><th className="n">ส่วนลดท้ายบิล</th><th className="n">จ่ายแล้ว</th><th className="n">คืนสินค้า</th><th className="n">คงค้าง</th><th>บันทึกโดย</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={12} rows={5} /> : (r.data?.items ?? []).map((b) => (
+            {loading ? <SkeletonRows cols={12} rows={5} /> : r.rows.map((b) => (
               <tr key={b.id}>
-                <td className="mono"><DocLink no={b.no} type="AP" /></td><td>{b.vendorName}</td><td className="mono small">{b.vendorInvoiceNo}</td><td className="mono small">{b.grNo ? <DocLink no={b.grNo} type="GR" /> : b.source === 'opening' ? 'ยอดยกมา' : '-'}</td>
+                <td className="mono"><DocLink no={b.no} type="AP" /></td><td>{b.vendorName}{b.note && <div className="small muted">{b.note}</div>}</td><td className="mono small">{b.vendorInvoiceNo}</td><td className="mono small">{b.grNo ? <DocLink no={b.grNo} type="GR" /> : b.source === 'opening' ? 'ยอดยกมา' : '-'}</td>
                 <td>{th(b.date)}</td><td>{th(b.dueDate)}<div className="small muted">{b.termLabel}</div></td>
                 <td className="n">{fmt(b.total)}</td><td className="n">{d(b.discount).gt(0) ? fmt(b.discount) : '-'}</td><td className="n">{fmt(b.paid)}</td><td className="n">{d(b.returned).gt(0) ? fmt(b.returned) : '-'}</td>
                 <td className="n"><b>{fmt(b.balance)}</b> {d(b.balance).gt(0) ? (b.overdueDays > 0 ? <Pill k="bad">เกิน {b.overdueDays} วัน</Pill> : null) : <Pill k="ok">จ่ายครบ</Pill>}</td>
                 <td className="small">{b.createdBy}</td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={12} className="empty">ไม่มีใบแจ้งหนี้</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={12} className="empty">ไม่มีใบแจ้งหนี้</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} count={r.data?.items.length} loading={r.isFetching} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="bills-more" />
       <p className="small muted" style={{ margin: '8px 0 0' }}>ระบบสร้างใบแจ้งหนี้ผู้ขายอัตโนมัติเมื่อยืนยันรับของ · ครบกำหนดคิดจากเงื่อนไขชำระของผู้ขาย</p>
     </div>
   );
 }
 
-function usePaged<T>(key: string, path: string, item: z.ZodType<T, z.ZodTypeDef, unknown>, q: string) {
-  const pager = useCursorPager(q);
-  const r = useQuery({
-    queryKey: ['pu', key, q, pager.cursor],
-    queryFn: () => api('GET', path, { query: { q, cursor: pager.cursor }, schema: page(item) }),
-    placeholderData: keepPreviousData,
-  });
-  return { r, pager, loading: r.isLoading || (r.isFetching && r.isPlaceholderData) };
-}
 
 function ReturnList({ canWrite, onNew }: { canWrite: boolean; onNew: () => void }) {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
-  const { r, pager, loading } = usePaged('returns', '/api/ap/vendor-returns', VendorReturn, dq);
+  const r = useLoadMore(['pu', 'returns'], '/api/ap/vendor-returns', VendorReturn, { q: dq }, 10);
+  const loading = r.isLoading;
   return (
     <div className="card">
       <h2><span>คืนสินค้าให้ผู้ขาย</span><button className="btn sm" disabled={!canWrite} onClick={onNew} data-testid="btn-new-return">+ ส่งคืนสินค้า</button></h2>
@@ -128,19 +116,19 @@ function ReturnList({ canWrite, onNew }: { canWrite: boolean; onNew: () => void 
         <table data-testid="ap-returns">
           <thead><tr><th>เลขที่</th><th>วันที่</th><th>ผู้ขาย</th><th>อ้างอิง</th><th>เหตุผล</th><th className="n">ยอด</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={6} rows={3} /> : (r.data?.items ?? []).map((x) => (
+            {loading ? <SkeletonRows cols={6} rows={3} /> : r.rows.map((x) => (
               <tr key={x.id}>
                 <td className="mono"><DocLink no={x.no} type="PR" /></td><td>{th(x.date)}</td><td>{x.vendorName}</td>
                 <td className="mono small"><DocLink no={x.grNo} type="GR" />{x.vendorCnNo && <div className="muted">ใบลดหนี้ผู้ขาย {x.vendorCnNo}</div>}</td>
-                <td className="small">{x.reason}<div className="muted">{x.lines.map((l) => `${l.name} × ${fq(l.qty)} ${l.unitName}`).join(', ')}</div></td>
+                <td className="small">{x.reason}{x.note && <div className="muted">หมายเหตุ: {x.note}</div>}<div className="muted">{x.lines.map((l) => `${l.name} × ${fq(l.qty)} ${l.unitName}`).join(', ')}</div></td>
                 <td className="n">{fmt(x.total)}{d(x.unapplied).gt(0) && <div className="small muted">เครดิตคงเหลือ {fmt(x.unapplied)}</div>}</td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={6} className="empty">ยังไม่มีการคืนสินค้า</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={6} className="empty">ยังไม่มีการคืนสินค้า</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="returns-more" />
       <p className="small muted" style={{ margin: '8px 0 0' }}>ตัดสต็อกจากล็อตของใบรับสินค้านั้นก่อน และลดยอดเจ้าหนี้ของใบเดียวกัน</p>
     </div>
   );
@@ -149,7 +137,8 @@ function ReturnList({ canWrite, onNew }: { canWrite: boolean; onNew: () => void 
 function PaymentList() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
-  const { r, pager, loading } = usePaged('payments', '/api/ap/payments', ApPayment, dq);
+  const r = useLoadMore(['pu', 'payments'], '/api/ap/payments', ApPayment, { q: dq }, 10);
+  const loading = r.isLoading;
   return (
     <div className="card">
       <h2>ใบสำคัญจ่าย</h2>
@@ -158,24 +147,25 @@ function PaymentList() {
         <table data-testid="ap-payments">
           <thead><tr><th>เลขที่</th><th>วันที่</th><th>ผู้ขาย</th><th>วิธีจ่าย</th><th className="n">ยอดจ่าย</th><th className="n">หัก ณ ที่จ่าย</th><th>โดย</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={7} rows={3} /> : (r.data?.items ?? []).map((p) => (
+            {loading ? <SkeletonRows cols={7} rows={3} /> : r.rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono"><DocLink no={p.no} type="PV" /></td><td>{th(p.date)}</td><td>{p.vendorName}<div className="small muted"><DocLinks nos={p.bills.map((b) => b.billNo)} type="AP" /></div></td>
-                <td className="small">{METHOD_TH[p.method]}{p.ref && <div className="muted">{p.ref}</div>}</td>
+                <td className="small">{METHOD_TH[p.method]}{p.ref && <div className="muted">{p.ref}</div>}{p.note && <div className="muted">{p.note}</div>}</td>
                 <td className="n">{fmt(p.amount)}</td><td className="n">{d(p.wht).gt(0) ? fmt(p.wht) : '-'}</td><td className="small">{p.createdBy}</td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={7} className="empty">ยังไม่มีการจ่าย</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={7} className="empty">ยังไม่มีการจ่าย</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="payments-more" />
     </div>
   );
 }
 
 function DiscountList() {
-  const { r, pager, loading } = usePaged('discounts', '/api/ap/purchase-discounts', PurchaseDiscount, '');
+  const r = useLoadMore(['pu', 'discounts'], '/api/ap/purchase-discounts', PurchaseDiscount, {}, 10);
+  const loading = r.isLoading;
   return (
     <div className="card">
       <h2>ส่วนลดรับจากผู้ขาย (ส่วนลดท้ายบิล)</h2>
@@ -183,14 +173,14 @@ function DiscountList() {
         <table>
           <thead><tr><th>วันที่</th><th>ใบรับสินค้า</th><th>ผู้ขาย</th><th className="n">ส่วนลด (ก่อน VAT)</th><th>บันทึกโดย</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={5} rows={2} /> : (r.data?.items ?? []).map((x) => (
+            {loading ? <SkeletonRows cols={5} rows={2} /> : r.rows.map((x) => (
               <tr key={x.billNo}><td>{th(x.date)}</td><td className="mono">{x.grNo ? <DocLink no={x.grNo} type="GR" /> : <DocLink no={x.billNo} type="AP" />}</td><td>{x.vendorName}</td><td className="n">{fmt(x.amount)}</td><td className="small">{x.createdBy}</td></tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={5} className="empty">ยังไม่มี</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={5} className="empty">ยังไม่มี</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="discounts-more" />
       <p className="small muted" style={{ margin: '8px 0 0' }}>ส่วนลดท้ายบิลที่ไม่ได้ระบุรายสินค้า ไม่นำไปลดทุนรายสินค้า แต่บันทึกเป็น "ส่วนลดรับ" แยกไว้ (BR-19) · ยอดเจ้าหนี้และภาษีซื้อคิดจากยอดหลังหักส่วนลด</p>
     </div>
   );
@@ -210,6 +200,7 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
   const [method, setMethod] = useState<'transfer' | 'cheque' | 'cash'>('transfer');
   const [ref, setRef] = useState('');
   const [wht, setWht] = useState<0 | 1 | 3>(0);
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const am = amounts ?? Object.fromEntries((bills.data ?? []).map((b) => [b.id, b.balance]));
@@ -223,7 +214,7 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/ap/payments', { body: { vendorId, method, ref: ref.trim() || undefined, whtRate: wht, allocations: sel.map((b) => ({ billId: b.id, amount: d(am[b.id]!).toFixed(2) })) }, schema: ApPayment });
+      const r = await api('POST', '/api/ap/payments', { body: { vendorId, method, ref: ref.trim() || undefined, whtRate: wht, note: note.trim() || undefined, allocations: sel.map((b) => ({ billId: b.id, amount: d(am[b.id]!).toFixed(2) })) }, schema: ApPayment });
       toast(`บันทึกจ่าย ${r.no} · จ่ายจริง ฿${fmt(r.net)}`);
       onDone();
     } catch (e) {
@@ -254,6 +245,7 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
         <label className="f">วิธีจ่าย<select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} data-testid="pay-method"><option value="transfer">โอนเงิน</option><option value="cheque">เช็ค</option><option value="cash">เงินสด</option></select></label>
         <label className="f">{method === 'cheque' ? 'เลขที่เช็ค *' : 'เลขอ้างอิง (ถ้ามี)'}<input type="text" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
         <label className="f">หัก ณ ที่จ่าย<select value={wht} onChange={(e) => setWht(Number(e.target.value) as 0 | 1 | 3)} data-testid="pay-wht"><option value={0}>ไม่มี (ซื้อสินค้า)</option><option value={1}>1% ค่าขนส่ง</option><option value={3}>3% ค่าบริการ</option></select></label>
+        <NoteField value={note} onChange={setNote} testId="pay-note" placeholder="เช่น โอนผ่านกสิกร รอบบ่าย / จ่ายพร้อมค่าขนส่ง" />
       </div>
       <div className="tot">
         <span className="muted">ยอดที่ตัดเจ้าหนี้</span><span>{fmt(total)}</span>
@@ -279,6 +271,7 @@ function ReturnModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
   const [reason, setReason] = useState(RET_REASONS[0]!);
   const [other, setOther] = useState('');
   const [cn, setCn] = useState('');
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const vat = meta.data?.shop.vatRegistered ?? true;
@@ -293,7 +286,7 @@ function ReturnModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/ap/vendor-returns', { body: { grNo, lines: ls, reason: why, vendorCnNo: cn.trim() || undefined }, schema: VendorReturn });
+      const r = await api('POST', '/api/ap/vendor-returns', { body: { grNo, lines: ls, reason: why, vendorCnNo: cn.trim() || undefined, note: note.trim() || undefined }, schema: VendorReturn });
       toast(`บันทึกส่งคืน ${r.no} · ลดเจ้าหนี้ ฿${fmt(r.apApplied)}`);
       onDone();
     } catch (e) {
@@ -343,6 +336,7 @@ function ReturnModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             <label className="f">เหตุผล<select value={reason} onChange={(e) => setReason(e.target.value)} data-testid="ret-reason">{RET_REASONS.map((x) => <option key={x}>{x}</option>)}<option value="__o">อื่น ๆ (ระบุเอง)</option></select></label>
             {reason === '__o' && <label className="f">ระบุเหตุผล *<input type="text" value={other} onChange={(e) => setOther(e.target.value)} /></label>}
             <label className="f">เลขที่ใบลดหนี้จากผู้ขาย (ถ้าได้รับแล้ว)<input type="text" value={cn} onChange={(e) => setCn(e.target.value)} data-testid="ret-cn" /></label>
+            <NoteField value={note} onChange={setNote} testId="ret-note" placeholder="เช่น ผู้ขายมารับคืนเอง วันที่ 12" />
           </div>
           <div className="tot">
             <span className="muted">มูลค่าคืน</span><span>{fmt(base)}</span>

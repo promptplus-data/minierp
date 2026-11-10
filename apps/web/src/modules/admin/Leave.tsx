@@ -3,14 +3,17 @@
  * calendar, and the employee's own payslips. Staff see only their own rows (server-side).
  */
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { HrLeave, HrLeaveCreated, page, type HrLeaveType } from '@erp/contracts';
 import { addDays, d, dayOfWeek, leaveDays } from '@erp/core';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
-import { Modal, Pager, Pill, SkeletonRows, fq, th, thTime, useCursorPager, useDebounced, useToast } from '../../ui';
-import { LEAVE_LABEL, admErr, periodTH, prevPeriod, thisPeriod, todayYmd, useHrMe } from './common';
+import { Modal, Pill, SkeletonRows, fq, th, thTime, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField } from '../../ui/NoteField';
+import { SearchSelect } from '../../ui/SearchSelect';
+import { LEAVE_LABEL, PAY_STATUS, SlipLink, admErr, periodTH, prevPeriod, thisPeriod, todayYmd, useHrMe, usePayslipPeriods } from './common';
 import { useLeaveBalances } from './Employees';
 import { ErrorBanner } from '../../errors';
 
@@ -81,12 +84,7 @@ function LeaveList({ boss, myEmpId }: { boss: boolean; myEmpId: string | null })
   // ?no=LV… (dashboard approvals, audit log) filters the list to that request
   const [q, setQ] = useState(sp.get('no') ?? '');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(`${status}|${dq}`);
-  const list = useQuery({
-    queryKey: ['hr-leaves', status, dq, pager.cursor],
-    queryFn: () => api('GET', '/api/hr/leaves', { query: { status: status || undefined, q: dq, limit: 20, cursor: pager.cursor }, schema: page(HrLeave) }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useLoadMore(['hr-leaves'], '/api/hr/leaves', HrLeave, { status: status || undefined, q: dq }, 20);
   const decide = async (l: HrLeave, ok: boolean) => {
     let deduct: boolean | undefined;
     if (ok && d(l.overDays).gt(0) && l.type !== 'unpaid') deduct = confirm(`เกินสิทธิ์ ${fq(l.overDays)} วัน · หักเงินเดือนตามวันที่เกินหรือไม่?\nตกลง = หักเงิน · ยกเลิก = ไม่หัก`);
@@ -100,7 +98,7 @@ function LeaveList({ boss, myEmpId }: { boss: boolean; myEmpId: string | null })
       toast(admErr(e));
     }
   };
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   return (
     <div className="card">
       <h2>รายการลา</h2>
@@ -114,14 +112,14 @@ function LeaveList({ boss, myEmpId }: { boss: boolean; myEmpId: string | null })
         <table data-testid="leave-table">
           <thead><tr><th>เลขที่</th><th>พนักงาน</th><th>ประเภท</th><th>วันที่</th><th className="n">วัน</th><th>เหตุผล</th><th>บันทึกโดย</th><th>สถานะ</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={9} /> : (list.data?.items ?? []).map((l) => (
+            {loading ? <SkeletonRows cols={9} /> : list.rows.map((l) => (
               <tr key={l.id}>
                 <td className="mono small">{l.no}</td>
                 <td>{l.employeeName}</td>
                 <td>{LEAVE_LABEL[l.type]}{l.halfDay && <div className="small muted">ครึ่งวัน</div>}</td>
                 <td className="small">{th(l.fromDate)}{l.toDate !== l.fromDate ? ` – ${th(l.toDate)}` : ''}</td>
                 <td className="n">{fq(l.days)}{d(l.overDays).gt(0) && l.type !== 'unpaid' && <div className="small" style={{ color: 'var(--warn)' }}>เกิน {fq(l.overDays)}{l.deduct ? ' · หักเงิน' : ''}</div>}</td>
-                <td className="small">{l.reason}</td>
+                <td className="small">{l.reason}{l.note && <div className="muted">หมายเหตุ: {l.note}</div>}</td>
                 <td className="small">{l.requestedBy}<div className="muted">{thTime(l.createdAt)}</div></td>
                 <td><Pill k={STATUS[l.status][0]}>{STATUS[l.status][1]}{l.decidedBy ? ` · ${l.decidedBy}` : ''}</Pill></td>
                 <td>{l.status === 'pending' && boss && l.employeeId !== myEmpId && (
@@ -132,11 +130,11 @@ function LeaveList({ boss, myEmpId }: { boss: boolean; myEmpId: string | null })
                 )}</td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={9} className="empty">ยังไม่มีรายการลา</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={9} className="empty">ยังไม่มีรายการลา</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="leave-more" />
     </div>
   );
 }
@@ -147,7 +145,7 @@ function LeaveModal({ boss, myEmpId, year, onClose }: { boss: boolean; myEmpId: 
   const bal = useLeaveBalances(year);
   const emps = (bal.data?.items ?? []).filter((e) => boss || e.employeeId === myEmpId);
   const today = todayYmd();
-  const [f, setF] = useState({ emp: myEmpId ?? '', type: 'sick' as HrLeaveType, from: today, to: today, half: false, reason: '', deduct: false });
+  const [f, setF] = useState({ emp: myEmpId ?? '', type: 'sick' as HrLeaveType, from: today, to: today, half: false, reason: '', deduct: false, note: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const empId = f.emp || emps[0]?.employeeId || '';
@@ -164,7 +162,7 @@ function LeaveModal({ boss, myEmpId, year, onClose }: { boss: boolean; myEmpId: 
     setErr('');
     try {
       const r = await api('POST', '/api/hr/leaves', {
-        body: { employeeId: empId, type: f.type, fromDate: f.from, toDate: f.to < f.from ? f.from : f.to, halfDay: f.half && f.from === f.to, reason: f.reason.trim(), deduct: f.deduct },
+        body: { employeeId: empId, type: f.type, fromDate: f.from, toDate: f.to < f.from ? f.from : f.to, halfDay: f.half && f.from === f.to, reason: f.reason.trim(), deduct: f.deduct, note: f.note.trim() || undefined },
         schema: HrLeaveCreated,
       });
       toast(`บันทึกการลา ${r.leave.no} แล้ว · ${r.leave.status === 'approved' ? 'อนุมัติทันที' : 'รออนุมัติ'}${r.warning ? ` · ${r.warning}` : ''}`);
@@ -183,9 +181,9 @@ function LeaveModal({ boss, myEmpId, year, onClose }: { boss: boolean; myEmpId: 
       {!emps.length && !bal.isLoading ? <div className="note">ผู้ใช้นี้ไม่ได้ผูกกับพนักงาน</div> : (
         <div className="fgrid">
           <label className="f">พนักงาน
-            <select value={empId} disabled={!boss} onChange={(e) => setF({ ...f, emp: e.target.value })} data-testid="leave-emp">
-              {emps.map((e) => <option key={e.employeeId} value={e.employeeId}>{e.name}</option>)}
-            </select>
+            <SearchSelect items={emps} value={empId || null} disabled={!boss} onChange={(id) => setF({ ...f, emp: id ?? '' })} testId="leave-emp" ariaLabel="พนักงาน"
+              getId={(e) => e.employeeId} getLabel={(e) => e.name} getSub={(e) => [e.code, e.position].filter(Boolean).join(' · ')} getSearch={(e) => `${e.code} ${e.position}`}
+              placeholder="ค้นหาชื่อ / รหัส / ตำแหน่ง" />
           </label>
           <label className="f">ประเภท
             <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value as HrLeaveType })} data-testid="leave-type">
@@ -196,6 +194,7 @@ function LeaveModal({ boss, myEmpId, year, onClose }: { boss: boolean; myEmpId: 
           <label className="f">ถึง<input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} data-testid="leave-to" /></label>
           <label className="row small"><input type="checkbox" checked={f.half} disabled={f.from !== f.to} onChange={(e) => setF({ ...f, half: e.target.checked })} /> ลาครึ่งวัน</label>
           <label className="f" style={{ gridColumn: '1/-1' }}>เหตุผล<input type="text" value={f.reason} placeholder="เช่น ไปหาหมอ / ธุระที่อำเภอ" onChange={(e) => setF({ ...f, reason: e.target.value })} data-testid="leave-reason" /></label>
+          <NoteField value={f.note} onChange={(note) => setF({ ...f, note })} testId="leave-note" placeholder="เช่น ฝากงานไว้กับคุณชัย / มีใบรับรองแพทย์" />
         </div>
       )}
       <div className="tot">
@@ -261,17 +260,32 @@ function LeaveCalendar() {
   );
 }
 
-/** Employee self-service: open one's own payslip of a paid month. */
+/**
+ * Employee self-service: the payroll months that include me. A month's slip opens once the run is published (paid);
+ * before that the button is disabled with "รอเผยแพร่รอบเงินเดือน" and no request is sent.
+ */
 function MySlips() {
-  const [p, setP] = useState(prevPeriod(thisPeriod()));
+  const runs = usePayslipPeriods();
+  const items = runs.data?.items ?? [];
   return (
     <div className="card">
       <h2>สลิปเงินเดือนของฉัน</h2>
-      <div className="row">
-        <input type="month" value={p} onChange={(e) => setP(e.target.value)} aria-label="งวด" style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' }} />
-        <Link className="btn pri" to={`/payslip/${p}`}>เปิดสลิป</Link>
+      {runs.isLoading && <div className="sk" />}
+      <div className="tw">
+        <table data-testid="my-slips">
+          <tbody>
+            {items.map((x) => (
+              <tr key={x.period}>
+                <td>{periodTH(x.period)}</td>
+                <td>{x.status && <Pill k={PAY_STATUS[x.status][1]}>{x.published ? `จ่ายแล้ว${x.payDate ? ` · ${th(x.payDate)}` : ''}` : 'ยังไม่เผยแพร่'}</Pill>}</td>
+                <td><SlipLink to={`/payslip/${x.period}`} published={x.published} pri testId={`my-slip-${x.period}`}>เปิดสลิป</SlipLink></td>
+              </tr>
+            ))}
+            {runs.data && !items.length && <tr><td className="empty">ยังไม่มีงวดเงินเดือนของคุณ</td></tr>}
+          </tbody>
+        </table>
       </div>
-      <p className="small muted">ดูและพิมพ์ได้เฉพาะงวดที่ร้านจ่ายแล้ว</p>
+      <p className="small muted">ดูและพิมพ์ได้เฉพาะงวดที่ร้านจ่ายแล้ว · งวดที่ยังไม่จ่ายแสดงเป็น "รอเผยแพร่รอบเงินเดือน"</p>
     </div>
   );
 }

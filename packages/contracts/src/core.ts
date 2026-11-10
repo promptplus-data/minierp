@@ -66,6 +66,12 @@ export type Customer = z.infer<typeof Customer>;
 export const CustomerCreate = Customer.omit({ id: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true, address: true, note: true });
 export const Vendor = z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable() });
 export type Vendor = z.infer<typeof Vendor>;
+/** Quick-create from the vendor picker (`POST /api/vendors`, data.master). Code is generated (V + 5 digits) when empty. */
+export const VendorCreate = z.object({
+  name: z.string().trim().min(1), code: z.string().trim().min(1).optional(), taxId: z.string().regex(/^\d{13}$/).nullable().optional(),
+  branch: z.string().nullable().optional(), phone: z.string().nullable().optional(),
+  term: z.discriminatedUnion('t', [z.object({ t: z.literal('cash') }), z.object({ t: z.literal('days'), x: z.number().int().min(1).max(365) })]).optional(),
+});
 export const Warehouse = z.object({ id: z.string(), name: z.string(), isPos: z.boolean(), active: z.boolean() });
 export type Warehouse = z.infer<typeof Warehouse>;
 
@@ -76,6 +82,8 @@ export const StockLineIn = z.object({ productId: z.string(), unitIdx: z.number()
 export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on onprem)
   vendorId: z.string(), vendorInvoiceNo: z.string().min(1), deliveryNo: z.string().min(1), warehouseId: z.string(),
   lines: z.array(StockLineIn.extend({ unitCost: DecNN })).min(1), billDiscount: DecNN.default('0'),
+  /** หมายเหตุ on the goods receipt; copied to the AP bill. */
+  note: z.string().max(500).optional(),
 });
 export const TransferReq = z.object({ fromWarehouseId: z.string(), toWarehouseId: z.string(), lines: z.array(StockLineIn).min(1), note: z.string().optional() });
 export const IssueReq = z.object({ warehouseId: z.string(), lines: z.array(StockLineIn).min(1), reason: z.string().min(1) });
@@ -188,7 +196,7 @@ export const coreRoutes = {
   posSale: 'POST /api/sales/pos', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
   returnsEligible: 'GET /api/returns/eligible', returnCreate: 'POST /api/returns',
   audit: 'GET /api/audit-log', auditVerify: 'GET /api/audit-log/verify',
-  vendors: 'GET /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
+  vendors: 'GET /api/vendors', vendorCreate: 'POST /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
   healthz: 'GET /healthz',
   // onprem only
   pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair', setup: 'POST /api/setup',

@@ -1,11 +1,11 @@
 /** REQ-M07-11 product photos for the POS tiles: the shop uploads photos of its own (non-SCG) products. */
 import { useRef, useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PRODUCT_IMAGE_MAX_BYTES, ProductImageInfo, page, type Product } from '@erp/contracts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { PRODUCT_IMAGE_MAX_BYTES, ProductImageInfo, page, Product } from '@erp/contracts';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { productPage } from '../../data';
-import { fmt, Pager, Pill, SkeletonRows, useCursorPager, useDebounced, useToast } from '../../ui';
+import { fmt, Pill, SkeletonRows, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
 import { PosImg } from './pos';
 import './retail.css';
 
@@ -39,15 +39,10 @@ export default function ProductImages() {
   const toast = useToast();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['img-products', dq, pager.cursor],
-    queryFn: () => api('GET', '/api/products', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: productPage }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useLoadMore(['img-products'], '/api/products', Product, { q: dq }, 20);
   const imgs = useQuery({ queryKey: ['product-images'], queryFn: () => api('GET', '/api/product-images', { query: { limit: 100 }, schema: page(ProductImageInfo) }) });
   const ver = new Map((imgs.data?.items ?? []).map((x) => [x.productId, x]));
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   const refresh = () => Promise.all(['product-images', 'pos-pricing'].map((k) => qc.invalidateQueries({ queryKey: [k] })));
 
   const upload = async (p: Product, file: File) => {
@@ -79,7 +74,7 @@ export default function ProductImages() {
         <table data-testid="img-table">
           <thead><tr><th>รูป</th><th>สินค้า</th><th>หมวด</th><th className="n">ราคา</th><th>ที่มาของรูป</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={6} /> : (list.data?.items ?? []).map((p) => {
+            {loading ? <SkeletonRows cols={6} /> : list.rows.map((p) => {
               const v = ver.get(p.id);
               return (
                 <tr key={p.id}>
@@ -92,11 +87,11 @@ export default function ProductImages() {
                 </tr>
               );
             })}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={6} className="empty">ไม่พบสินค้า</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={6} className="empty">ไม่พบสินค้า</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
     </div>
   );
 }

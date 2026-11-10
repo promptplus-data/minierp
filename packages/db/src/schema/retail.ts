@@ -38,6 +38,7 @@ export const retailPromos = pgTable('retail_promos', {
   updatedAt: timestamp('updated_at', { withTimezone: true }),
   closedBy: uuid('closed_by'),
   closedAt: timestamp('closed_at', { withTimezone: true }),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const retailPriceLists = pgTable('retail_price_lists', {
@@ -53,6 +54,7 @@ export const retailPriceLists = pgTable('retail_price_lists', {
   createdBy: uuid('created_by').notNull(),
   createdAt: createdAt(),
   updatedAt: timestamp('updated_at', { withTimezone: true }),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const retailPriceListItems = pgTable('retail_price_list_items', {

@@ -22,6 +22,8 @@ export interface GrHookLine {
 export interface GrHookInput {
   docId: string; no: string; date: string; vendorId: string; vendorInvoiceNo: string;
   billDiscount: string; mode: BillDiscountMode; lines: GrHookLine[];
+  /** GR note, copied to the AP bill. */
+  note?: string;
 }
 
 /** Returns the AP bill number. */
@@ -39,9 +41,9 @@ export async function onGoodsReceipt(tx: Tx, ctx: Ctx, gr: GrHookInput): Promise
   const bill = purchaseBill(gr.lines.map((l) => l.amount), gr.billDiscount, vat);
   const no = await nextDocNo(tx, ctx.tenantId, 'AP', gr.date);
   await tx.query(
-    `insert into ap_bills (tenant_id, no, source, vendor_id, vendor_invoice_no, gr_doc_id, gr_no, date, due_date, base, discount, discount_mode, vat, total, created_by)
-     values ($1,$2,'gr',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-    [ctx.tenantId, no, gr.vendorId, gr.vendorInvoiceNo, gr.docId, gr.no, gr.date, dueDate(gr.date, shop.rows[0]?.term), bill.base, bill.discount, gr.mode, bill.vat, money(bill.total), ctx.userId],
+    `insert into ap_bills (tenant_id, no, source, vendor_id, vendor_invoice_no, gr_doc_id, gr_no, date, due_date, base, discount, discount_mode, vat, total, created_by, note)
+     values ($1,$2,'gr',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+    [ctx.tenantId, no, gr.vendorId, gr.vendorInvoiceNo, gr.docId, gr.no, gr.date, dueDate(gr.date, shop.rows[0]?.term), bill.base, bill.discount, gr.mode, bill.vat, money(bill.total), ctx.userId, gr.note ?? ''],
   );
   return no;
 }
