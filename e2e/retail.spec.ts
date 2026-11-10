@@ -136,7 +136,8 @@ test('price list: the contractor price applies at the POS once the customer is c
   await page.getByTestId('tile-SCG-AAC-75').click();
   await page.getByTestId('qty-0').fill('100');
   await expect(page.getByTestId('total')).toHaveText('฿2,400.00');
-  await page.getByTestId('pos-cust').selectOption({ label: 'หจก. รุ่งเรืองก่อสร้าง' });
+  await page.getByTestId('pos-cust-input').fill('รุ่งเรือง');
+  await page.getByTestId('pos-cust-list').getByRole('option', { name: /หจก\. รุ่งเรืองก่อสร้าง/ }).click();
   await expect(page.getByTestId('cline-0')).toContainText('ราคาลูกค้า');
   await expect(page.getByTestId('total')).toHaveText('฿2,250.00');
   await page.getByTestId('pay').click();

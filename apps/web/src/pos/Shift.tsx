@@ -220,6 +220,7 @@ function CloseShiftModal({ shift, onClose }: { shift: Shift; onClose: () => void
             <span style={{ color: diff.lt(0) ? 'var(--bad)' : diff.gt(0) ? 'var(--warn)' : 'var(--ok)' }} data-testid="diff">{diff.gt(0) ? '+' : ''}{fmt(diff)}</span>
           </div>
           <div className="small muted" style={{ marginTop: 8 }}>ยอดโอน / QR / บัตรในกะ: {others.map(([k, v]) => `${METHOD_TH[k] ?? k} ${fmt(v)}`).join(' · ') || '-'}</div>
+          {d(shift.creditSales).gt(0) && <div className="small muted" data-testid="shift-credit">ขายเชื่อในกะ (ไปที่ลูกหนี้ ไม่นับเงินในลิ้นชัก): {fmt(shift.creditSales)}</div>}
           <label className="f" style={{ marginTop: 8 }}>หมายเหตุ (จำเป็นถ้าเงินขาดหรือเกิน)<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ทอนเงินผิด" data-testid="close-note" /></label>
         </div>
       </div>

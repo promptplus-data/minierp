@@ -101,13 +101,17 @@ test('below-cost sale: manager approves the discount, owner approves below cost'
   await page.getByTestId('tile-SCG-CEM-T50').click();
   await page.getByTestId('ldisc-0').fill('30');
   await expect(page.getByTestId('total')).toHaveText('฿115.00');
-  await page.getByTestId('pay').click();
-  await page.getByTestId('pay-confirm').click();
+  // manager override: the PIN is asked as soon as the discount is entered, not at payment
+  await page.getByTestId('ldisc-0').press('Enter');
   await expect(page.getByRole('heading', { name: 'ส่วนลดเกินสิทธิ์' })).toBeVisible();
   // a wrong PIN stays in the modal
   await approve(page, 'คุณสุดา', '9999');
   await expect(page.getByRole('alert')).toHaveText('PIN ไม่ถูกต้อง');
   await approve(page, 'คุณสุดา');
+  await expect(page.getByTestId('override-state')).toContainText('อนุมัติแล้ว');
+  await page.getByTestId('reason-regular').click();
+  await page.getByTestId('pay').click();
+  await page.getByTestId('pay-confirm').click();
   await expect(page.getByTestId('below-cost')).toContainText('ปูนซีเมนต์ตราเสือ');
   // below cost is owner-only: the picker lists the owner only
   await expect(page.getByTestId('apv-by').locator('option')).toHaveCount(1);
@@ -125,6 +129,8 @@ test('full tax invoice for a customer with a tax ID', async ({ page }) => {
   await page.getByTestId('tile-SCG-AAC-75').click();
   await page.getByTestId('pay').click();
   await page.getByTestId('kind-full').check();
+  await page.getByTestId('pay-cust-input').fill('รุ่งเรือง');
+  await page.getByTestId('pay-cust-list').getByRole('option', { name: /รุ่งเรืองก่อสร้าง/ }).click();
   // split payment: 100 cash + rest transfer
   await page.getByTestId('pa-0').fill('100');
   await page.getByTestId('add-pay').click();

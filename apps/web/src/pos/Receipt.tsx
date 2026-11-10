@@ -4,7 +4,7 @@ import type { SalesDoc, Shift } from '@erp/contracts';
 import { useMeta } from '../data';
 import { fmt, fq, th, thTime } from '../ui';
 
-export const METHOD_TH: Record<string, string> = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'PromptPay QR', card: 'บัตรเครดิต/เดบิต', credit: 'ลดหนี้' };
+export const METHOD_TH: Record<string, string> = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'PromptPay QR', card: 'บัตรเครดิต/เดบิต', credit: 'เงินเชื่อ' };
 
 export const DOC_TITLE: Record<SalesDoc['type'], string> = {
   ABB: 'ใบกำกับภาษีอย่างย่อ/ใบเสร็จรับเงิน', INV: 'ใบกำกับภาษี/ใบเสร็จรับเงิน', RC: 'ใบเสร็จรับเงิน', CN: 'ใบลดหนี้ / รับคืนสินค้า',
@@ -47,7 +47,8 @@ export function Slip({ doc }: { doc: SalesDoc }) {
         );
       })}
       <hr />
-      <R l="รวม" r={fmt(d(t.gross).minus(d(t.lineDisc)))} />
+      <R l="รวมเป็นเงิน" r={fmt(t.gross)} />
+      {d(t.lineDisc).gt(0) && <R l="ส่วนลดรายการ" r={`−${fmt(t.lineDisc)}`} />}
       {d(t.billDisc).gt(0) && <R l="ส่วนลดท้ายบิล" r={`−${fmt(t.billDisc)}`} />}
       <R l="สุทธิ" r={fmt(t.total)} b />
       {!nv && (
@@ -59,6 +60,9 @@ export function Slip({ doc }: { doc: SalesDoc }) {
       )}
       {doc.payments.length > 0 && <hr />}
       {doc.payments.map((p, i) => <R key={i} l={METHOD_TH[p.method] ?? p.method} r={fmt(p.amount)} />)}
+      {doc.payments.some((p) => p.method === 'credit') && <div>ลูกค้า: {doc.customer.name} · ค้างชำระ {fmt(doc.arBalance ?? '0')}</div>}
+      {doc.discReason && <div className="small">เหตุผลส่วนลด: {doc.discReason}</div>}
+      {doc.note && <div data-testid="slip-note">หมายเหตุ: {doc.note}</div>}
       <div className="c" style={{ marginTop: 6 }}>ขอบคุณที่ใช้บริการ</div>
     </div>
   );
@@ -81,6 +85,7 @@ export function ShiftSlip({ shift, userName, note }: { shift: Shift; userName: s
       <hr />
       {Object.entries(shift.byMethod).map(([k, v]) => <R key={k} l={`ขาย · ${METHOD_TH[k] ?? k}`} r={fmt(v)} />)}
       <R l="คืนเงินสดลูกค้า" r={`−${fmt(shift.cashRefunds)}`} />
+      {d(shift.creditSales).gt(0) && <R l="ขายเชื่อ (ลูกหนี้ ไม่นับในลิ้นชัก)" r={fmt(shift.creditSales)} />}
       <R l="นำเงินเข้าลิ้นชัก" r={fmt(shift.cashIn)} />
       <R l="นำเงินออกลิ้นชัก" r={`−${fmt(shift.cashOut)}`} />
       <hr />
