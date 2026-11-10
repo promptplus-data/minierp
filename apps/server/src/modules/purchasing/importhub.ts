@@ -408,7 +408,7 @@ export async function preview(tx: Tx, deps: Deps, ctx: Ctx, req: ImportReq) {
 }
 
 /** Commits the file in the request transaction: all rows, or (onlyValid) every row that passed. */
-export async function commit(tx: Tx, deps: Deps, ctx: Ctx, req: ImportReq & { mapping: Record<string, number>; onlyValid: boolean; updateExisting: boolean; saveMapping: boolean }) {
+export async function commit(tx: Tx, deps: Deps, ctx: Ctx, req: ImportReq & { mapping: Record<string, number>; onlyValid: boolean; updateExisting: boolean; saveMapping: boolean; note?: string }) {
   permFor(ctx, req.kind);
   if (req.mode === 'ongoing' && !isMaster(req.kind)) throw E.validation('ส่งข้อมูลเป็นรอบนำเข้าได้เฉพาะข้อมูลหลัก');
   const a = await analyze(tx, deps, req);
@@ -418,8 +418,8 @@ export async function commit(tx: Tx, deps: Deps, ctx: Ctx, req: ImportReq & { ma
   if (!a.rows.some((r) => r.apply)) throw E.validation('ไม่มีแถวที่นำเข้าได้');
   const no = await nextDocNo(tx, ctx.tenantId, 'IMP', deps.today());
   const b = await tx.query<{ id: string; created_at: Date }>(
-    `insert into import_batches (tenant_id, no, kind, mode, source, file_name, file_sha256, rows_total, rows_error, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id, created_at`,
-    [ctx.tenantId, no, req.kind, req.mode, req.source, req.fileName, a.file.sha256, a.rows.length, c.error, ctx.userId]);
+    `insert into import_batches (tenant_id, no, kind, mode, source, file_name, file_sha256, rows_total, rows_error, created_by, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id, created_at`,
+    [ctx.tenantId, no, req.kind, req.mode, req.source, req.fileName, a.file.sha256, a.rows.length, c.error, ctx.userId, req.note?.trim() ?? '']);
   const batch = { id: b.rows[0]!.id, no };
   const n = { created: 0, updated: 0, skipped: 0 };
   for (const r of a.rows) {
@@ -440,6 +440,7 @@ export async function commit(tx: Tx, deps: Deps, ctx: Ctx, req: ImportReq & { ma
   return {
     id: batch.id, no, kind: req.kind, mode: req.mode, source: req.source, fileName: req.fileName, rowsTotal: a.rows.length,
     rowsCreated: n.created, rowsUpdated: n.updated, rowsSkipped: n.skipped, rowsError: c.error, createdBy: ctx.name, createdAt: b.rows[0]!.created_at.toISOString(),
+    note: req.note?.trim() ?? '',
   };
 }
 
@@ -450,11 +451,12 @@ export async function listBatches(tx: Tx, ctx: Ctx, q: { limit: number; cursor?:
   let where = '';
   if (cur) { params.push(cur[0], cur[1]); where = `where (b.created_at, b.id) < ($1::timestamptz, $2::uuid)`; }
   params.push(q.limit + 1);
-  const r = await tx.query<{ id: string; no: string; kind: string; mode: string; source: string; file_name: string; rows_total: number; rows_created: number; rows_updated: number; rows_skipped: number; rows_error: number; created_by: string; created_at: Date }>(
-    `select b.id, b.no, b.kind, b.mode, b.source, b.file_name, b.rows_total, b.rows_created, b.rows_updated, b.rows_skipped, b.rows_error, u.name created_by, b.created_at
+  const r = await tx.query<{ id: string; no: string; kind: string; mode: string; source: string; file_name: string; rows_total: number; rows_created: number; rows_updated: number; rows_skipped: number; rows_error: number; created_by: string; created_at: Date; note: string }>(
+    `select b.id, b.no, b.kind, b.mode, b.source, b.file_name, b.rows_total, b.rows_created, b.rows_updated, b.rows_skipped, b.rows_error, u.name created_by, b.created_at, b.note
        from import_batches b join users u on u.id = b.created_by ${where} order by b.created_at desc, b.id desc limit $${params.length}`, params);
   return pageOf(r.rows, q.limit, (x) => [x.created_at.toISOString(), x.id], (x) => ({
     id: x.id, no: x.no, kind: x.kind, mode: x.mode, source: x.source, fileName: x.file_name, rowsTotal: x.rows_total, rowsCreated: x.rows_created,
     rowsUpdated: x.rows_updated, rowsSkipped: x.rows_skipped, rowsError: x.rows_error, createdBy: x.created_by, createdAt: x.created_at.toISOString(),
+    note: x.note,
   }));
 }

@@ -15,15 +15,15 @@ const GROUP_TH: Record<string, string> = { retail: 'ปลีก', whole: 'ข�
 
 interface Row {
   id: string; name: string; customer_id: string | null; customer_name: string | null; customer_group: PriceList['customerGroup']; vat_included: boolean;
-  valid_from: string | null; valid_to: string | null; active: boolean; item_count: number; created_by: string; created_at: Date;
+  valid_from: string | null; valid_to: string | null; active: boolean; item_count: number; created_by: string; created_at: Date; note: string;
 }
 const SELECT = `select l.id, l.name, l.customer_id, c.name customer_name, l.customer_group, l.vat_included, l.valid_from, l.valid_to, l.active,
-    (select count(*)::int from retail_price_list_items i where i.list_id = l.id and i.active) item_count, u.name created_by, l.created_at
+    (select count(*)::int from retail_price_list_items i where i.list_id = l.id and i.active) item_count, u.name created_by, l.created_at, l.note
   from retail_price_lists l join users u on u.id = l.created_by left join customers c on c.id = l.customer_id`;
 const toList = (r: Row): PriceList => ({
   id: r.id, name: r.name, customer: r.customer_id ? { id: r.customer_id, name: r.customer_name ?? '' } : null, customerGroup: r.customer_group,
   vatIncluded: r.vat_included, validFrom: r.valid_from, validTo: r.valid_to, active: r.active, itemCount: r.item_count,
-  createdBy: r.created_by, createdAt: r.created_at.toISOString(),
+  createdBy: r.created_by, createdAt: r.created_at.toISOString(), note: r.note,
 });
 
 export async function listPriceLists(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string }) {
@@ -104,9 +104,9 @@ export async function createPriceList(tx: Tx, ctx: Ctx, b: Input): Promise<Price
   if (!b.customerId === !b.customerGroup) throw E.validation('A price list is for one customer or one customer group');
   await validate(tx, b);
   const r = await tx.query<{ id: string }>(
-    `insert into retail_price_lists (tenant_id, name, customer_id, customer_group, vat_included, valid_from, valid_to, active, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
-    [ctx.tenantId, b.name, b.customerId ?? null, b.customerId ? null : b.customerGroup, b.vatIncluded, b.validFrom ?? null, b.validTo ?? null, b.active, ctx.userId],
+    `insert into retail_price_lists (tenant_id, name, customer_id, customer_group, vat_included, valid_from, valid_to, active, created_by, note)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+    [ctx.tenantId, b.name, b.customerId ?? null, b.customerId ? null : b.customerGroup, b.vatIncluded, b.validFrom ?? null, b.validTo ?? null, b.active, ctx.userId, b.note?.trim() ?? ''],
   );
   await writeItems(tx, ctx, r.rows[0]!.id, b.items);
   const out = await getPriceList(tx, ctx, r.rows[0]!.id);
@@ -123,20 +123,22 @@ export async function updatePriceList(tx: Tx, ctx: Ctx, id: string, b: z.infer<t
     customerGroup: b.customerGroup !== undefined ? b.customerGroup : before.customerGroup,
     vatIncluded: b.vatIncluded ?? before.vatIncluded, validFrom: b.validFrom !== undefined ? b.validFrom : before.validFrom,
     validTo: b.validTo !== undefined ? b.validTo : before.validTo, active: b.active ?? before.active,
+    note: b.note !== undefined ? b.note.trim() : before.note,
   };
   if (b.customerId) next.customerGroup = null;
   if (b.customerGroup) next.customerId = null;
   if (!next.customerId === !next.customerGroup) throw E.validation('A price list is for one customer or one customer group');
   await validate(tx, { ...next, items: b.items });
   await tx.query(
-    `update retail_price_lists set name = $2, customer_id = $3, customer_group = $4, vat_included = $5, valid_from = $6, valid_to = $7, active = $8, updated_at = now() where id = $1`,
-    [id, next.name, next.customerId, next.customerGroup, next.vatIncluded, next.validFrom, next.validTo, next.active],
+    `update retail_price_lists set name = $2, customer_id = $3, customer_group = $4, vat_included = $5, valid_from = $6, valid_to = $7, active = $8, note = $9, updated_at = now() where id = $1`,
+    [id, next.name, next.customerId, next.customerGroup, next.vatIncluded, next.validFrom, next.validTo, next.active, next.note],
   );
   if (b.items) await writeItems(tx, ctx, id, b.items);
   const out = await getPriceList(tx, ctx, id);
   const diffs: string[] = [];
   const diff = (label: string, a: unknown, c: unknown) => { if (String(a ?? '') !== String(c ?? '')) diffs.push(`${label}: ${a ?? '-'} → ${c ?? '-'}`); };
   diff('ชื่อ', before.name, out.name);
+  diff('หมายเหตุ', before.note, out.note);
   diff('ใช้กับ', target({ customerId: before.customer?.id, customerGroup: before.customerGroup }, before.customer?.name), target({ customerId: out.customer?.id, customerGroup: out.customerGroup }, out.customer?.name));
   diff('ช่วง', `${before.validFrom ?? '…'}–${before.validTo ?? '…'}`, `${out.validFrom ?? '…'}–${out.validTo ?? '…'}`);
   diff('VAT', before.vatIncluded ? 'รวม' : 'ไม่รวม', out.vatIncluded ? 'รวม' : 'ไม่รวม');

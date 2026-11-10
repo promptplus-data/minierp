@@ -197,7 +197,7 @@ export async function deliveryPreview(tx: Tx, deps: Deps, ctx: Ctx, req: Paramet
 
 export async function deliveryCommit(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: Parameters<typeof analyze>[2] & { mapping: Partial<Record<Field, number>>; warehouseId?: string; saveProfile: boolean; profileName?: string; forceDnNos: string[]; forceReason?: string },
+  req: Parameters<typeof analyze>[2] & { mapping: Partial<Record<Field, number>>; warehouseId?: string; saveProfile: boolean; profileName?: string; forceDnNos: string[]; forceReason?: string; note?: string },
 ) {
   requirePerm(ctx, 'inv.receive');
   const a = await analyze(tx, deps, req);
@@ -206,9 +206,9 @@ export async function deliveryCommit(
   const wh = req.warehouseId ? (await requireWarehouse(tx, req.warehouseId)).id : null;
   const no = await nextDocNo(tx, ctx.tenantId, 'IMP', deps.today());
   const batch = await tx.query<{ id: string }>(
-    `insert into import_batches (tenant_id, no, kind, mode, source, file_name, file_sha256, rows_total, rows_error, created_by)
-     values ($1,$2,'delivery','delivery',$3,$4,$5,$6,$7,$8) returning id`,
-    [ctx.tenantId, no, a.profileName ?? req.profileName ?? 'ไฟล์ใบส่งของ', req.fileName, a.file.sha256, a.rows.length, a.rows.filter((r) => r.status === 'error').length, ctx.userId]);
+    `insert into import_batches (tenant_id, no, kind, mode, source, file_name, file_sha256, rows_total, rows_error, created_by, note)
+     values ($1,$2,'delivery','delivery',$3,$4,$5,$6,$7,$8,$9) returning id`,
+    [ctx.tenantId, no, a.profileName ?? req.profileName ?? 'ไฟล์ใบส่งของ', req.fileName, a.file.sha256, a.rows.length, a.rows.filter((r) => r.status === 'error').length, ctx.userId, req.note?.trim() ?? '']);
   const batchId = batch.rows[0]!.id;
   const drafts: { id: string; dnNo: string | null; lines: number; unmatched: number }[] = [];
   const skipped: { dnNo: string | null; reason: string }[] = [];
@@ -420,7 +420,7 @@ export async function createProductForLine(tx: Tx, deps: Deps, ctx: Ctx, id: str
   return getDraft(tx, deps, ctx, g.id);
 }
 
-export async function confirmDraft(tx: Tx, deps: Deps, ctx: Ctx, id: string, req: { vendorInvoiceNo: string; deliveryNo: string; billDiscount: string; shortReason?: string }) {
+export async function confirmDraft(tx: Tx, deps: Deps, ctx: Ctx, id: string, req: { vendorInvoiceNo: string; deliveryNo: string; billDiscount: string; shortReason?: string; note?: string }) {
   requirePerm(ctx, 'inv.receive');
   const g = await lockDraft(tx, id);
   if (!g.vendor_id) throw E.validation('เลือกผู้ขายก่อนยืนยันรับ');
@@ -443,7 +443,7 @@ export async function confirmDraft(tx: Tx, deps: Deps, ctx: Ctx, id: string, req
     return { productId: l.product_id!, unitIdx: l.unit_idx!, qty: qty4(accepted), unitCost: draftUnitCost(l, g.vat_flag, vat) };
   }).filter((l) => d(l.qty).gt(0));
   if (!recv.length) throw E.validation('ไม่มีสินค้าที่รับเข้าได้');
-  const doc = await receipt(tx, deps, ctx, { vendorId: g.vendor_id, vendorInvoiceNo: req.vendorInvoiceNo.trim(), deliveryNo: dn, warehouseId: g.warehouse_id, lines: recv, billDiscount: req.billDiscount });
+  const doc = await receipt(tx, deps, ctx, { vendorId: g.vendor_id, vendorInvoiceNo: req.vendorInvoiceNo.trim(), deliveryNo: dn, warehouseId: g.warehouse_id, lines: recv, billDiscount: req.billDiscount, note: req.note });
   await tx.query(`update gr_drafts set status = 'confirmed', confirmed_doc_id = $2, confirmed_no = $3, dn_no = $4, invoice_no = $5, short_reason = $6 where id = $1`,
     [g.id, doc.id, doc.no, dn, req.vendorInvoiceNo.trim(), req.shortReason?.trim() || null]);
   const ap = await tx.query<{ no: string }>(`select no from ap_bills where gr_doc_id = $1`, [doc.id]);

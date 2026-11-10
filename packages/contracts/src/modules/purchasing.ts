@@ -33,6 +33,8 @@ export const GrSummary = z.object({
   id: z.string(), no: z.string(), date: Ymd, vendorId: z.string().nullable(), vendorName: z.string().nullable(),
   vendorInvoiceNo: z.string().nullable(), deliveryNo: z.string().nullable(), warehouseId: z.string(), total: Dec.nullable(),
   apBillNo: z.string().nullable(), itemsPreview: z.string(), createdBy: z.string(), returnable: z.boolean(),
+  /** หมายเหตุ typed on the receipt (manual receipt or draft confirm). */
+  note: z.string().default(''),
 });
 export type GrSummary = z.infer<typeof GrSummary>;
 export const GrLineView = z.object({
@@ -53,8 +55,11 @@ export const ApBill = z.object({
   vendorInvoiceNo: z.string(), grNo: z.string().nullable(), date: Ymd, dueDate: Ymd, termLabel: z.string(),
   base: Dec, discount: Dec, discountMode: z.enum(['sep', 'alloc']), vat: Dec, total: Dec, paid: Dec, returned: Dec, balance: Dec,
   overdueDays: z.number().int(), createdBy: z.string(),
+  /** Copied from the goods receipt; editable on the bill page (`PATCH /api/ap/bills/:no`). */
+  note: z.string().default(''),
 });
 export type ApBill = z.infer<typeof ApBill>;
+export const ApBillUpdate = z.object({ note: z.string().max(500) });
 /** One AP bill with what settled it: payment vouchers and vendor returns (REQ-M18, links both ways). */
 export const ApBillDetail = ApBill.extend({
   payments: z.array(z.object({ no: z.string(), date: Ymd, amount: Dec })),
@@ -86,12 +91,13 @@ export type ApPayment = z.infer<typeof ApPayment>;
 
 export const VendorReturnReq = z.object({
   grNo: z.string(), lines: z.array(z.object({ grLineId: z.string(), qty: DecNN })).min(1),
-  reason: z.string().min(1), vendorCnNo: z.string().optional(),
+  reason: z.string().min(1), vendorCnNo: z.string().optional(), note: z.string().max(500).optional(),
 });
 export const VendorReturn = z.object({
   id: z.string(), no: z.string(), date: Ymd, vendorId: z.string(), vendorName: z.string(), grNo: z.string(), apBillNo: z.string().nullable(),
   reason: z.string(), vendorCnNo: z.string().nullable(), base: Dec, vat: Dec, total: Dec, apApplied: Dec, unapplied: Dec, cogs: Dec.nullable(), createdBy: z.string(),
   lines: z.array(z.object({ productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, amount: Dec })),
+  note: z.string().default(''),
 });
 export type VendorReturn = z.infer<typeof VendorReturn>;
 export const PurchaseDiscount = z.object({ billNo: z.string(), grNo: z.string().nullable(), date: Ymd, vendorName: z.string(), amount: Dec, createdBy: z.string() });
@@ -131,7 +137,7 @@ export const DeliveryPreview = z.object({
 export type DeliveryPreview = z.infer<typeof DeliveryPreview>;
 export const DeliveryCommitReq = DeliveryPreviewReq.extend({
   mapping: DeliveryMapping, warehouseId: z.string().optional(), saveProfile: z.boolean().default(true), profileName: z.string().optional(),
-  forceDnNos: z.array(z.string()).default([]), forceReason: z.string().optional(),
+  forceDnNos: z.array(z.string()).default([]), forceReason: z.string().optional(), note: z.string().max(500).optional(),
 });
 export const DeliveryCommitRes = z.object({
   batchNo: z.string(), drafts: z.array(z.object({ id: z.string(), dnNo: z.string().nullable(), lines: z.number().int(), unmatched: z.number().int() })),
@@ -161,6 +167,7 @@ export const GrDraftCreateProductReq = z.object({
 });
 export const GrDraftConfirmReq = z.object({
   vendorInvoiceNo: z.string().min(1), deliveryNo: z.string().min(1), billDiscount: DecNN.default('0'), shortReason: z.string().optional(),
+  note: z.string().max(500).optional(),
 });
 export const GrDraftConfirmRes = z.object({ grNo: z.string(), apBillNo: z.string().nullable() });
 
@@ -187,10 +194,12 @@ export const ImportPreview = z.object({
 export type ImportPreview = z.infer<typeof ImportPreview>;
 export const ImportCommitReq = ImportPreviewReq.extend({
   mapping: z.record(z.number().int().min(0)), onlyValid: z.boolean().default(true), updateExisting: z.boolean().default(false), saveMapping: z.boolean().default(true),
+  note: z.string().max(500).optional(),
 });
 export const ImportBatch = z.object({
   id: z.string(), no: z.string(), kind: z.string(), mode: z.string(), source: z.string(), fileName: z.string(), rowsTotal: z.number().int(),
   rowsCreated: z.number().int(), rowsUpdated: z.number().int(), rowsSkipped: z.number().int(), rowsError: z.number().int(), createdBy: z.string(), createdAt: z.string(),
+  note: z.string().default(''),
 });
 export type ImportBatch = z.infer<typeof ImportBatch>;
 export const ImportTemplateQuery = z.object({ format: z.enum(['csv', 'xlsx']).default('csv') });
@@ -232,6 +241,7 @@ export const purchasingRoutes = {
 
   apBills: 'GET /api/ap/bills',
   apBill: 'GET /api/ap/bills/:no',
+  apBillUpdate: 'PATCH /api/ap/bills/:no',
   apAging: 'GET /api/ap/aging',
   apPayments: 'GET /api/ap/payments',
   apPaymentCreate: 'POST /api/ap/payments',

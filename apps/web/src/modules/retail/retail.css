@@ -30,3 +30,6 @@ td .rt-actions{flex-direction:column;align-items:stretch}
   .rt-span2{grid-column:auto}
   .rt-comps input.qty{width:64px}
 }
+/* promo targets: picked products as removable chips (ProductPicker adds them) */
+.rt-x{border:0;background:none;padding:0 0 0 4px;cursor:pointer;color:var(--muted);font-size:12px;line-height:1}
+.rt-x:hover{color:var(--bad)}

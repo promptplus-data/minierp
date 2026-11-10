@@ -37,6 +37,7 @@ export const leaveRequests = pgTable('leave_requests', {
   overDays: numeric('over_days', { precision: 6, scale: 1 }).notNull().default('0'), deduct: boolean('deduct').notNull().default(false),
   status: text('status').notNull().default('pending'), requestedBy: uuid('requested_by').notNull(), decidedBy: uuid('decided_by'),
   decidedAt: ts('decided_at'), decideNote: text('decide_note'), createdAt: createdAt(),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const payrollRuns = pgTable('payroll_runs', {
@@ -44,6 +45,7 @@ export const payrollRuns = pgTable('payroll_runs', {
   ssoRate: numeric('sso_rate', { precision: 6, scale: 4 }).notNull(), ssoCap: money('sso_cap').notNull(), ssoFloor: money('sso_floor').notNull(),
   createdBy: uuid('created_by').notNull(), createdAt: createdAt(), approvedBy: uuid('approved_by'), approvedAt: ts('approved_at'),
   paidBy: uuid('paid_by'), paidAt: ts('paid_at'), payDate: date('pay_date'),
+  note: text('note').notNull().default(''), // 0640
 });
 
 export const payrollLines = pgTable('payroll_lines', {

@@ -1,12 +1,15 @@
 /** M15 shop promotions (mockup VIEWS.promo / promoModal): list, create / edit, close early, P&L per promo. */
 import { useEffect, useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Promo, PromoCheck, PromoPnl, page, type PromoInput } from '@erp/contracts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Promo, PromoCheck, PromoPnl, type Product, type PromoInput } from '@erp/contracts';
 import { PROMO_STATE_TH, addDays, d, type PromoState } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useCatalog, useMeta } from '../../data';
-import { ApprovalModal, fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput, type PillKind } from '../../ui';
+import { ApprovalModal, fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast, type ApprovalInput, type PillKind } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField } from '../../ui/NoteField';
+import { ProductPicker } from '../../ui/ProductPicker';
 import './retail.css';
 import { ErrorBanner } from '../../errors';
 
@@ -40,15 +43,10 @@ function PromoList() {
   const [state, setState] = useState<PromoState | ''>('');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(`${state}|${dq}`);
   const [edit, setEdit] = useState<Promo | 'new' | null>(null);
   const [closing, setClosing] = useState<Promo | null>(null);
-  const list = useQuery({
-    queryKey: ['promos', state, dq, pager.cursor],
-    queryFn: () => api('GET', '/api/promos', { query: { state, q: dq, limit: 20, cursor: pager.cursor }, schema: page(Promo) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore(['promos'], '/api/promos', Promo, { state, q: dq }, 10);
+  const loading = list.isLoading;
   const done = (msg: string) => { void qc.invalidateQueries({ queryKey: ['promos'] }); void qc.invalidateQueries({ queryKey: ['pos-pricing'] }); toast(msg); };
 
   return (
@@ -71,10 +69,10 @@ function PromoList() {
         <table data-testid="promo-table">
           <thead><tr><th>รหัส</th><th>ชื่อโปร</th><th>แบบ</th><th>สินค้าที่ร่วม</th><th>ระยะเวลา</th><th>สถานะ</th><th className="n">ขายแล้ว</th><th className="n">ยอดขาย</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={9} /> : (list.data?.items ?? []).map((p) => (
+            {loading ? <SkeletonRows cols={9} /> : list.rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono small">{p.code}</td>
-                <td>{p.name}<div className="rt-desc">โดย {p.createdBy} · {th(p.createdAt.slice(0, 10))}{p.updatedAt ? ` · แก้ล่าสุด ${p.updatedBy}` : ''}</div>{p.belowCost && <div><Pill k="warn">ต่ำกว่าทุน · {p.belowCostBy ?? 'เจ้าของ'} ยืนยัน</Pill></div>}{p.channels.includes('b2b') && <div className="rt-desc">ช่องทาง {p.channels.map((c) => (c === 'pos' ? 'หน้าร้าน' : 'B2B')).join(' / ')}</div>}</td>
+                <td>{p.name}<div className="rt-desc">โดย {p.createdBy} · {th(p.createdAt.slice(0, 10))}{p.updatedAt ? ` · แก้ล่าสุด ${p.updatedBy}` : ''}</div>{p.belowCost && <div><Pill k="warn">ต่ำกว่าทุน · {p.belowCostBy ?? 'เจ้าของ'} ยืนยัน</Pill></div>}{p.note && <div className="rt-desc">หมายเหตุ: {p.note}</div>}{p.channels.includes('b2b') && <div className="rt-desc">ช่องทาง {p.channels.map((c) => (c === 'pos' ? 'หน้าร้าน' : 'B2B')).join(' / ')}</div>}</td>
                 <td>{p.kind === 'bundle' ? <Pill k="ok">ชุดโปร</Pill> : <Pill k="acc">ลดราคา</Pill>}<div className="rt-desc">{promoDesc(p)}</div></td>
                 <td className="small rt-items">{p.lines.map((l) => <div key={l.productId}>{l.name}{l.qtyPerSet ? ` × ${fq(l.qtyPerSet)}` : ''}</div>)}{p.kind === 'bundle' && p.setsAvailable != null && <div className="rt-desc">จัดได้ {p.setsAvailable} ชุด</div>}</td>
                 <td className="small">{th(p.start)} – {th(p.end)}<div className="muted">{days(p.start, p.end)} วัน</div></td>
@@ -89,11 +87,11 @@ function PromoList() {
                 )}</td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={9} className="empty">ยังไม่มีโปรโมชั่น{state ? 'ในสถานะนี้' : ''}</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={9} className="empty">ยังไม่มีโปรโมชั่น{state ? 'ในสถานะนี้' : ''}</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="promo-more" />
       <p className="small muted">ยอดขายนับจากบิลที่ไม่ถูกยกเลิก หักรับคืน{seeCost ? ' · กำไรดูที่แท็บ "กำไรต่อโปร"' : ''} · ปิดโปรแล้วมีผลทันทีกับบิลใหม่ บิลที่ออกไปแล้วไม่เปลี่ยน</p>
       {edit && <PromoModal promo={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={(p) => { setEdit(null); done(`บันทึกโปร ${p.code} แล้ว`); }} />}
       {closing && <CloseModal p={closing} onClose={() => setClosing(null)} onDone={(p) => { setClosing(null); done(`ปิดโปร ${p.code} แล้ว`); }} />}
@@ -159,8 +157,9 @@ function CloseModal({ p, onClose, onDone }: { p: Promo; onClose: () => void; onD
 
 interface Form {
   name: string; kind: 'disc' | 'bundle'; mode: 'pct' | 'amt' | 'fixed'; value: string; setPrice: string; sku: string;
-  items: string[]; comps: { productId: string; qty: string }[]; start: string; end: string; pos: boolean; b2b: boolean; draft: boolean;
+  items: string[]; comps: { productId: string; qty: string }[]; start: string; end: string; pos: boolean; b2b: boolean; draft: boolean; note: string;
 }
+const isStockItem = (p: Product) => p.kind === 'stock';
 
 function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose: () => void; onSaved: (p: Promo) => void }) {
   const { can } = useAuth();
@@ -173,9 +172,8 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
   const [f, setF] = useState<Form>(() => promo ? {
     name: promo.name, kind: promo.kind, mode: promo.mode ?? 'pct', value: promo.value ?? '', setPrice: promo.setPrice ?? '', sku: promo.sku ?? '',
     items: promo.kind === 'disc' ? promo.lines.map((l) => l.productId) : [], comps: promo.kind === 'bundle' ? promo.lines.map((l) => ({ productId: l.productId, qty: l.qtyPerSet ?? '1' })) : [],
-    start: promo.start, end: promo.end, pos: promo.channels.includes('pos'), b2b: promo.channels.includes('b2b'), draft: promo.status === 'draft',
-  } : { name: '', kind: 'disc', mode: 'pct', value: '5', setPrice: '', sku: '', items: [], comps: [], start: today, end: addDays(today, 30), pos: true, b2b: false, draft: false });
-  const [pick, setPick] = useState('');
+    start: promo.start, end: promo.end, pos: promo.channels.includes('pos'), b2b: promo.channels.includes('b2b'), draft: promo.status === 'draft', note: promo.note,
+  } : { name: '', kind: 'disc', mode: 'pct', value: '5', setPrice: '', sku: '', items: [], comps: [], start: today, end: addDays(today, 30), pos: true, b2b: false, draft: false, note: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [apv, setApv] = useState(false);
@@ -185,13 +183,13 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
   }, [f.kind, stockProducts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const body = (): PromoInput => ({
-    name: f.name.trim(), kind: f.kind, start: f.start, end: f.end, draft: f.draft,
+    name: f.name.trim(), kind: f.kind, start: f.start, end: f.end, draft: f.draft, note: f.note.trim(),
     channels: [...(f.pos ? ['pos' as const] : []), ...(f.b2b ? ['b2b' as const] : [])],
     ...(f.kind === 'disc'
       ? { mode: f.mode, value: f.value.trim() || '0', items: f.items.map((productId) => ({ productId })) }
       : { setPrice: f.setPrice.trim() || '0', ...(f.sku.trim() ? { sku: f.sku.trim() } : {}), items: f.comps.map((c) => ({ productId: c.productId, qtyPerSet: c.qty.trim() || '0' })) }),
   });
-  const ready = f.name.trim() && (f.pos || f.b2b) && (f.kind === 'disc' ? f.items.length > 0 && /^\d+(\.\d+)?$/.test(f.value) : f.comps.length > 0 && /^\d+(\.\d+)?$/.test(f.setPrice));
+  const ready = f.name.trim() && (f.pos || f.b2b) && (f.kind === 'disc' ? f.items.length > 0 && /^\d+(\.\d+)?$/.test(f.value) : f.comps.length > 0 && f.comps.every((c) => c.productId) && /^\d+(\.\d+)?$/.test(f.setPrice));
   const key = JSON.stringify(body());
   const dkey = useDebounced(key, 350);
   const check = useQuery({
@@ -228,7 +226,6 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
     }
   };
 
-  const filtered = stockProducts.filter((p) => !pick.trim() || p.name.toLowerCase().includes(pick.trim().toLowerCase()) || p.sku.toLowerCase().includes(pick.trim().toLowerCase()));
   const normal = ck?.normalSetPrice ?? null;
   const setEx = f.setPrice && vat ? d(f.setPrice).div('1.07') : d(f.setPrice || 0);
 
@@ -258,13 +255,17 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
             <label className="f">{f.mode === 'pct' ? 'ลด (%)' : f.mode === 'amt' ? 'ลด (บาท ต่อหน่วยหลัก)' : `ราคาโปร (บาท ต่อหน่วยหลัก${vat ? ' รวม VAT' : ''})`}<input type="text" inputMode="decimal" value={f.value} onChange={(e) => set({ value: e.target.value })} data-testid="pm-value" /></label>
           </div>
           <div className="small muted">สินค้าที่ร่วมโปร (เลือกได้หลายรายการ) · เลือกแล้ว {f.items.length} รายการ</div>
-          <input type="search" value={pick} onChange={(e) => setPick(e.target.value)} placeholder="ค้นชื่อหรือรหัสสินค้า" aria-label="ค้นสินค้าที่ร่วมโปร" />
-          <div className="rt-pick">
-            {filtered.map((p) => {
-              const on = f.items.includes(p.id);
-              return <label key={p.id} className={on ? 'on' : ''}><input type="checkbox" checked={on} onChange={() => set({ items: on ? f.items.filter((x) => x !== p.id) : [...f.items, p.id] })} /> {p.name}</label>;
-            })}
-          </div>
+          <ProductPicker value={null} showStock={false} filter={(p) => !f.items.includes(p.id)} ariaLabel="เพิ่มสินค้าที่ร่วมโปร" testId="pm-add-item"
+            placeholder="พิมพ์ชื่อ / รหัส / บาร์โค้ด เพื่อเพิ่มสินค้า" onChange={(id) => { if (id) set({ items: [...f.items, id] }); }} />
+          {f.items.length > 0 && (
+            <div className="rt-pick" data-testid="pm-items">
+              {f.items.map((id) => (
+                <label key={id} className="on">{cat.byId.get(id)?.name ?? id}
+                  <button type="button" className="rt-x" aria-label={`เอาออก ${cat.byId.get(id)?.name ?? ''}`} onClick={() => set({ items: f.items.filter((x) => x !== id) })}>✕</button>
+                </label>
+              ))}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -274,9 +275,8 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
               <tbody>
                 {f.comps.map((c, i) => (
                   <tr key={i}>
-                    <td><select value={c.productId} aria-label={`สินค้าในชุด ${i + 1}`} onChange={(e) => set({ comps: f.comps.map((y, j) => (j === i ? { ...y, productId: e.target.value } : y)) })}>
-                      {stockProducts.filter((p) => p.kind === 'stock').map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select></td>
+                    <td><ProductPicker value={c.productId || null} filter={isStockItem} ariaLabel={`สินค้าในชุด ${i + 1}`} testId={`pm-comp${i}`} style={{ minWidth: 220 }}
+                      onChange={(id) => set({ comps: f.comps.map((y, j) => (j === i ? { ...y, productId: id ?? '' } : y)) })} /></td>
                     <td className="n"><input className="qty" type="text" inputMode="decimal" value={c.qty} aria-label={`จำนวนต่อชุด ${i + 1}`} onChange={(e) => set({ comps: f.comps.map((y, j) => (j === i ? { ...y, qty: e.target.value } : y)) })} /> {cat.byId.get(c.productId)?.units[0]?.name}</td>
                     <td>{f.comps.length > 1 && <button className="btn sm bad" onClick={() => set({ comps: f.comps.filter((_, j) => j !== i) })} aria-label="ลบสินค้าในชุด">✕</button>}</td>
                   </tr>
@@ -308,6 +308,7 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
       )}
       {clash.length > 0 && !f.draft && <div className="note bad small">สินค้าซ้ำกับโปรที่ช่วงเวลาทับกัน: {clash.map((c) => `${c.code} ${c.name}`).join(', ')} · สินค้าหนึ่งอยู่ได้ในโปรลดราคาเดียวต่อช่วงเวลา</div>}
       {ck && ck.belowCost.length > 0 && <div className="note bad small" data-testid="pm-below">ราคาโปรต่ำกว่าต้นทุน: {ck.belowCost.join(', ')} · ต้องให้เจ้าของร้านอนุมัติตอนบันทึก หลังอนุมัติแล้วขายตามโปรได้โดยไม่ต้องขออนุมัติทุกบิล</div>}
+      <NoteField value={f.note} onChange={(note) => set({ note })} testId="pm-note" placeholder="เช่น โปรร่วมกับตัวแทน SCG ภาคเหนือ" />
       <label className="row small"><input type="checkbox" checked={f.draft} disabled={!!promo && promo.status !== 'draft'} onChange={(e) => set({ draft: e.target.checked })} /> บันทึกเป็นร่าง (ยังไม่ใช้กับบิล)</label>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act">

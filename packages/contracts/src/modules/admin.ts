@@ -58,7 +58,7 @@ export const HrSettingsUpdate = z.object({ ssoRate: DecNN.optional(), ssoCap: De
 
 export const HrLeave = z.object({
   id: z.string(), no: z.string(), employeeId: z.string(), employeeName: z.string(), type: HrLeaveType,
-  fromDate: z.string(), toDate: z.string(), halfDay: z.boolean(), days: Dec, reason: z.string(),
+  fromDate: z.string(), toDate: z.string(), halfDay: z.boolean(), days: Dec, reason: z.string(), note: z.string().default(''),
   overDays: Dec, deduct: z.boolean(), status: z.enum(['pending', 'approved', 'rejected']),
   requestedBy: z.string(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable(), createdAt: z.string(),
 });
@@ -66,7 +66,7 @@ export type HrLeave = z.infer<typeof HrLeave>;
 export const HrLeaveQuery = pageQuery.extend({ status: z.enum(['pending', 'approved', 'rejected']).optional(), employeeId: z.string().optional() });
 export const HrLeaveCreate = z.object({
   employeeId: z.string().optional(), // default: the caller's own employee record
-  type: HrLeaveType, fromDate: YMD, toDate: YMD, halfDay: z.boolean().default(false), reason: z.string().default(''),
+  type: HrLeaveType, fromDate: YMD, toDate: YMD, halfDay: z.boolean().default(false), reason: z.string().default(''), note: z.string().max(500).optional(),
   deduct: z.boolean().default(false), // over-entitlement days are deducted from pay
 });
 export const HrLeaveDecide = z.object({ deduct: z.boolean().optional(), note: z.string().optional() });
@@ -90,11 +90,21 @@ export const HrPayrollRun = z.object({
   id: z.string(), period: z.string(), status: HrPayrollStatus, ssoRate: Dec, ssoCap: Dec, ssoFloor: Dec,
   createdBy: z.string(), createdAt: z.string(), approvedBy: z.string().nullable(), approvedAt: z.string().nullable(),
   paidBy: z.string().nullable(), paidAt: z.string().nullable(), payDate: z.string().nullable(),
+  note: z.string().default(''),
+  /** Payslips are published to employees (and openable) once the run is paid. */
+  published: z.boolean().default(false),
   totals: HrPayrollTotals, lines: z.array(HrPayrollLine),
 });
 export type HrPayrollRun = z.infer<typeof HrPayrollRun>;
 export const HrPayrollSummary = HrPayrollRun.omit({ lines: true }).extend({ headcount: z.number() });
-export const HrPayrollCreate = z.object({ period: Period });
+export const HrPayrollCreate = z.object({ period: Period, note: z.string().max(500).optional() });
+export const HrPayrollUpdate = z.object({ note: z.string().max(500) });
+export const HrPayslipPeriodQuery = z.object({ period: Period.optional(), limit: z.coerce.number().int().min(1).max(60).default(24) });
+export const HrPayslipPeriods = z.object({
+  employeeId: z.string().nullable(),
+  items: z.array(z.object({ period: z.string(), exists: z.boolean(), status: HrPayrollStatus.nullable(), published: z.boolean(), payDate: z.string().nullable() })),
+});
+export type HrPayslipPeriods = z.infer<typeof HrPayslipPeriods>;
 export const HrPayrollLineUpdate = z.object({
   days: DecNN.optional(), ot: DecNN.optional(), allowance: DecNN.optional(), advance: DecNN.optional(), tax: DecNN.nullable().optional(),
 });
@@ -313,7 +323,7 @@ export const adminRoutes = {
   hrSettings: 'GET /api/hr/settings', hrSettingsUpdate: 'PATCH /api/hr/settings',
   hrLeaves: 'GET /api/hr/leaves', hrLeaveCreate: 'POST /api/hr/leaves', hrLeaveApprove: 'POST /api/hr/leaves/:id/approve', hrLeaveReject: 'POST /api/hr/leaves/:id/reject',
   hrLeaveBalances: 'GET /api/hr/leave-balances',
-  hrPayrollRuns: 'GET /api/hr/payroll', hrPayrollCreate: 'POST /api/hr/payroll', hrPayroll: 'GET /api/hr/payroll/:period',
+  hrPayrollRuns: 'GET /api/hr/payroll', hrPayrollCreate: 'POST /api/hr/payroll', hrPayroll: 'GET /api/hr/payroll/:period', hrPayrollUpdate: 'PATCH /api/hr/payroll/:period', hrPayslipPeriods: 'GET /api/hr/payslip-periods',
   hrPayrollLine: 'PATCH /api/hr/payroll/:period/lines/:lineId', hrPayrollRecalc: 'POST /api/hr/payroll/:period/recalc',
   hrPayrollApprove: 'POST /api/hr/payroll/:period/approve', hrPayrollReopen: 'POST /api/hr/payroll/:period/reopen', hrPayrollPay: 'POST /api/hr/payroll/:period/pay',
   hrPayslips: 'GET /api/hr/payroll/:period/slips', hrLabourCost: 'GET /api/hr/labour-cost',

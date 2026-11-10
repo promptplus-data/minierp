@@ -26,12 +26,12 @@ export interface PromoRow {
   id: string; code: string; name: string; kind: 'disc' | 'bundle'; mode: PromoMode | null; value: string | null; set_price: string | null; sku: string | null;
   items: PromoItemRow[]; channels: ('pos' | 'b2b')[]; start_date: string; end_date: string; status: 'draft' | 'active' | 'closed'; below_cost: boolean;
   below_cost_by_name: string | null; created_by_name: string; created_at: Date; updated_by_name: string | null; updated_at: Date | null;
-  closed_by_name: string | null; closed_at: Date | null;
+  closed_by_name: string | null; closed_at: Date | null; note: string;
 }
 
 const PROMO_SELECT = `select p.id, p.code, p.name, p.kind, p.mode, p.value::text, p.set_price::text, p.sku, p.items, p.channels, p.start_date, p.end_date,
     p.status, p.below_cost, bu.name below_cost_by_name, cu.name created_by_name, p.created_at, uu.name updated_by_name, p.updated_at,
-    xu.name closed_by_name, p.closed_at
+    xu.name closed_by_name, p.closed_at, p.note
   from retail_promos p join users cu on cu.id = p.created_by left join users bu on bu.id = p.below_cost_by
   left join users uu on uu.id = p.updated_by left join users xu on xu.id = p.closed_by`;
 
@@ -186,7 +186,7 @@ async function toPromos(tx: Tx, ctx: Ctx, deps: Deps, rows: PromoRow[]): Promise
       state: promoState({ status: r.status, start: r.start_date, end: r.end_date }, today),
       belowCost: r.below_cost, belowCostBy: r.below_cost_by_name,
       createdBy: r.created_by_name, createdAt: r.created_at.toISOString(), updatedBy: r.updated_by_name, updatedAt: iso(r.updated_at),
-      closedBy: r.closed_by_name, closedAt: iso(r.closed_at), setsAvailable,
+      closedBy: r.closed_by_name, closedAt: iso(r.closed_at), setsAvailable, note: r.note,
       stats: stats.get(r.id) ?? { bills: 0, qty: '0', sales: '0.00' },
     });
   }
@@ -263,10 +263,10 @@ export async function createPromo(tx: Tx, deps: Deps, ctx: Ctx, body: PromoInput
   }
   const code = await nextDocNo(tx, ctx.tenantId, 'PR', deps.today());
   const r = await tx.query<{ id: string }>(
-    `insert into retail_promos (tenant_id, code, name, kind, mode, value, set_price, sku, items, channels, start_date, end_date, status, below_cost, below_cost_by, below_cost_detail, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning id`,
+    `insert into retail_promos (tenant_id, code, name, kind, mode, value, set_price, sku, items, channels, start_date, end_date, status, below_cost, below_cost_by, below_cost_detail, created_by, note)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id`,
     [ctx.tenantId, code, body.name, s.kind, s.mode, s.value, s.setPrice, s.kind === 'bundle' ? body.sku ?? null : null, JSON.stringify(s.items), body.channels,
-      body.start, body.end, status, !!by, by?.id ?? null, by ? ev.belowCost.join(', ') : null, ctx.userId],
+      body.start, body.end, status, !!by, by?.id ?? null, by ? ev.belowCost.join(', ') : null, ctx.userId, body.note?.trim() ?? ''],
   );
   audits.push({ action: 'create', object: 'promotion', ref: code, detail: `${promoText(s, body.name)} · ${body.start}–${body.end} · ${body.channels.join('/')}${status === 'draft' ? ' · ร่าง' : ''}` });
   await writeAudit(tx, ctx, audits);
@@ -287,6 +287,7 @@ export async function updatePromo(tx: Tx, deps: Deps, ctx: Ctx, id: string, body
     start: body.start ?? row.start_date,
     end: body.end ?? row.end_date,
     sku: body.sku ?? row.sku,
+    note: body.note?.trim() ?? row.note,
   };
   const s = shapeOf({ kind: row.kind, mode: next.mode, value: next.value, setPrice: next.setPrice, items: next.items });
   validateShape({ ...s, start: next.start, end: next.end });
@@ -316,14 +317,15 @@ export async function updatePromo(tx: Tx, deps: Deps, ctx: Ctx, id: string, body
   diff('ส่วนลด', row.mode && `${row.mode} ${qty4(row.value ?? 0)}`, s.mode && `${s.mode} ${qty4(s.value ?? 0)}`);
   diff('ราคาชุด', row.set_price && money(row.set_price), s.setPrice && money(s.setPrice));
   diff('ช่องทาง', row.channels.join('/'), next.channels.join('/'));
+  diff('หมายเหตุ', row.note, next.note);
   if (JSON.stringify(row.items) !== JSON.stringify(s.items)) diffs.push('แก้รายการสินค้า');
   if (status !== row.status) diffs.push('ร่าง → ใช้งาน');
   await tx.query(
     `update retail_promos set name = $2, mode = $3, value = $4, set_price = $5, sku = $6, items = $7, channels = $8, start_date = $9, end_date = $10, status = $11,
        below_cost = $12, below_cost_by = case when $12 then coalesce($13::uuid, below_cost_by) else null end,
-       below_cost_detail = case when $12 then $14 else null end, updated_by = $15, updated_at = now() where id = $1`,
+       below_cost_detail = case when $12 then $14 else null end, updated_by = $15, updated_at = now(), note = $16 where id = $1`,
     [row.id, next.name, s.mode, s.value, s.setPrice, row.kind === 'bundle' ? next.sku : null, JSON.stringify(s.items), next.channels, next.start, next.end, status,
-      belowCost, belowBy, ev.belowCost.join(', '), ctx.userId],
+      belowCost, belowBy, ev.belowCost.join(', '), ctx.userId, next.note],
   );
   audits.push({ action: 'update', object: 'promotion', ref: row.code, detail: diffs.join(' · ') || 'ไม่มีการเปลี่ยนแปลง' });
   await writeAudit(tx, ctx, audits);

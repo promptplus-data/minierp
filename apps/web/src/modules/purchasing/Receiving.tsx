@@ -2,16 +2,20 @@
  * M05 "ซื้อเข้า / รับของ": BR-10 banner, draft receipts from delivery files (M19-08, one per DN), check-and-confirm
  * (REQ-M05-03/04), confirmed receipts with their AP bill, manual receipt (core form), BR-19 setting.
  */
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { DELIVERY_FIELDS, DeliveryCommitRes, DeliveryPreview, GrDraft, GrDraftConfirmRes, GrDraftSummary, GrSummary, PurchasingSettings, page } from '@erp/contracts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { DELIVERY_FIELDS, DeliveryCommitRes, DeliveryPreview, GrDraft, GrDraftConfirmRes, GrDraftSummary, GrSummary, PurchasingSettings, type Product } from '@erp/contracts';
 import { d } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useCatalog, useMeta, useVendors, useWarehouses } from '../../data';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField } from '../../ui/NoteField';
+import { ProductPicker } from '../../ui/ProductPicker';
+import { VendorPicker } from '../../ui/VendorPicker';
 import { ReceiptModal } from '../../stock/forms';
-import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced, useToast } from '../../ui';
+import { fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast } from '../../ui';
 import { ageText, downloadErrorRows, GrAlertBanner, readAsBase64, STATUS_PILL, STATUS_TH, thOrDash, useDashboard } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocLinks } from '../../doclink';
@@ -22,6 +26,8 @@ const FIELD_TH: Record<(typeof DELIVERY_FIELDS)[number], string> = {
   vat_flag: 'ราคารวม VAT?', invoice_no: 'เลขที่ใบกำกับ', line_discount: 'ส่วนลดบรรทัด',
 };
 const REQUIRED = new Set(['product_code', 'product_name', 'qty', 'unit', 'unit_price']);
+
+const isStock = (p: Product) => p.kind === 'stock' && p.active;
 
 export default function Receiving() {
   const { can } = useAuth();
@@ -65,13 +71,8 @@ export default function Receiving() {
 function DraftList({ onOpen }: { onOpen: (id: string) => void }) {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
-  const pager = useCursorPager(dq);
-  const r = useQuery({
-    queryKey: ['pu', 'drafts', dq, pager.cursor],
-    queryFn: () => api('GET', '/api/gr-drafts', { query: { q: dq, cursor: pager.cursor, status: 'draft' }, schema: page(GrDraftSummary) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const r = useLoadMore(['pu', 'drafts'], '/api/gr-drafts', GrDraftSummary, { q: dq, status: 'draft' }, 10);
+  const loading = r.isLoading;
   return (
     <>
       <div className="row" style={{ marginBottom: 10 }}>
@@ -82,7 +83,7 @@ function DraftList({ onOpen }: { onOpen: (id: string) => void }) {
         <table data-testid="draft-table">
           <thead><tr><th>ใบส่งของ (DN)</th><th className="pu-hide-sm">ใบสั่งซื้อ</th><th>ผู้แทนจำหน่าย</th><th className="pu-hide-sm">วันที่ส่ง</th><th className="n">รายการ</th><th>ค้าง</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={7} rows={3} /> : (r.data?.items ?? []).map((g) => (
+            {loading ? <SkeletonRows cols={7} rows={3} /> : r.rows.map((g) => (
               <tr key={g.id} className="pu-click" onClick={() => onOpen(g.id)} title="แตะเพื่อตรวจรับ">
                 <td className="mono">{g.dnNo ?? <span className="muted">ยังไม่มีเลข</span>}</td>
                 <td className="mono pu-hide-sm">{g.poNo ?? '-'}</td>
@@ -93,11 +94,11 @@ function DraftList({ onOpen }: { onOpen: (id: string) => void }) {
                 <td><button className="btn sm pri" onClick={(e) => { e.stopPropagation(); onOpen(g.id); }} data-testid={`draft-open-${g.dnNo ?? 'none'}`}>ตรวจรับ</button></td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={7} className="empty">ไม่มีของรอยืนยันรับ<br /><span className="small">นำเข้าไฟล์ใบส่งของ หรือบันทึกซื้อเข้าเอง</span></td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={7} className="empty">ไม่มีของรอยืนยันรับ<br /><span className="small">นำเข้าไฟล์ใบส่งของ หรือบันทึกซื้อเข้าเอง</span></td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} count={r.data?.items.length} loading={r.isFetching} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="drafts-more" />
     </>
   );
 }
@@ -107,13 +108,8 @@ function ReceiptList() {
   const whs = useWarehouses();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
-  const pager = useCursorPager(dq);
-  const r = useQuery({
-    queryKey: ['pu', 'receipts', dq, pager.cursor],
-    queryFn: () => api('GET', '/api/purchasing/receipts', { query: { q: dq, cursor: pager.cursor }, schema: page(GrSummary) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const r = useLoadMore(['pu', 'receipts'], '/api/purchasing/receipts', GrSummary, { q: dq }, 20);
+  const loading = r.isLoading;
   const seeCost = can('data.cost') === 1;
   const cols = seeCost ? 7 : 6;
   return (
@@ -126,22 +122,22 @@ function ReceiptList() {
         <table data-testid="receipt-table">
           <thead><tr><th>เลขที่</th><th>DN / ใบกำกับ</th><th>วันที่</th><th>ผู้ขาย</th><th>สินค้า</th>{seeCost && <th className="n">ยอด</th>}<th>เจ้าหนี้</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={cols} rows={4} /> : (r.data?.items ?? []).map((g) => (
+            {loading ? <SkeletonRows cols={cols} rows={4} /> : r.rows.map((g) => (
               <tr key={g.id}>
                 <td className="mono"><DocLink no={g.no} type="GR" /></td>
                 <td className="mono small">{g.deliveryNo ?? '-'}<div className="muted">{g.vendorInvoiceNo ?? ''}</div></td>
                 <td>{th(g.date)}</td>
                 <td>{g.vendorName ?? '-'}<div className="small muted">{whs.data?.find((w) => w.id === g.warehouseId)?.name}</div></td>
-                <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div></td>
+                <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div>{g.note && <div className="muted">หมายเหตุ: {g.note}</div>}</td>
                 {seeCost && <td className="n">{g.total != null ? fmt(g.total) : '-'}</td>}
                 <td className="mono small"><DocLink no={g.apBillNo} type="AP" /></td>
               </tr>
             ))}
-            {!loading && !r.data?.items.length && <tr><td colSpan={cols} className="empty">ยังไม่มีใบรับสินค้า</td></tr>}
+            {!loading && !r.rows.length && <tr><td colSpan={cols} className="empty">ยังไม่มีใบรับสินค้า</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!r.data?.nextCursor} count={r.data?.items.length} loading={r.isFetching} onPrev={pager.prev} onNext={() => pager.next(r.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={r.rows.length} testId="receipts-more" />
     </div>
   );
 }
@@ -154,7 +150,8 @@ function DeliveryImportModal({ onClose, onDone }: { onClose: () => void; onDone:
   const active = (whs.data ?? []).filter((w) => w.active);
   const [file, setFile] = useState<{ name: string; b64: string } | null>(null);
   const [encoding, setEncoding] = useState<'auto' | 'utf8' | 'tis620'>('auto');
-  const [vendorId, setVendorId] = useState('');
+  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [note, setNote] = useState('');
   const [vat, setVat] = useState<'' | 'inc' | 'exc' | 'none'>('');
   const [mapping, setMapping] = useState<Record<string, number> | null>(null);
   const [pv, setPv] = useState<DeliveryPreview | null>(null);
@@ -198,7 +195,7 @@ function DeliveryImportModal({ onClose, onDone }: { onClose: () => void; onDone:
     setErr('');
     try {
       const r = await api('POST', '/api/delivery-imports/commit', {
-        body: { ...base(), mapping, warehouseId: whId, saveProfile: true, profileName: profileName.trim() || undefined, forceDnNos: force, forceReason: forceReason.trim() || undefined },
+        body: { ...base(), mapping, warehouseId: whId, saveProfile: true, note: note.trim() || undefined, profileName: profileName.trim() || undefined, forceDnNos: force, forceReason: forceReason.trim() || undefined },
         schema: DeliveryCommitRes,
       });
       toast(`สร้างใบรับของร่าง ${r.drafts.length} ใบ${r.skipped.length ? ` · ข้าม ${r.skipped.length} ใบ` : ''}`);
@@ -219,7 +216,7 @@ function DeliveryImportModal({ onClose, onDone }: { onClose: () => void; onDone:
       <div className="fgrid">
         <label className="f">ไฟล์ (.csv, .xlsx)<input type="file" accept=".csv,.xlsx,.txt" onChange={(e) => void pick(e.target.files?.[0])} data-testid="dl-file" /></label>
         <label className="f">Encoding (CSV)<select value={encoding} onChange={(e) => setEncoding(e.target.value as typeof encoding)}><option value="auto">ตรวจอัตโนมัติ</option><option value="utf8">UTF-8</option><option value="tis620">TIS-620 (ภาษาไทย Windows)</option></select></label>
-        <label className="f">ผู้ขาย (ถ้าไฟล์ไม่ระบุ)<select value={vendorId} onChange={(e) => setVendorId(e.target.value)}><option value="">— ตามชื่อในไฟล์ —</option>{(vendors.data ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+        <label className="f">ผู้ขาย (ถ้าไฟล์ไม่ระบุ)<VendorPicker value={vendorId} onChange={(id) => setVendorId(id)} emptyLabel="— ตามชื่อในไฟล์ —" testId="dl-vendor" /></label>
         <label className="f">ราคาในไฟล์<select value={vat} onChange={(e) => setVat(e.target.value as typeof vat)}><option value="">ตามไฟล์ / ค่าที่จำไว้</option><option value="exc">ไม่รวม VAT</option><option value="inc">รวม VAT แล้ว</option><option value="none">ไม่มี VAT</option></select></label>
       </div>
       {file && <div className="row"><button className="btn sm" disabled={busy} onClick={() => void preview(mapping)}>ตรวจไฟล์อีกครั้ง</button>{busy && <span className="small muted">กำลังอ่านไฟล์…</span>}</div>}
@@ -282,6 +279,7 @@ function DeliveryImportModal({ onClose, onDone }: { onClose: () => void; onDone:
           <div className="fgrid">
             <label className="f">เข้าคลัง (แก้ได้ตอนตรวจรับ)<select value={whId} onChange={(e) => setWh(e.target.value)}>{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
             <label className="f">ชื่อการจับคู่ที่จะจำไว้<input type="text" value={profileName} placeholder="เช่น ไฟล์ทวีพัฒนา" onChange={(e) => setProfileName(e.target.value)} /></label>
+            <NoteField value={note} onChange={setNote} testId="dl-note" label="หมายเหตุของการนำเข้า" placeholder="เช่น ไฟล์รอบส่งวันจันทร์" />
           </div>
         </>
       )}
@@ -301,14 +299,13 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
   const qc = useQueryClient();
   const meta = useMeta();
   const cat = useCatalog();
-  const vendors = useVendors();
   const whs = useWarehouses();
-  const stockProducts = useMemo(() => (cat.data ?? []).filter((p) => p.kind === 'stock' && p.active), [cat.data]);
   const r = useQuery({ queryKey: ['pu', 'draft', id], queryFn: () => api('GET', `/api/gr-drafts/${id}`, { schema: GrDraft }) });
   const [inv, setInv] = useState<string | null>(null);
   const [dn, setDn] = useState<string | null>(null);
   const [bd, setBd] = useState('');
   const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
   const [newFor, setNewFor] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -337,7 +334,7 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
     setBusy(true);
     setErr('');
     try {
-      const res = await api('POST', `/api/gr-drafts/${id}/confirm`, { body: { vendorInvoiceNo: invNo.trim(), deliveryNo: dnNo.trim(), billDiscount: bd.trim() || '0', shortReason: reason.trim() || undefined }, schema: GrDraftConfirmRes });
+      const res = await api('POST', `/api/gr-drafts/${id}/confirm`, { body: { vendorInvoiceNo: invNo.trim(), deliveryNo: dnNo.trim(), billDiscount: bd.trim() || '0', shortReason: reason.trim() || undefined, note: note.trim() || undefined }, schema: GrDraftConfirmRes });
       toast(`รับเข้าสต็อก ${res.grNo} แล้ว${res.apBillNo ? ` · ตั้งเจ้าหนี้ ${res.apBillNo}` : ''}`);
       await qc.invalidateQueries({ queryKey: ['stock'] });
       onClose();
@@ -362,7 +359,7 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
       <h3>ตรวจรับของ · {g.dnNo ? `DN ${g.dnNo}` : 'ยังไม่มีเลขที่ใบส่งของ'}</h3>
       <div className="small muted">{g.poNo ?? ''}{g.poNo ? ' · ' : ''}{g.dealerName ?? 'ไม่ระบุผู้ขาย'} · นำเข้า {th(g.receivedOn)} โดย {g.createdBy}{g.ageDays >= 2 ? ` · ค้าง ${g.ageDays} วัน` : ''}</div>
       <div className="fgrid">
-        <label className="f">ผู้ขาย *<select value={g.vendorId ?? ''} onChange={(e) => void patch({ vendorId: e.target.value || null })} data-testid="draft-vendor"><option value="">— เลือกผู้ขาย —</option>{(vendors.data ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+        <label className="f">ผู้ขาย *<VendorPicker value={g.vendorId} onChange={(id) => void patch({ vendorId: id })} testId="draft-vendor" invalid={!g.vendorId} /></label>
         <label className="f">เข้าคลัง *<select value={g.warehouseId ?? ''} onChange={(e) => void patch({ warehouseId: e.target.value || null })} data-testid="draft-wh"><option value="">— เลือกคลัง —</option>{(whs.data ?? []).filter((w) => w.active).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
         <label className="f">เลขที่ใบส่งของ *<input type="text" value={dnNo} onChange={(e) => setDn(e.target.value)} data-testid="draft-dn" /></label>
         <label className="f">เลขที่ใบกำกับภาษีผู้ขาย *<input type="text" value={invNo} onChange={(e) => setInv(e.target.value)} data-testid="draft-inv" /></label>
@@ -377,10 +374,9 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
                 <tr key={l.id}>
                   <td className="pu-cell-wrap"><span className="mono small">{l.externalCode}</span><div>{l.externalName}</div>{l.warnings.length > 0 && <div className="pu-msgs">{l.warnings.join(' · ')}</div>}</td>
                   <td>
-                    <select className="pu-sel" value={l.productId ?? ''} aria-label={`ผูกสินค้า ${l.externalCode}`} onChange={(e) => void patch({ lines: [{ lineId: l.id, productId: e.target.value || null }] })} data-testid={`draft-p-${l.externalCode}`}>
-                      <option value="">— ยังไม่ผูก —</option>
-                      {stockProducts.map((x) => <option key={x.id} value={x.id}>{x.sku} · {x.name}</option>)}
-                    </select>
+                    <ProductPicker value={l.productId} warehouseId={g.warehouseId} filter={isStock} ariaLabel={`ผูกสินค้า ${l.externalCode}`} testId={`draft-p-${l.externalCode}`}
+                      placeholder="— ยังไม่ผูก · พิมพ์ค้นหาสินค้า —" style={{ minWidth: 220 }}
+                      onChange={(id) => void patch({ lines: [{ lineId: l.id, productId: id }] })} />
                     {!l.productId && <div><span className="small" style={{ color: 'var(--warn)' }}>ยังไม่ผูกกับสินค้าของร้าน</span> {(can('data.master') === 1 || can('inv.receive') === 1) && <button className="btn sm" onClick={() => setNewFor(l.id)} data-testid={`draft-new-${l.externalCode}`}>สร้างสินค้าใหม่</button>}</div>}
                   </td>
                   <td>{p ? <select value={l.unitIdx ?? ''} aria-label="หน่วย" onChange={(e) => void patch({ lines: [{ lineId: l.id, unitIdx: e.target.value === '' ? null : Number(e.target.value) }] })}><option value="">— เลือก —</option>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select> : <span className="muted">{l.unitText}</span>}{p && l.unitIdx == null && <div className="pu-msgs bad">ไฟล์: {l.unitText}</div>}</td>
@@ -394,6 +390,7 @@ function DraftModal({ id, onClose }: { id: string; onClose: () => void }) {
           </tbody>
         </table>
       </div>
+      <NoteField value={note} onChange={setNote} testId="draft-note" placeholder="เช่น ถุงปูนฉีก 1 ถุง ผู้ขายจะเปลี่ยนให้รอบหน้า" />
       {mismatch && <label className="f">เหตุผลที่รับไม่ตรง *<input type="text" value={reason} placeholder="เช่น ถุงแตก 2 ถุง" onChange={(e) => setReason(e.target.value)} data-testid="draft-reason" /></label>}
       <div className="grid g2" style={{ gap: 12 }}>
         <label className="f">ส่วนลดท้ายบิลตามใบกำกับ (บาท{vat ? ' ก่อน VAT' : ''})<input type="text" inputMode="decimal" value={bd} placeholder="0" onChange={(e) => setBd(e.target.value)} /></label>

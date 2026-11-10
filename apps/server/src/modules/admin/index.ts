@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
   AdmAuditEntry, AdmCentralPriceReq, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
   AdmTenantImport, AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
-  HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate,
+  HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate, HrPayrollUpdate, HrPayslipPeriodQuery,
   HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall, ShareRange, ShopExportReq, SupportGrantCreate, TermsAccept, pageQuery,
 } from '@erp/contracts';
 import { writeAudit } from '../../lib/audit';
@@ -68,9 +68,12 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/hr/payroll', authed(async (tx, ctx, req) => hr.listRuns(tx, ctx, pageQuery.parse(req.query))));
   app.post('/api/hr/payroll', authed(async (tx, ctx, req, reply) => {
     reply.status(201);
-    return hr.createRun(tx, ctx, HrPayrollCreate.parse(req.body).period);
+    const b = HrPayrollCreate.parse(req.body);
+    return hr.createRun(tx, ctx, b.period, b.note);
   }));
+  app.get('/api/hr/payslip-periods', authed(async (tx, ctx, req) => hr.payslipPeriods(tx, ctx, HrPayslipPeriodQuery.parse(req.query))));
   app.get('/api/hr/payroll/:period', authed(async (tx, ctx, req) => hr.getRun(tx, ctx, period(req))));
+  app.patch('/api/hr/payroll/:period', authed(async (tx, ctx, req) => hr.updateRunNote(tx, ctx, period(req), HrPayrollUpdate.parse(req.body).note)));
   app.patch('/api/hr/payroll/:period/lines/:lineId', authed(async (tx, ctx, req) =>
     hr.updateLine(tx, ctx, period(req), (req.params as { lineId: string }).lineId, HrPayrollLineUpdate.parse(req.body))));
   app.post('/api/hr/payroll/:period/recalc', authed(async (tx, ctx, req) => hr.recalcRun(tx, ctx, period(req))));

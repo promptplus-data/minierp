@@ -5,7 +5,10 @@ import { AdjustRequest, StockDoc, type Product } from '@erp/contracts';
 import { d, sum } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { checkFields, qtyMsg, requiredMsg } from '../errors';
-import { useCatalog, useMeta, useVendors, useWarehouseStock, useWarehouses } from '../data';
+import { useCatalog, useMeta, useWarehouseStock, useWarehouses } from '../data';
+import { NoteField } from '../ui/NoteField';
+import { ProductPicker } from '../ui/ProductPicker';
+import { VendorPicker } from '../ui/VendorPicker';
 import { fmt, fq, Modal, ReasonField, reasonInit, reasonText, ShortageModal, useToast, type ReasonState, type Shortage } from '../ui';
 
 export type StockKind = 'tr' | 'iss' | 'adj';
@@ -169,16 +172,18 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
 interface RLine { pid: string; u: number; q: string; cost: string }
 
 /** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount per BR-19 (purchasing settings). */
+const isStock = (p: Product) => p.kind === 'stock';
+
 export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateStock();
   const meta = useMeta();
-  const vendors = useVendors();
   const whs = useWarehouses();
   const prods = useStockProducts();
   const vat = meta.data?.shop.vatRegistered ?? true;
   const active = (whs.data ?? []).filter((w) => w.active);
-  const [vendor, setVendor] = useState('');
+  const [vendor, setVendor] = useState<string | null>(null);
+  const [note, setNote] = useState('');
   const [inv, setInv] = useState('');
   const [dn, setDn] = useState('');
   const [wh, setWh] = useState('');
@@ -186,7 +191,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<RLine[]>([{ pid: '', u: 0, q: '1', cost: '0' }]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const vId = vendor || vendors.data?.[0]?.id || '';
+  const vId = vendor ?? '';
   const whId = wh || active.find((w) => !w.isPos)?.id || active[0]?.id || '';
   const update = (i: number, patch: Partial<RLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const amt = (l: RLine) => (isNum(l.q) && isNum(l.cost) ? d(l.q).times(d(l.cost)) : d(0));
@@ -199,6 +204,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
     const ls = lines.filter((l) => l.pid);
     if (!ls.length) return setErr('เลือกสินค้าอย่างน้อย 1 รายการ');
     if (!checkFields({
+      vendorId: !vId && 'เลือกผู้จำหน่าย',
       deliveryNo: requiredMsg(dn, 'เลขที่ใบส่งของ'), vendorInvoiceNo: requiredMsg(inv, 'เลขที่ใบกำกับภาษี / บิลของผู้ขาย'),
       ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [[`lines.${i}.qty`, qtyMsg(l.q)], [`lines.${i}.unitCost`, !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
       billDiscount: !!bd && !isNum(bd) && 'ส่วนลดท้ายบิลต้องเป็นตัวเลข',
@@ -207,7 +213,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
     setErr('');
     try {
       const res = await api('POST', '/api/stock/receipts', {
-        body: { vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim() })) },
+        body: { vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', note: note.trim() || undefined, lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim() })) },
         schema: StockDoc,
       });
       await invalidate();
@@ -225,7 +231,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
       <h3>ซื้อเข้าแบบบันทึกเอง</h3>
       <p className="small muted" style={{ margin: 0 }}>สำหรับของที่ซื้อจากผู้จำหน่าย · 1 ใบรับได้หลายสินค้า · บันทึกแล้วสร้างล็อตใหม่ตามวันที่รับของ</p>
       <div className="fgrid">
-        <label className="f">ผู้จำหน่าย<select name="vendorId" value={vId} onChange={(e) => setVendor(e.target.value)}>{(vendors.data ?? []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}</select></label>
+        <label className="f">ผู้จำหน่าย (จำเป็น)<VendorPicker value={vendor} onChange={(id) => setVendor(id)} testId="gr-vendor" /></label>
         <label className="f">เลขที่ใบส่งของ (จำเป็น)<input type="text" name="deliveryNo" value={dn} onChange={(e) => setDn(e.target.value)} placeholder="เช่น DO-6910-0158" data-testid="gr-dn" /></label>
         <label className="f">เลขที่ใบกำกับภาษีผู้ขาย (จำเป็น)<input type="text" name="vendorInvoiceNo" value={inv} onChange={(e) => setInv(e.target.value)} placeholder="เช่น IV6910-0042" data-testid="gr-inv" /></label>
         <label className="f">เข้าคลัง<select name="warehouseId" value={whId} onChange={(e) => setWh(e.target.value)}>{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
@@ -239,11 +245,8 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
               return (
                 <tr key={i}>
                   <td>
-                    <select value={l.pid} aria-label={`สินค้าแถว ${i + 1}`} data-testid={`gr-p${i}`}
-                      onChange={(e) => { const np = prods.byId.get(e.target.value); update(i, { pid: e.target.value, u: 0, cost: np?.cost ?? l.cost }); }}>
-                      <option value="">— เลือกสินค้า —</option>
-                      {prods.list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                    </select>
+                    <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStock} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
+                      onChange={(id, np) => update(i, { pid: id ?? '', u: 0, cost: np?.cost ?? l.cost })} />
                     {!p && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
                   </td>
                   <td>{p ? <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select> : '-'}</td>
@@ -258,6 +261,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
         </table>
       </div>
       <div className="row"><button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0' }])}>+ เพิ่มสินค้า</button><span className="small muted">{lines.filter((l) => l.pid).length} รายการ</span></div>
+      <NoteField value={note} onChange={setNote} testId="gr-note" placeholder="เช่น ของมาไม่ครบ รอส่งเพิ่ม / ชำระเงินสดหน้างาน" />
       <div className="grid g2" style={{ gap: 12 }}>
         <div>
           <label className="f">ส่วนลดท้ายบิลจากผู้ขาย (บาท{vat ? ' ก่อน VAT' : ''} · ไม่ได้ระบุรายสินค้า)<input type="text" inputMode="decimal" name="billDiscount" value={bd} placeholder="0" onChange={(e) => setBd(e.target.value)} data-testid="gr-bd" /></label>

@@ -2,18 +2,27 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { RouteLink } from '../../doclink';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bom, Mo, MoReport, MoSuggest, MoSummary, page } from '@erp/contracts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bom, Mo, MoReport, MoSuggest, MoSummary, page, type Product } from '@erp/contracts';
 import { d, moUnitCost, sum, yieldPct } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
 import { useCatalog, useWarehouses } from '../../data';
-import { fmt, fq, Modal, Pager, Pill, SkeletonRows, th, thTime, useCursorPager, useDebounced, useToast } from '../../ui';
+import { fmt, fq, Modal, Pill, SkeletonRows, th, thTime, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { NoteField, NoteText } from '../../ui/NoteField';
+import { ProductPicker } from '../../ui/ProductPicker';
+import { SearchSelect, type RemotePage } from '../../ui/SearchSelect';
 import './retail.css';
 import { ErrorBanner } from '../../errors';
 
 const STATUS: Record<Mo['status'], [string, 'ok' | 'warn' | 'mut']> = { wip: ['กำลังผลิต · เบิกแล้ว', 'warn'], closed: ['ผลิตเสร็จ · รับเข้าแล้ว', 'ok'], cancelled: ['ยกเลิก', 'mut'] };
 const isNum = (s: string) => /^\d+(\.\d+)?$/.test(s.trim());
+const isStockActive = (p: Product) => p.kind === 'stock' && p.active;
+const bomPage = page(Bom);
+/** Active BOMs (one per product) for the MO product picker, searched on the server. */
+const fetchBoms = (q: string, cursor: string | undefined, limit: number): Promise<RemotePage<Bom>> =>
+  api('GET', '/api/boms', { query: { q: q || undefined, cursor, limit }, schema: bomPage, silent: true });
 
 export default function Production() {
   const [tab, setTab] = useState<'mo' | 'bom' | 'rep'>('mo');
@@ -40,18 +49,13 @@ function MoList() {
   const [status, setStatus] = useState<Mo['status'] | ''>('');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(`${status}|${dq}`);
   // /production/:no opens that order (document links from the stock ledger, audit log, lots)
   const { no: routeNo } = useParams();
   const nav = useNavigate();
   const [modal, setModalRaw] = useState<null | { k: 'new' } | { k: 'out' | 'close' | 'view' | 'cancel'; no: string }>(routeNo ? { k: 'view', no: routeNo } : null);
   const setModal = (m: typeof modal) => { setModalRaw(m); if (!m && routeNo) nav('/production', { replace: true }); };
-  const list = useQuery({
-    queryKey: ['mos', status, dq, pager.cursor],
-    queryFn: () => api('GET', '/api/mos', { query: { status, q: dq, limit: 20, cursor: pager.cursor }, schema: page(MoSummary) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore(['mos'], '/api/mos', MoSummary, { status, q: dq }, 10);
+  const loading = list.isLoading;
   const done = (msg: string) => {
     setModal(null);
     void Promise.all(['mos', 'mo', 'stock', 'boms', 'mo-report'].map((k) => qc.invalidateQueries({ queryKey: [k] })));
@@ -76,7 +80,7 @@ function MoList() {
         <table data-testid="mo-table">
           <thead><tr><th>เลขที่</th><th>วันที่</th><th>สินค้าที่ผลิต</th><th className="n">แผน</th><th>สถานะ</th>{see && <th className="n">ทุนวัตถุดิบ</th>}<th className="n">ได้จริง (ดี / เสีย)</th><th className="n">ผลได้</th>{see && <th className="n">ทุน/ชิ้น</th>}<th>โดย</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={see ? 11 : 9} /> : (list.data?.items ?? []).map((m) => (
+            {loading ? <SkeletonRows cols={see ? 11 : 9} /> : list.rows.map((m) => (
               <tr key={m.id}>
                 <td className="mono"><a href="#" onClick={(e) => { e.preventDefault(); setModal({ k: 'view', no: m.no }); }}>{m.no}</a></td>
                 <td>{th(m.date)}</td>
@@ -98,11 +102,11 @@ function MoList() {
                 </div></td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={11} className="empty">ยังไม่มีใบสั่งผลิต</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={11} className="empty">ยังไม่มีใบสั่งผลิต</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="mo-more" />
       {modal?.k === 'new' && <MoModal onClose={() => setModal(null)} onDone={(m) => done(`เปิดใบสั่งผลิต ${m.no} และเบิกวัตถุดิบแล้ว`)} />}
       {modal && modal.k !== 'new' && <MoDetail no={modal.no} mode={modal.k} onClose={() => setModal(null)} onDone={done} />}
     </>
@@ -114,7 +118,9 @@ function MoModal({ onClose, onDone }: { onClose: () => void; onDone: (m: Mo) => 
   const { can } = useAuth();
   const see = can('data.cost') === 1;
   const whs = useWarehouses();
-  const boms = useQuery({ queryKey: ['boms', 'active'], queryFn: () => api('GET', '/api/boms', { query: { limit: 100 }, schema: page(Bom) }) });
+  // First active BOM = default product; the picker searches every BOM on the server.
+  const boms = useQuery({ queryKey: ['boms', 'active', 'first'], queryFn: () => api('GET', '/api/boms', { query: { limit: 1 }, schema: bomPage }) });
+  const [bomSel, setBomSel] = useState<Bom | null>(null);
   const back = (whs.data ?? []).find((w) => !w.isPos && w.active) ?? whs.data?.[0];
   const [pid, setPid] = useState('');
   const [plan, setPlan] = useState('20');
@@ -158,7 +164,10 @@ function MoModal({ onClose, onDone }: { onClose: () => void; onDone: (m: Mo) => 
       <h3>สร้างใบสั่งผลิต · เบิกวัตถุดิบ</h3>
       {boms.data && !boms.data.items.length && <div className="note warn small">ยังไม่มีสูตรการผลิต ตั้งสูตรที่แท็บ "สูตรการผลิต (BOM)" ก่อน</div>}
       <div className="fgrid">
-        <label className="f">สินค้าที่จะผลิต<select value={productId} onChange={(e) => { setPid(e.target.value); setIss({}); }} data-testid="mo-product">{(boms.data?.items ?? []).map((b) => <option key={b.id} value={b.productId}>{b.productName} (สูตร v{b.version})</option>)}</select></label>
+        <label className="f">สินค้าที่จะผลิต<SearchSelect<Bom> value={productId || null} selected={bomSel ?? boms.data?.items.find((b) => b.productId === productId) ?? null}
+          fetchPage={fetchBoms} queryKey={['pick-boms']} getId={(b) => b.productId} getLabel={(b) => `${b.productName} (สูตร v${b.version})`}
+          getSub={(b) => `${b.components.length} วัตถุดิบ · ${b.unitName}`} ariaLabel="สินค้าที่จะผลิต" testId="mo-product" placeholder="ค้นหาสินค้าที่มีสูตรผลิต"
+          onChange={(id, b) => { setPid(id ?? ''); setBomSel(b); setIss({}); }} /></label>
         <label className="f">จำนวนที่จะผลิต<input type="text" inputMode="decimal" value={plan} onChange={(e) => { setPlan(e.target.value); setIss({}); }} data-testid="mo-plan" /></label>
         <label className="f">เบิกวัตถุดิบจากคลัง<select value={issueWh} onChange={(e) => setWh(e.target.value)}>{(whs.data ?? []).filter((w) => w.active).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
         <label className="f">รับสินค้าผลิตเสร็จเข้าคลัง<select value={outWh} onChange={(e) => setOut(e.target.value)}>{(whs.data ?? []).filter((w) => w.active).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
@@ -187,7 +196,7 @@ function MoModal({ onClose, onDone }: { onClose: () => void; onDone: (m: Mo) => 
         </div>
       )}
       {short.length > 0 && <div className="note bad small">วัตถุดิบไม่พอ: {short.map((x) => x.name).join(', ')} · ลดจำนวนผลิต หรือรับวัตถุดิบเข้าก่อน (สต็อกห้ามติดลบ)</div>}
-      <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ล็อตสำหรับงานหมู่บ้านลานนา" /></label>
+      <NoteField value={note} onChange={setNote} testId="mo-note" placeholder="เช่น ล็อตสำหรับงานหมู่บ้านลานนา" />
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy || !lines.length || !!short.length || bad} onClick={() => void go()} data-testid="mo-issue">เบิกวัตถุดิบและเริ่มผลิต</button></div>
     </Modal>
@@ -244,6 +253,7 @@ function MoDetail({ no, mode, onClose, onDone }: { no: string; mode: 'out' | 'cl
             ))}</tbody>
           </table>
         </div>
+        {m.note && <p className="small" style={{ margin: '8px 0 0' }}><b>หมายเหตุ</b> <NoteText note={m.note} /></p>}
         {m.outputs.length > 0 && (
           <div className="small" style={{ marginTop: 8 }}>
             <b>บันทึกผลผลิต</b>
@@ -303,13 +313,8 @@ function BomList() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
   const [all, setAll] = useState(false);
-  const pager = useCursorPager(`${dq}|${all}`);
   const [edit, setEdit] = useState<Bom | 'new' | null>(null);
-  const list = useQuery({
-    queryKey: ['boms', dq, all, pager.cursor],
-    queryFn: () => api('GET', '/api/boms', { query: { q: dq, all: all || undefined, limit: 20, cursor: pager.cursor }, schema: page(Bom) }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useLoadMore(['boms'], '/api/boms', Bom, { q: dq, all: all || undefined }, 10);
   const activate = async (b: Bom) => {
     try {
       await api('POST', `/api/boms/${b.id}/activate`, { schema: Bom });
@@ -331,7 +336,7 @@ function BomList() {
       </div>
       <div className="rt-cards">
         {list.isLoading && Array.from({ length: 2 }, (_, i) => <div key={i} className="card"><div className="sk" /><div className="sk" /><div className="sk" /></div>)}
-        {(list.data?.items ?? []).map((b) => (
+        {list.rows.map((b) => (
           <div className="card" key={b.id} data-testid={`bom-${b.version}`}>
             <h2 style={{ fontSize: 14 }}>{b.productName} <span className="row" style={{ gap: 6 }}>{b.active ? <Pill k="ok">v{b.version} · ใช้อยู่</Pill> : <Pill k="mut">v{b.version}</Pill>}
               {manage && (b.active ? <button className="btn sm" onClick={() => setEdit(b)}>แก้สูตร</button> : <button className="btn sm" onClick={() => void activate(b)}>ใช้สูตรนี้</button>)}</span></h2>
@@ -350,9 +355,9 @@ function BomList() {
             </div>
           </div>
         ))}
-        {list.data && !list.data.items.length && <div className="empty">ยังไม่มีสูตรการผลิต</div>}
+        {list.data && !list.rows.length && <div className="empty">ยังไม่มีสูตรการผลิต</div>}
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="bom-more" />
       {edit && <BomModal bom={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onSaved={(b) => { setEdit(null); void qc.invalidateQueries({ queryKey: ['boms'] }); toast(`บันทึกสูตร ${b.productName} v${b.version} แล้ว`); }} />}
     </>
   );
@@ -360,16 +365,14 @@ function BomList() {
 
 function BomModal({ bom, onClose, onSaved }: { bom: Bom | null; onClose: () => void; onSaved: (b: Bom) => void }) {
   const cat = useCatalog();
-  const stock = (cat.data ?? []).filter((p) => p.kind === 'stock' && p.active);
   const [pid, setPid] = useState(bom?.productId ?? '');
-  const productId = pid || stock[0]?.id || '';
+  const productId = pid;
   const [comps, setComps] = useState<{ productId: string; qty: string }[]>(bom ? bom.components.map((c) => ({ productId: c.productId, qty: c.qtyPerUnit })) : []);
   const [labour, setLabour] = useState(bom ? d(bom.labourPerUnit).plus(d(bom.overheadPerUnit)).toString() : '0');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const mats = stock.filter((p) => p.id !== productId);
-  const ok = !!productId && comps.length > 0 && comps.every((c) => isNum(c.qty) && d(c.qty).gt(0)) && isNum(labour);
+  const ok = !!productId && comps.length > 0 && comps.every((c) => c.productId && isNum(c.qty) && d(c.qty).gt(0)) && isNum(labour);
   const save = async () => {
     setBusy(true);
     setErr('');
@@ -385,21 +388,23 @@ function BomModal({ bom, onClose, onSaved }: { bom: Bom | null; onClose: () => v
   return (
     <Modal onClose={onClose} label="สูตรการผลิต">
       <h3>สูตรการผลิต{bom ? ` · ${bom.productName} (เวอร์ชันใหม่ต่อจาก v${bom.version})` : ''}</h3>
-      {!bom && <label className="f">สินค้าที่ผลิต<select value={productId} onChange={(e) => setPid(e.target.value)} data-testid="bom-product">{stock.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+      {!bom && <label className="f">สินค้าที่ผลิต<ProductPicker value={productId || null} filter={isStockActive} showStock={false} ariaLabel="สินค้าที่ผลิต" testId="bom-product" onChange={(id) => setPid(id ?? '')} /></label>}
       <p className="small muted" style={{ margin: 0 }}>ใช้วัตถุดิบเท่าไรต่อ 1 {unitOf(productId)} (หน่วยหลักของวัตถุดิบ)</p>
       <div className="tw">
         <table className="rt-mt">
           <thead><tr><th>วัตถุดิบ</th><th className="n">ใช้ต่อหน่วย</th><th /></tr></thead>
           <tbody>{comps.map((c, i) => (
             <tr key={i}>
-              <td><select value={c.productId} aria-label={`วัตถุดิบ ${i + 1}`} onChange={(e) => setComps((x) => x.map((y, j) => (j === i ? { ...y, productId: e.target.value } : y)))}>{mats.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></td>
+              <td><ProductPicker value={c.productId || null} ariaLabel={`วัตถุดิบ ${i + 1}`} testId={`bom-m${i}`} style={{ minWidth: 220 }}
+                filter={(p) => isStockActive(p) && p.id !== productId && (p.id === c.productId || !comps.some((y) => y.productId === p.id))}
+                onChange={(id) => setComps((x) => x.map((y, j) => (j === i ? { ...y, productId: id ?? '' } : y)))} /></td>
               <td className="n"><input className="qty" type="text" inputMode="decimal" value={c.qty} aria-label={`ใช้ต่อหน่วย ${i + 1}`} onChange={(e) => setComps((x) => x.map((y, j) => (j === i ? { ...y, qty: e.target.value } : y)))} /> {unitOf(c.productId)}</td>
               <td>{comps.length > 1 && <button className="btn sm bad" aria-label="ลบวัตถุดิบ" onClick={() => setComps((x) => x.filter((_, j) => j !== i))}>✕</button>}</td>
             </tr>
           ))}</tbody>
         </table>
       </div>
-      <div className="row"><button className="btn sm" onClick={() => setComps((x) => [...x, { productId: mats.find((p) => !x.some((y) => y.productId === p.id))?.id ?? mats[0]!.id, qty: '1' }])} data-testid="bom-add">+ เพิ่มวัตถุดิบ</button></div>
+      <div className="row"><button className="btn sm" onClick={() => setComps((x) => [...x, { productId: '', qty: '1' }])} data-testid="bom-add">+ เพิ่มวัตถุดิบ</button></div>
       <label className="f">ค่าแรง / ค่าใช้จ่ายการผลิตต่อหน่วย (บาท)<input type="text" inputMode="decimal" value={labour} onChange={(e) => setLabour(e.target.value)} /></label>
       <label className="f">หมายเหตุเวอร์ชัน<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ลดเหล็กเส้นตามแบบใหม่" /></label>
       {err && <div className="err" role="alert">{err}</div>}

@@ -178,6 +178,21 @@ export async function listVendors(tx: Tx, q: PageQuery) {
   return pageOf(r.rows, q.limit, (v) => [v.code, v.id], (v): Vendor => ({ id: v.id, code: v.code, name: v.name, taxId: v.tax_id, branch: v.branch, phone: v.phone }));
 }
 
+/** Quick-create from the vendor picker. Code = V + 5 digits after the highest numeric code unless given (unique index → 409). */
+export async function createVendor(tx: Tx, ctx: Ctx, v: { name: string; code?: string; taxId?: string | null; branch?: string | null; phone?: string | null; term?: { t: 'cash' } | { t: 'days'; x: number } }): Promise<Vendor> {
+  let code = v.code?.trim();
+  if (!code) {
+    const r = await tx.query<{ n: number | null }>(`select max(substring(code from 2)::int) n from vendors where code ~ '^V[0-9]{5}$'`);
+    code = 'V' + String((r.rows[0]?.n ?? 0) + 1).padStart(5, '0');
+  }
+  const r = await tx.query<{ id: string; code: string; name: string; tax_id: string | null; branch: string | null; phone: string | null }>(
+    `insert into vendors (tenant_id, code, name, tax_id, branch, phone, term) values ($1,$2,$3,$4,$5,$6,$7) returning id, code, name, tax_id, branch, phone`,
+    [ctx.tenantId, code, v.name.trim(), v.taxId || null, v.taxId ? v.branch?.trim() || 'สำนักงานใหญ่' : null, v.phone?.trim() || null, JSON.stringify(v.term ?? { t: 'cash' })],
+  );
+  const x = r.rows[0]!;
+  return { id: x.id, code: x.code, name: x.name, taxId: x.tax_id, branch: x.branch, phone: x.phone };
+}
+
 export async function listWarehouses(tx: Tx, q: PageQuery) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];

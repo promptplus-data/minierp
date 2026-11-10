@@ -235,15 +235,15 @@ export async function rehireEmployee(tx: Tx, ctx: Ctx, id: string): Promise<HrEm
 // ---------------------------------------------------------------- leave
 interface LeaveRow {
   id: string; no: string; employee_id: string; emp_name: string; leave_type: LeaveKind; from_date: string; to_date: string; half_day: boolean; days: string;
-  reason: string; over_days: string; deduct: boolean; status: HrLeave['status']; req_name: string; dec_name: string | null; decided_at: Date | null; created_at: Date;
+  reason: string; over_days: string; deduct: boolean; status: HrLeave['status']; req_name: string; dec_name: string | null; decided_at: Date | null; created_at: Date; note: string;
 }
 const LEAVE_SELECT = `select l.id, l.no, l.employee_id, e.name emp_name, l.leave_type, l.from_date, l.to_date, l.half_day, l.days::text, l.reason, l.over_days::text,
-  l.deduct, l.status, ru.name req_name, du.name dec_name, l.decided_at, l.created_at
+  l.deduct, l.status, ru.name req_name, du.name dec_name, l.decided_at, l.created_at, l.note
   from leave_requests l join employees e on e.id = l.employee_id join users ru on ru.id = l.requested_by left join users du on du.id = l.decided_by`;
 const toLeave = (r: LeaveRow): HrLeave => ({
   id: r.id, no: r.no, employeeId: r.employee_id, employeeName: r.emp_name, type: r.leave_type, fromDate: r.from_date, toDate: r.to_date, halfDay: r.half_day,
   days: d(r.days).toString(), reason: r.reason, overDays: d(r.over_days).toString(), deduct: r.deduct, status: r.status, requestedBy: r.req_name,
-  decidedBy: r.dec_name, decidedAt: r.decided_at?.toISOString() ?? null, createdAt: r.created_at.toISOString(),
+  decidedBy: r.dec_name, decidedAt: r.decided_at?.toISOString() ?? null, createdAt: r.created_at.toISOString(), note: r.note,
 });
 
 async function leaveRecords(tx: Tx, employeeId: string, excludeId?: string): Promise<LeaveRecord[]> {
@@ -309,10 +309,10 @@ export async function createLeave(tx: Tx, ctx: Ctx, body: In<typeof HrLeaveCreat
   const autoApprove = boss && !own;
   const no = await nextDocNo(tx, ctx.tenantId, 'LV', today);
   const r = await tx.query<{ id: string }>(
-    `insert into leave_requests (tenant_id, no, employee_id, leave_type, from_date, to_date, half_day, days, reason, over_days, deduct, status, requested_by, decided_by, decided_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
+    `insert into leave_requests (tenant_id, no, employee_id, leave_type, from_date, to_date, half_day, days, reason, over_days, deduct, status, requested_by, decided_by, decided_at, note)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
     [ctx.tenantId, no, e.id, body.type, body.fromDate, body.toDate, body.halfDay, String(days), body.reason, over, deduct,
-      autoApprove ? 'approved' : 'pending', ctx.userId, autoApprove ? ctx.userId : null, autoApprove ? new Date() : null],
+      autoApprove ? 'approved' : 'pending', ctx.userId, autoApprove ? ctx.userId : null, autoApprove ? new Date() : null, body.note?.trim() ?? ''],
   );
   const leave = toLeave((await tx.query<LeaveRow>(`${LEAVE_SELECT} where l.id = $1`, [r.rows[0]!.id])).rows[0]!);
   const warning = overWarning(over, deduct, body.type);
@@ -366,10 +366,10 @@ export async function leaveBalanceRows(tx: Tx, ctx: Ctx, year: number) {
 // ---------------------------------------------------------------- payroll
 interface RunRow {
   id: string; period: string; status: HrPayrollRun['status']; sso_rate: string; sso_cap: string; sso_floor: string; created_name: string; created_at: Date;
-  approved_name: string | null; approved_at: Date | null; paid_name: string | null; paid_at: Date | null; pay_date: string | null;
+  approved_name: string | null; approved_at: Date | null; paid_name: string | null; paid_at: Date | null; pay_date: string | null; note: string;
 }
 const RUN_SELECT = `select r.id, r.period, r.status, r.sso_rate::text, r.sso_cap::text, r.sso_floor::text, cu.name created_name, r.created_at,
-  au.name approved_name, r.approved_at, pu.name paid_name, r.paid_at, r.pay_date
+  au.name approved_name, r.approved_at, pu.name paid_name, r.paid_at, r.pay_date, r.note
   from payroll_runs r join users cu on cu.id = r.created_by left join users au on au.id = r.approved_by left join users pu on pu.id = r.paid_by`;
 interface LineRow {
   id: string; employee_id: string; emp_code: string; emp_name: string; emp_position: string; emp_type: HrEmployee['type']; bank_account: string; pay: 'monthly' | 'daily';
@@ -429,7 +429,7 @@ async function runOut(tx: Tx, run: RunRow): Promise<HrPayrollRun> {
   return {
     id: run.id, period: run.period, status: run.status, ssoRate: d(run.sso_rate).toString(), ssoCap: money(run.sso_cap), ssoFloor: money(run.sso_floor),
     createdBy: run.created_name, createdAt: run.created_at.toISOString(), approvedBy: run.approved_name, approvedAt: run.approved_at?.toISOString() ?? null,
-    paidBy: run.paid_name, paidAt: run.paid_at?.toISOString() ?? null, payDate: run.pay_date,
+    paidBy: run.paid_name, paidAt: run.paid_at?.toISOString() ?? null, payDate: run.pay_date, note: run.note, published: run.status === 'paid',
     totals: { base: t('base'), ot: t('ot'), allowance: t('allowance'), commission: t('commission'), unpaidAmt: t('unpaidAmt'), gross: t('gross'), sso: t('sso'), tax: t('tax'), advance: t('advance'), net: t('net'), employerSso: t('sso') },
     lines,
   };
@@ -461,7 +461,7 @@ export async function listRuns(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: st
   return pageOf(r.rows, q.limit, (x) => [x.period], (x) => ({
     id: x.id, period: x.period, status: x.status, ssoRate: d(x.sso_rate).toString(), ssoCap: money(x.sso_cap), ssoFloor: money(x.sso_floor), createdBy: x.created_name,
     createdAt: x.created_at.toISOString(), approvedBy: x.approved_name, approvedAt: x.approved_at?.toISOString() ?? null, paidBy: x.paid_name,
-    paidAt: x.paid_at?.toISOString() ?? null, payDate: x.pay_date, headcount: x.headcount,
+    paidAt: x.paid_at?.toISOString() ?? null, payDate: x.pay_date, headcount: x.headcount, note: x.note, published: x.status === 'paid',
     totals: { base: money(x.base), ot: money(x.ot), allowance: money(x.allowance), commission: money(x.commission), unpaidAmt: money(x.unpaid_amt), gross: money(x.gross), sso: money(x.sso), tax: money(x.tax), advance: money(x.advance), net: money(x.net), employerSso: money(x.sso) },
   }));
 }
@@ -507,15 +507,15 @@ async function writeLine(tx: Tx, ctx: Ctx, runId: string, cfg: PayrollConfig, e:
 
 const PAY_EMP = `select id, code, name, position, emp_type, bank_account, salary::text, daily_rate::text, commission_pct::text, sso, user_id from employees`;
 
-export async function createRun(tx: Tx, ctx: Ctx, period: string): Promise<HrPayrollRun> {
+export async function createRun(tx: Tx, ctx: Ctx, period: string, note = ''): Promise<HrPayrollRun> {
   requirePerm(ctx, 'hr.salary');
   const { to } = periodRange(period);
   const exists = await tx.query(`select 1 from payroll_runs where period = $1`, [period]);
   if (exists.rowCount) throw E.conflict(`Payroll ${period} already exists`);
   const s = await hrSettings(tx, ctx.tenantId);
   const run = await tx.query<{ id: string }>(
-    `insert into payroll_runs (tenant_id, period, sso_rate, sso_cap, sso_floor, created_by) values ($1,$2,$3,$4,$5,$6) returning id`,
-    [ctx.tenantId, period, s.ssoRate, s.ssoCap, s.ssoFloor, ctx.userId],
+    `insert into payroll_runs (tenant_id, period, sso_rate, sso_cap, sso_floor, created_by, note) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+    [ctx.tenantId, period, s.ssoRate, s.ssoCap, s.ssoFloor, ctx.userId, note.trim()],
   );
   const cfg = { ssoRate: s.ssoRate, ssoCap: s.ssoCap, ssoFloor: s.ssoFloor };
   const emps = await tx.query<PayEmp>(`${PAY_EMP} where status = 'active' and emp_type = any($1) and start_date <= $2 order by code`, [PAYROLL_TYPES, to]);
@@ -574,6 +574,39 @@ export async function transitionRun(tx: Tx, ctx: Ctx, period: string, to: 'appro
   const action = { approved: 'approve', draft: 'reopen', paid: 'pay' }[to];
   await writeAudit(tx, ctx, [{ action, object: 'payroll', ref: period, detail: `${out.lines.length} คน · สุทธิ ${out.totals.net}` }]);
   return out;
+}
+
+/** หมายเหตุ of a payroll run (editable in any status; the figures stay locked once paid). */
+export async function updateRunNote(tx: Tx, ctx: Ctx, period: string, note: string): Promise<HrPayrollRun> {
+  requirePerm(ctx, 'hr.salary');
+  const run = await loadRun(tx, period, true);
+  const next = note.trim();
+  if (next !== run.note) {
+    await tx.query(`update payroll_runs set note = $2 where id = $1`, [run.id, next]);
+    await writeAudit(tx, ctx, [{ action: 'update', object: 'payroll', ref: period, detail: `หมายเหตุ: ${run.note || '-'} → ${next || '-'}` }]);
+  }
+  return runOut(tx, await loadRun(tx, period));
+}
+
+/**
+ * Which months have a published payslip (run paid) — never 404, so the UI can show the slip button disabled
+ * ("รอเผยแพร่รอบเงินเดือน") without firing a request that fails. HR salary sees every run; an employee sees the runs
+ * that include them. `period` narrows to one month (returned with exists=false when there is no run).
+ */
+export async function payslipPeriods(tx: Tx, ctx: Ctx, q: { period?: string; limit: number }) {
+  const full = can(ctx, 'hr.salary') === 1;
+  const me = (await tx.query<{ id: string }>(`select id from employees where user_id = $1`, [ctx.userId])).rows[0];
+  if (!full && !me) return { employeeId: null, items: [] };
+  const params: unknown[] = [];
+  const where: string[] = [];
+  if (!full) { params.push(me!.id); where.push(`exists (select 1 from payroll_lines l where l.run_id = r.id and l.employee_id = $${params.length})`); }
+  if (q.period) { params.push(q.period); where.push(`r.period = $${params.length}`); }
+  params.push(q.limit);
+  const r = await tx.query<{ period: string; status: HrPayrollRun['status']; pay_date: string | null }>(
+    `select r.period, r.status, r.pay_date from payroll_runs r ${where.length ? 'where ' + where.join(' and ') : ''} order by r.period desc limit $${params.length}`, params);
+  const items = r.rows.map((x) => ({ period: x.period, exists: true, status: x.status, published: x.status === 'paid', payDate: x.pay_date }));
+  if (q.period && !items.length) items.push({ period: q.period, exists: false, status: null as unknown as HrPayrollRun['status'], published: false, payDate: null });
+  return { employeeId: me?.id ?? null, items };
 }
 
 /** Payslips (REQ-M17-03). HR salary sees every slip; an employee sees only their own slip of a paid month. */
