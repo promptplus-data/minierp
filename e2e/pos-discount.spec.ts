@@ -103,7 +103,9 @@ test('customer search and quick create from the POS cart', async ({ page }) => {
   await expect(page.getByTestId('pos-cust-input')).toHaveValue(name);
 });
 
-test('credit sale (เงินเชื่อ) appears in AR and not in the shift cash', async ({ page, request }) => {
+test('credit sale (เงินเชื่อ) appears in AR and not in the shift cash; no wasted 404 requests', async ({ page, request }) => {
+  const notFound: string[] = [];
+  page.on('response', (r) => { if (r.status() === 404 && r.url().includes('/api/')) notFound.push(r.url()); });
   await login(page, 'prae');
   await openPos(page);
   await page.getByTestId('tile-PVC-4-85').click();
@@ -123,4 +125,5 @@ test('credit sale (เงินเชื่อ) appears in AR and not in the shi
   expect(items.find((x) => x.no === no)?.arBalance).toBe('89.00');
   await page.goto(`/sales/${no}`);
   await expect(page.getByTestId('doc-ar')).toContainText('89.00');
+  expect(notFound).toEqual([]);
 });
