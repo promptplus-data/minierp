@@ -99,8 +99,8 @@ test('below-cost sale: manager approves the discount, owner approves below cost'
   await login(page, 'prae');
   await page.goto('/pos');
   await page.getByTestId('tile-SCG-CEM-T50').click();
-  await page.getByTestId('ldisc-0').fill('30');
-  await expect(page.getByTestId('total')).toHaveText('฿115.00');
+  await page.getByTestId('ldisc-0').fill('25'); // 17 %: within the manager's own 20 % cap
+  await expect(page.getByTestId('total')).toHaveText('฿120.00');
   // manager override: the PIN is asked as soon as the discount is entered, not at payment
   await page.getByTestId('ldisc-0').press('Enter');
   await expect(page.getByRole('heading', { name: 'ส่วนลดเกินสิทธิ์' })).toBeVisible();

@@ -194,7 +194,7 @@ export const SalesInvoiceReq = z.discriminatedUnion('source', [
   }),
 ]);
 export type SalesInvoiceReq = z.infer<typeof SalesInvoiceReq>;
-export const SalesInvoiceSource = z.enum(['delivery', 'direct', 'installment', 'deposit', 'forfeit', 'abb']);
+export const SalesInvoiceSource = z.enum(['delivery', 'direct', 'installment', 'deposit', 'forfeit', 'abb', 'pos']);
 /** A full tax invoice issued later for a POS abbreviated invoice: the ABB is voided and the INV refers to it (BR-03). */
 export const SalesAbbInvoiceReq = z.object({ abbNo: z.string().min(1), customerId: z.string() });
 export const SalesInvoice = z.object({

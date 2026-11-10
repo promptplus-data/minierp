@@ -92,6 +92,12 @@ test('number pad edits the POS qty and the payment amount; quick cash; the sale 
 
   const total = ((await page.getByTestId('total').innerText()).replace(/[^\d.]/g, ''));
   await page.getByTestId('pay').tap();
+  await expect(page.getByTestId('pa-0')).toBeVisible();
+  if (await page.getByTestId('kind-full').isChecked()) {
+    // this machine may issue full tax invoices only (POS ID registry): a full tax invoice needs a customer with a tax ID
+    await page.getByTestId('pay-cust-input').fill('รุ่งเรือง');
+    await page.getByTestId('pay-cust-list').getByRole('option', { name: /รุ่งเรืองก่อสร้าง/ }).tap();
+  }
   const amount = page.getByTestId('pa-0');
   await expect(amount).toHaveValue(/\d/);
   await amount.tap();

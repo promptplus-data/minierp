@@ -163,6 +163,8 @@ export const SalesDoc = z.object({
   discReason: z.string().nullable().optional(),
   /** Outstanding receivable (POS credit sale / B2B credit invoice). */
   arBalance: Dec.optional(),
+  /** The `ref` document has a B2B invoice page (sales_invoices); false = a POS bill, opened at /sales/:no. */
+  refB2b: z.boolean().optional(),
 });
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });

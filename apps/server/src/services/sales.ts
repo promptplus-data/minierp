@@ -84,6 +84,8 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
     payments: row.payments, status: row.status,
     voided: row.status === 'void' ? { by: row.void_by_name ?? '', at: row.void_at!.toISOString(), reason: row.void_reason ?? '' } : null,
     createdBy: row.created_by_name, ref: row.ref_no,
+    // whether the referenced bill has a B2B invoice page (else the client opens it as a POS document, no 404 probe)
+    ...(row.ref_doc_id ? { refB2b: !!(await tx.query(`select 1 from sales_invoices where doc_id = $1`, [row.ref_doc_id])).rowCount } : {}),
     ...(row.type === 'ABB' ? { posId: await posIdOf(tx, row.device_id) } : {}),
     related: await relatedDocs(tx, row.id),
     note: row.note, discReason: row.disc_reason, arBalance: row.status === 'void' ? '0.00' : money(row.ar_balance),

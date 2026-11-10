@@ -65,7 +65,11 @@ e2e: `e2e/retail.spec.ts` (both editions), screenshots `e2e/screenshots/retail-*
 | REQ-M16-02 open MO and issue | done | BOM x plan suggestion, editable qty, FIFO issue |
 | REQ-M16-03 record output | done | repeated good / reject entries, close receives one lot |
 | REQ-M16-04 cost vs plan | done | MO report (standard vs actual per unit) |
-| REQ-M07-08 hold bill | done | several held bills per shift |
+| REQ-M07-02 line / bill discount (POS workstream) | done | role cap, manager PIN asked at entry (override token covers up to the approved amount), quick 5 % / 10 % / amount, reason chips, totals gross / line / bill / net / VAT |
+| REQ-M07-03 payments (POS workstream) | done | + เงินเชื่อ (credit) to a credit-term customer → AR, excluded from shift cash |
+| REQ-M07-05 full tax invoice (POS workstream) | done | searchable customer picker with tax-ID requirement and quick create |
+| REQ-M07-09 below cost (POS workstream) | done | live red flag for everyone, numbers only for `data.cost`; owner PIN at payment |
+| REQ-M07-08 hold bill | done | several held bills per shift (manual prices are not kept on a held bill) |
 | REQ-M07-11 pick by image / category | done | photo upload, promo category in POS |
 | REQ-M01-07 POS ID | done | machine registry; ABB prints POS ID |
 | BR-05 price order | partial | list vs retail implemented; quotation price (group A) is outside this module |

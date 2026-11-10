@@ -36,7 +36,7 @@ export default function DocDetail() {
         <div className="kv">
           <span>วันที่</span><span>{th(doc.date)}</span>
           <span>ลูกค้า</span><span>{doc.customer.name}{doc.customer.phone ? ` · ${doc.customer.phone}` : ''}</span>
-          {doc.ref && <><span>อ้างอิง</span><span className="mono" data-testid="doc-ref"><DocLink no={doc.ref} /></span></>}
+          {doc.ref && <><span>อ้างอิง</span><span className="mono" data-testid="doc-ref">{/* a POS full tax invoice has no B2B page: open it here instead of probing /b2b/inv (404) */}<DocLink no={doc.ref} type={doc.refB2b === false && doc.ref.startsWith('INV') ? 'ABB' : undefined} /></span></>}
           {!!doc.related?.length && <><span>เอกสารต่อเนื่อง</span><span className="mono" data-testid="doc-related">{doc.related.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}><DocLink no={x.no} type={x.kind} /></span></span>)}</span></>}
           <span>ภาษี</span><span>{doc.vatMode === 'inc' ? 'ราคารวม VAT 7%' : doc.vatMode === 'exc' ? 'ราคาไม่รวม VAT' : 'ร้านไม่จด VAT'}</span>
           <span>ชำระโดย</span><span>{doc.payments.map((p) => `${METHOD_TH[p.method] ?? p.method} ${fmt(p.amount)}`).join(' + ') || '-'}</span>

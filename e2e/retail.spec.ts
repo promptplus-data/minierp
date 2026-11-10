@@ -225,6 +225,8 @@ test('POS machines: register, approve with POS ID; a pending machine issues full
   await page.getByTestId('tile-PVC-4-85').click();
   await page.getByTestId('pay').click();
   await expect(page.getByTestId('abb-off')).toContainText('ออกได้เฉพาะใบกำกับภาษีเต็มรูป');
+  await page.getByTestId('pay-cust-input').fill('รุ่งเรือง');
+  await page.getByTestId('pay-cust-list').getByRole('option', { name: /รุ่งเรืองก่อสร้าง/ }).click();
   await page.getByTestId('pay-confirm').click();
   await expect(page.getByTestId('sale-no')).toHaveText(/^INV/);
   await page.getByTestId('next-bill').click();
