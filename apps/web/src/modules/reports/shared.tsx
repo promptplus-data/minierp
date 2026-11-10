@@ -1,9 +1,31 @@
 /** Shared bits of the reports screens: authenticated file download, filters, period helpers. */
 import { useState, type ReactNode } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import type { z } from 'zod';
 import type { ReportSource } from '@erp/contracts';
-import { getToken, errText } from '../../api';
+import { api, getToken, errText } from '../../api';
 import { useToast } from '../../ui';
 import './reports.css';
+
+/**
+ * Lazy report table: the first page brings the rows and the period totals (computed on the server over every row),
+ * later pages only add rows (20 at a time, `LoadMore` / infinite scroll). `data` keeps the report shape with all
+ * loaded rows, and its totals always come from the server — never from summing the loaded rows.
+ */
+export function useReportPages<T extends { rows: unknown[]; nextCursor: string | null }>(
+  name: string, path: string, query: Record<string, string | number | boolean | undefined>, schema: z.ZodType<T, z.ZodTypeDef, unknown>, enabled = true,
+) {
+  const r = useInfiniteQuery({
+    queryKey: ['rp', name, query],
+    enabled,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api('GET', path, { query: { ...query, cursor: pageParam, limit: 20 }, schema }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+  const first = r.data?.pages[0];
+  const data: T | undefined = first ? { ...first, rows: r.data!.pages.flatMap((x) => x.rows) as T['rows'] } : undefined;
+  return { ...r, data };
+}
 
 const bkk = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 export const bkkToday = () => bkk(new Date());

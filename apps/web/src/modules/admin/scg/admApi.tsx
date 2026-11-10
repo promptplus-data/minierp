@@ -3,9 +3,9 @@
  * their own token. Same error shape as the shop API (ApiFail), so screens reuse admErr().
  */
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import type { ZodType, ZodTypeDef } from 'zod';
-import { AdmLoginRes, AdmUser, ApiError, type AdmRole } from '@erp/contracts';
+import { AdmLoginRes, AdmUser, ApiError, page, type AdmRole, type Page } from '@erp/contracts';
 import { ApiFail, reportFailure } from '../../../api';
 
 const KEY = 'erp-adm-token';
@@ -46,6 +46,19 @@ export async function admApi<T = unknown>(method: 'GET' | 'POST' | 'PATCH', path
   const p = opts.schema.safeParse(json);
   if (!p.success) throw new ApiFail(res.status, 'INTERNAL', 'Response does not match the contract', p.error.issues);
   return p.data;
+}
+
+/** Lazy SCG console list: 20 rows a page through the console token (the shop `useLoadMore` uses the shop token). Pair with `LoadMore`. */
+export function useAdmLoadMore<T>(key: readonly unknown[], path: string, item: ZodType<T, ZodTypeDef, unknown>, query: Q = {}, pageSize = 20) {
+  const schema = page(item) as unknown as ZodType<Page<T>, ZodTypeDef, unknown>;
+  const clean = Object.fromEntries(Object.entries(query).filter(([, v]) => v !== '' && v != null)) as Q;
+  const r = useInfiniteQuery({
+    queryKey: [...key, clean, pageSize],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => admApi('GET', path, { query: { ...clean, limit: pageSize, cursor: pageParam }, schema }),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+  return { ...r, rows: r.data?.pages.flatMap((x) => x.items) ?? [] };
 }
 
 interface AdmAuth { admin: AdmUser | null; restoring: boolean; login: (u: string, p: string) => Promise<void>; logout: () => void }

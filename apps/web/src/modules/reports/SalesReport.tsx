@@ -1,11 +1,10 @@
 /** M11-01 sales and gross profit by day / month / product / category / customer / seller / sale type. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ReportSales, type ReportSalesBy } from '@erp/contracts';
-import { api, errText } from '../../api';
-import { fmt, fq, Pager, SkeletonRows, useCursorPager, useDebounced } from '../../ui';
-import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart } from './shared';
+import { fmt, fq, SkeletonRows, useDebounced } from '../../ui';
+import { DownloadButtons, Field, SourceNotes, bkkToday, monthStart, useReportPages } from './shared';
 import { ErrorBanner } from '../../errors';
+import { LoadMore } from '../../ui/lists';
 import { RouteLink } from '../../doclink';
 
 const BY: [ReportSalesBy, string][] = [
@@ -34,14 +33,10 @@ export default function SalesReport() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
   const filt = { from, to, by, saleType, q: dq };
-  const pager = useCursorPager(JSON.stringify(filt));
   const ok = !!from && !!to && from <= to;
-  const r = useQuery({
-    queryKey: ['rp', 'sales', filt, pager.cursor], enabled: ok, placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/reports/sales', { query: { ...filt, cursor: pager.cursor }, schema: ReportSales }),
-  });
+  const r = useReportPages('sales', '/api/reports/sales', filt, ReportSales, ok);
   const data = r.data;
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const loading = r.isLoading;
   const cost = data?.costVisible ?? false;
   const cols = 7 + (cost ? 3 : 0) + (by === 'product' ? 1 : 0);
   const t = data?.totals;
@@ -92,7 +87,7 @@ export default function SalesReport() {
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(data?.nextCursor ?? null)} count={data?.rows.length} loading={loading} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={data?.rows.length} testId="sales-more" />
       {data && data.voided.count > 0 && <p className="small muted" style={{ marginTop: 8 }}>ไม่นับบิลที่ยกเลิก {data.voided.count} ใบ (มูลค่า ฿{fmt(data.voided.total)}) · ยอดสุทธิหักใบลดหนี้ / รับคืนแล้ว</p>}
       <SourceNotes sources={data?.sources} />
     </>

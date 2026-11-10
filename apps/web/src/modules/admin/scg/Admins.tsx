@@ -1,12 +1,13 @@
 /** SCG Admin accounts and roles (mockup VIEWS.adm_users) and the platform audit log (super admin only). */
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { AdmAuditEntry, AdmRole, AdmUser, page } from '@erp/contracts';
-import { Modal, Pager, Pill, SkeletonRows, thTime, useCursorPager, useDebounced, useToast, type PillKind } from '../../../ui';
+import { AdmAuditEntry, AdmRole, AdmUser } from '@erp/contracts';
+import { Modal, Pill, SkeletonRows, thTime, useDebounced, useToast, type PillKind } from '../../../ui';
+import { LoadMore } from '../../../ui/lists';
 import { ErrorBanner, checkFields, requiredMsg } from '../../../errors';
 import { admErr } from '../common';
-import { ADM_ROLE_TH, admApi, useAdm } from './admApi';
+import { ADM_ROLE_TH, admApi, useAdmLoadMore, useAdm } from './admApi';
 
 type V = 1 | 0 | 'ro';
 const MATRIX: [string, V[]][] = [
@@ -82,12 +83,8 @@ const ACT: Record<string, PillKind> = { update: 'acc', activate: 'ok', deactivat
 function AuditCard() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['scg', 'audit', dq, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/audit', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: page(AdmAuditEntry) }),
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useAdmLoadMore(['scg', 'audit'], '/api/adm/audit', AdmAuditEntry, { q: dq });
+  const loading = list.isLoading;
   return (
     <div className="card">
       <h2>log ของ SCG Admin</h2>
@@ -96,13 +93,13 @@ function AuditCard() {
         <table data-testid="adm-audit">
           <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การกระทำ</th><th>เรื่อง</th><th>อ้างอิง</th><th>รายละเอียด</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={6} /> : (list.data?.items ?? []).map((a) => (
+            {loading ? <SkeletonRows cols={6} /> : list.rows.map((a) => (
               <tr key={a.id}><td className="small mono">{thTime(a.at)}</td><td className="small">{a.admin}</td><td><Pill k={ACT[a.action] ?? 'mut'}>{a.action}</Pill></td><td className="small">{a.object}</td><td className="small mono">{a.ref ?? ''}</td><td className="small">{a.detail}</td></tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
     </div>
   );
 }

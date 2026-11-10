@@ -3,11 +3,12 @@
  * wholesale prices with an effective date; push to shops (shops keep their own selling price edits).
  */
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AdmCentralProduct, AdmPush, AdmPushResult, page } from '@erp/contracts';
-import { Modal, Pager, Pill, SkeletonRows, fmt, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
+import { useQueryClient } from '@tanstack/react-query';
+import { AdmCentralProduct, AdmPush, AdmPushResult } from '@erp/contracts';
+import { Modal, Pill, SkeletonRows, fmt, th, thTime, useDebounced, useToast } from '../../../ui';
+import { LoadMore } from '../../../ui/lists';
 import { admErr, todayYmd } from '../common';
-import { admApi, admCan, useAdm } from './admApi';
+import { admApi, useAdmLoadMore, admCan, useAdm } from './admApi';
 import { checkFields, requiredMsg } from '../../../errors';
 
 const CATS = ['ปูนซีเมนต์', 'หลังคา', 'ผนัง', 'กาว/ยาแนว', 'ประปา', 'กระเบื้อง', 'สุขภัณฑ์', 'อื่น ๆ'];
@@ -20,11 +21,7 @@ export default function Master() {
   const [tab, setTab] = useState<'prod' | 'push'>('prod');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['scg', 'central', dq, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/central-products', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: page(AdmCentralProduct) }),
-  });
+  const list = useAdmLoadMore(['scg', 'central'], '/api/adm/central-products', AdmCentralProduct, { q: dq });
   const [edit, setEdit] = useState<AdmCentralProduct | 'new' | null>(null);
   const [price, setPrice] = useState<AdmCentralProduct | null>(null);
   const [busy, setBusy] = useState(false);
@@ -42,7 +39,7 @@ export default function Master() {
       setBusy(false);
     }
   };
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   return (
     <div className="card">
       <div className="tabs" role="tablist">
@@ -60,7 +57,7 @@ export default function Master() {
             <table data-testid="central-table">
               <thead><tr><th>รหัส</th><th>ชื่อสินค้า</th><th>หมวด</th><th>หน่วยนับ</th><th>บาร์โค้ด</th><th className="n">ราคาแนะนำ ปลีก / ส่ง</th><th>ราคาถัดไป</th><th>สถานะ</th><th /></tr></thead>
               <tbody>
-                {loading ? <SkeletonRows cols={9} /> : (list.data?.items ?? []).map((c) => (
+                {loading ? <SkeletonRows cols={9} /> : list.rows.map((c) => (
                   <tr key={c.id} className={c.active ? '' : 'off'}>
                     <td className="mono small">{c.sku}</td><td>{c.name}</td><td className="small">{c.category}</td>
                     <td className="small">{c.units.map((u, i) => (i === 0 ? u.name : `${u.name} = ${u.factor} ${c.units[0]!.name}`)).join(' · ')}</td>
@@ -71,11 +68,11 @@ export default function Master() {
                     <td>{write && <div className="row"><button className="btn sm" onClick={() => setEdit(c)}>แก้ไข</button><button className="btn sm" onClick={() => setPrice(c)} data-testid={`central-price-${c.sku}`}>ตั้งราคา</button></div>}</td>
                   </tr>
                 ))}
-                {!loading && list.data && !list.data.items.length && <tr><td colSpan={9} className="empty">ไม่พบสินค้า</td></tr>}
+                {!loading && list.data && !list.rows.length && <tr><td colSpan={9} className="empty">ไม่พบสินค้า</td></tr>}
               </tbody>
             </table>
           </div>
-          <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+          <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
         </>
       ) : <Pushes />}
       {edit && <EditModal c={edit === 'new' ? null : edit} onClose={() => setEdit(null)} onDone={() => { setEdit(null); refresh(); }} />}
@@ -85,25 +82,21 @@ export default function Master() {
 }
 
 function Pushes() {
-  const pager = useCursorPager('p');
-  const list = useQuery({
-    queryKey: ['scg', 'pushes', pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/central-push', { query: { limit: 20, cursor: pager.cursor }, schema: page(AdmPush) }),
-  });
+  const list = useAdmLoadMore(['scg', 'pushes'], '/api/adm/central-push', AdmPush);
   return (
     <>
       <div className="tw" style={{ marginTop: 12 }}>
         <table>
           <thead><tr><th>เวลา</th><th>รายการ</th><th className="n">สินค้า</th><th className="n">ร้าน</th><th>ส่งให้</th><th>โดย</th></tr></thead>
           <tbody>
-            {list.isLoading ? <SkeletonRows cols={6} rows={3} /> : (list.data?.items ?? []).map((p) => (
+            {list.isLoading ? <SkeletonRows cols={6} rows={3} /> : list.rows.map((p) => (
               <tr key={p.id}><td className="small">{thTime(p.at)}</td><td>{p.what}</td><td className="n">{p.products}</td><td className="n">{p.shops}</td><td className="small">{p.target}</td><td className="small">{p.by}</td></tr>
             ))}
-            {list.data && !list.data.items.length && <tr><td colSpan={6} className="empty">ยังไม่เคยส่ง</td></tr>}
+            {list.data && !list.rows.length && <tr><td colSpan={6} className="empty">ยังไม่เคยส่ง</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
     </>
   );
 }

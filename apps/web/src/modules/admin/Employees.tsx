@@ -1,13 +1,14 @@
 /** REQ-M17-01 + REQ-M01-10: employees with their login user (created together), resign instead of delete, rehire. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, page, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
+import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
 import { DEFAULT_LEAVE_ENTITLEMENT, USERNAME_RE, thaiIdValid } from '@erp/core';
 import { api } from '../../api';
 import { ROLE_TH, useAuth } from '../../auth';
-import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, useCursorPager, useDebounced, useToast } from '../../ui';
-import { EMP_TYPE_TH, admErr, todayYmd } from './common';
+import { Modal, Pill, SkeletonRows, fmt, fq, th, useDebounced, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { EMP_TYPE_TH, SlipLink, admErr, periodTH, todayYmd, usePayslipPeriods } from './common';
 import { ErrorBanner, checkFields, requiredMsg } from '../../errors';
 
 const ROLES = Role.options.filter((r) => r !== 'owner');
@@ -30,12 +31,10 @@ export default function Employees() {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'active' | 'resigned' | 'all'>('all');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(`${dq}|${status}`);
-  const list = useQuery({
-    queryKey: ['hr-employees', dq, status, pager.cursor],
-    queryFn: () => api('GET', '/api/hr/employees', { query: { q: dq, status, limit: 20, cursor: pager.cursor }, schema: page(HrEmployee) }),
-    placeholderData: keepPreviousData,
-  });
+  const list = useLoadMore(['hr-employees'], '/api/hr/employees', HrEmployee, { q: dq, status }, 20);
+  // Latest payroll month: each row's slip button opens it once published, disabled ("รอเผยแพร่รอบเงินเดือน") before.
+  const slipRuns = usePayslipPeriods(undefined, sal);
+  const lastRun = slipRuns.data?.items[0] ?? null;
   const bal = useLeaveBalances(Number(todayYmd().slice(0, 4)));
   const balOf = (id: string) => bal.data?.items.find((b) => b.employeeId === id);
   const [edit, setEdit] = useState<HrEmployee | 'new' | null>(null);
@@ -55,7 +54,7 @@ export default function Employees() {
       toast(admErr(err));
     }
   };
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   const cols = sal ? 9 : 8;
 
   return (
@@ -77,7 +76,7 @@ export default function Employees() {
             <tr><th>รหัส</th><th>ชื่อ</th><th>ตำแหน่ง / ประเภท</th><th>เริ่มงาน</th>{sal && <th className="n">ค่าจ้าง</th>}<th>ผู้ใช้ · บทบาท</th><th>วันลาคงเหลือ (ป่วย / กิจ / พักร้อน)</th><th>สถานะ</th><th /></tr>
           </thead>
           <tbody>
-            {loading ? <SkeletonRows cols={cols} /> : (list.data?.items ?? []).map((e) => {
+            {loading ? <SkeletonRows cols={cols} /> : list.rows.map((e) => {
               const b = balOf(e.id);
               return (
                 <tr key={e.id} className={e.status === 'resigned' ? 'off' : ''}>
@@ -93,6 +92,10 @@ export default function Employees() {
                   }).join(' · ')}</td>
                   <td>{e.status === 'active' ? <Pill k="ok">ทำงาน</Pill> : <Pill k="mut">ลาออก {e.resignedAt ? th(e.resignedAt) : ''}</Pill>}</td>
                   <td>
+                    <div className="row">
+                    {sal && lastRun && e.type !== 'owner' && e.type !== 'external' && (
+                      <SlipLink to={`/payslip/${lastRun.period}?emp=${e.id}`} published={lastRun.published} testId={`emp-slip-${e.code}`}>สลิป {periodTH(lastRun.period)}</SlipLink>
+                    )}
                     {manage && (
                       <div className="row">
                         <button className="btn sm" onClick={() => setEdit(e)}>แก้ไข</button>
@@ -101,15 +104,16 @@ export default function Employees() {
                           : <button className="btn sm" onClick={() => void rehire(e)}>รับกลับ</button>}
                       </div>
                     )}
+                    </div>
                   </td>
                 </tr>
               );
             })}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={cols} className="empty">ไม่พบพนักงาน</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={cols} className="empty">ไม่พบพนักงาน</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="emp-more" />
       {edit && <EmpModal emp={edit === 'new' ? null : edit} sal={sal} onClose={() => setEdit(null)} onSaved={(pw) => { setEdit(null); refresh(); if (pw) setCreated(pw); }} />}
       {resign && <ResignModal emp={resign} onClose={() => setResign(null)} onDone={() => { setResign(null); refresh(); }} />}
       {created && (

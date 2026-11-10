@@ -4,13 +4,15 @@
  */
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { AdmLicense, AdmShare, page } from '@erp/contracts';
 import { addDays } from '@erp/core';
-import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useDebounced, useToast } from '../../../ui';
+import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useDebounced, useToast } from '../../../ui';
+import { LoadMore } from '../../../ui/lists';
+import { SearchSelect, type RemotePage } from '../../../ui/SearchSelect';
 import { admErr, todayYmd } from '../common';
-import { admApi, admCan, useAdm } from './admApi';
+import { admApi, useAdmLoadMore, admCan, useAdm } from './admApi';
 import { checkFields, requiredMsg } from '../../../errors';
 
 type Lic = z.infer<typeof AdmLicense>;
@@ -23,16 +25,12 @@ export default function Licenses() {
   const [sp] = useSearchParams();
   const [q, setQ] = useState(sp.get('q') ?? '');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['scg', 'licenses', dq, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/licenses', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: page(AdmLicense) }),
-  });
+  const list = useAdmLoadMore(['scg', 'licenses'], '/api/adm/licenses', AdmLicense, { q: dq });
   const [issued, setIssued] = useState<Lic | null>(null);
   const [show, setShow] = useState<Lic | null>(null);
   const [revoke, setRevoke] = useState<Lic | null>(null);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['scg'] }); };
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   const today = todayYmd();
   return (
     <>
@@ -44,7 +42,7 @@ export default function Licenses() {
           <table data-testid="license-table">
             <thead><tr><th>เลขที่</th><th>ร้าน</th><th>ประเภท</th><th>หมดอายุ</th><th>ออกเมื่อ / โดย</th><th>ส่งยอดล่าสุด</th><th>สถานะ</th><th /></tr></thead>
             <tbody>
-              {loading ? <SkeletonRows cols={8} /> : (list.data?.items ?? []).map((l) => {
+              {loading ? <SkeletonRows cols={8} /> : list.rows.map((l) => {
                 const expired = !!l.expiresAt && l.expiresAt < today;
                 const soon = !!l.expiresAt && !expired && l.expiresAt <= addDays(today, 30);
                 return (
@@ -60,11 +58,11 @@ export default function Licenses() {
                   </tr>
                 );
               })}
-              {!loading && list.data && !list.data.items.length && <tr><td colSpan={8} className="empty">ยังไม่มี license</td></tr>}
+              {!loading && list.data && !list.rows.length && <tr><td colSpan={8} className="empty">ยังไม่มี license</td></tr>}
             </tbody>
           </table>
         </div>
-        <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+        <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
         <p className="small muted">คีย์ตรวจในเครื่องของร้านโดยไม่ต่อเน็ต การยกเลิกจึงไม่ปิดเครื่องของร้าน แต่ SCG จะไม่รับสรุปยอดขายจากคีย์ที่ยกเลิก · ต่ออายุ = ออกคีย์ใหม่ให้ร้านใส่แทน</p>
       </div>
       {(issued ?? show) && <KeyModal l={(issued ?? show)!} fresh={!!issued} onClose={() => { setIssued(null); setShow(null); }} />}
@@ -73,7 +71,13 @@ export default function Licenses() {
   );
 }
 
+/** Shops that already hold a license (renewal): searched on the server by name / tax ID / license no. / region. */
+const licPage = page(AdmLicense);
+const fetchLicensedShops = (q: string, cursor: string | undefined, limit: number): Promise<RemotePage<Lic>> =>
+  admApi('GET', '/api/adm/licenses', { query: { q: q || undefined, cursor, limit }, schema: licPage });
+
 function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
+  const [from, setFrom] = useState<Lic | null>(null);
   const [f, setF] = useState({ shopName: '', taxId: '', type: 'expiring' as 'expiring' | 'lifetime', expiresAt: addDays(todayYmd(), 365), region: '', note: '' });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -84,6 +88,7 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
     try {
       const l = await admApi('POST', '/api/adm/licenses', { body: { ...f, shopName: f.shopName.trim(), expiresAt: f.type === 'lifetime' ? null : f.expiresAt }, schema: AdmLicense });
       setF({ ...f, shopName: '', taxId: '', note: '' });
+      setFrom(null);
       onIssued(l);
     } catch (e) {
       setErr(admErr(e));
@@ -95,6 +100,12 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
     <div className="card">
       <h2>ออก license key ให้ร้าน On-premise</h2>
       <div className="fgrid">
+        <label className="f" style={{ gridColumn: '1/-1' }}>ต่ออายุให้ร้านเดิม (ไม่บังคับ)
+          <SearchSelect<Lic> value={from?.licenseId ?? null} selected={from} fetchPage={fetchLicensedShops} queryKey={['scg', 'pick-licensed']}
+            getId={(l) => l.licenseId} getLabel={(l) => l.shopName} getSub={(l) => `${l.taxId}${l.region ? ` · ${l.region}` : ''} · ${l.licenseId}${l.expiresAt ? ` · หมดอายุ ${th(l.expiresAt)}` : ' · ตลอดชีพ'}`}
+            emptyLabel="— ร้านใหม่ (กรอกเอง) —" placeholder="ค้นชื่อร้าน / เลขผู้เสียภาษี / เลขที่ license" testId="lic-from" ariaLabel="ต่ออายุให้ร้านเดิม"
+            onChange={(_, l) => { setFrom(l); if (l) setF((x) => ({ ...x, shopName: l.shopName, taxId: l.taxId, region: l.region ?? '' })); }} />
+        </label>
         <label className="f">ชื่อร้าน (ตรงกับในโปรแกรมของร้าน) *<input type="text" name="shopName" value={f.shopName} onChange={(e) => setF({ ...f, shopName: e.target.value })} data-testid="lic-shop" /></label>
         <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} name="taxId" value={f.taxId} onChange={(e) => setF({ ...f, taxId: e.target.value.replace(/\D/g, '') })} data-testid="lic-tax" /></label>
         <label className="f">ประเภท
@@ -158,13 +169,9 @@ function RevokeModal({ l, onClose, onDone }: { l: Lic; onClose: () => void; onDo
 export function Shares() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['scg', 'shares', dq, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => admApi('GET', '/api/adm/sales-shares', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: page(AdmShare) }),
-  });
+  const list = useAdmLoadMore(['scg', 'shares'], '/api/adm/sales-shares', AdmShare, { q: dq });
   const [open, setOpen] = useState<z.infer<typeof AdmShare> | null>(null);
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const loading = list.isLoading;
   return (
     <div className="card">
       <h2>สรุปยอดขายที่ร้าน On-premise ส่งให้ SCG</h2>
@@ -173,17 +180,17 @@ export function Shares() {
         <table data-testid="shares-table">
           <thead><tr><th>รับเมื่อ</th><th>ร้าน</th><th>license</th><th>ช่วงข้อมูล</th><th className="n">ยอดรวม</th><th /></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={6} /> : (list.data?.items ?? []).map((s) => (
+            {loading ? <SkeletonRows cols={6} /> : list.rows.map((s) => (
               <tr key={s.id}>
                 <td className="small">{thTime(s.receivedAt)}</td><td>{s.shopName}<div className="small muted">{s.taxId}</div></td><td className="mono small">{s.licenseId}</td>
                 <td className="small">{th(s.from)} – {th(s.to)}</td><td className="n">{fmt(s.total)}</td><td><button className="btn sm" onClick={() => setOpen(s)}>ดูรายละเอียด</button></td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={6} className="empty">ยังไม่มีร้านส่งสรุปยอดขาย</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={6} className="empty">ยังไม่มีร้านส่งสรุปยอดขาย</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
       <p className="small muted">ร้านเลือกส่งเองและกดส่งเอง · มีเฉพาะยอดขายรายวันต่อสินค้า SCG และยอดรวมสินค้าอื่น ไม่มีข้อมูลลูกค้า</p>
       {open && (
         <Modal onClose={() => setOpen(null)} wide label="สรุปยอดขาย">

@@ -1,7 +1,8 @@
 /** Shared bits of the admin module screens: labels, dates, error text, A4 print mode, the payslip paper. */
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { HrMe, type HrEmpType, type HrLeaveType, type HrPayslip, type LicenseStatus } from '@erp/contracts';
+import { HrMe, HrPayslipPeriods, type HrEmpType, type HrLeaveType, type HrPayslip, type LicenseStatus } from '@erp/contracts';
 import { LEAVE_TH, periodTH } from '@erp/core';
 import { ApiFail, api, errText, registerReasons } from '../../api';
 import { useAuth } from '../../auth';
@@ -83,6 +84,29 @@ export function usePrintA4() {
     document.documentElement.classList.add('pa4');
     return () => document.documentElement.classList.remove('pa4');
   }, []);
+}
+
+/** Payroll months and whether their payslips are published (run paid). Never 404s, so no failing request is fired. */
+export const usePayslipPeriods = (period?: string, enabled = true) => useQuery({
+  queryKey: ['hr-slip-periods', period ?? ''],
+  enabled,
+  staleTime: 30_000,
+  queryFn: () => api('GET', '/api/hr/payslip-periods', { query: { period }, schema: HrPayslipPeriods }),
+});
+
+export const SLIP_WAIT = 'รอเผยแพร่รอบเงินเดือน';
+
+/**
+ * Payslip button: a link once the payroll run is published (paid); before that a disabled button with the tooltip
+ * "รอเผยแพร่รอบเงินเดือน" (owner decision: no click, no request that would fail).
+ */
+export function SlipLink({ to, published, children, testId, pri }: { to: string; published: boolean; children: ReactNode; testId?: string; pri?: boolean }) {
+  if (published) return <Link className={`btn sm${pri ? ' pri' : ''}`} to={to} data-testid={testId}>{children}</Link>;
+  return (
+    <span className="adm-slip-wait" title={SLIP_WAIT}>
+      <button type="button" className={`btn sm${pri ? ' pri' : ''}`} disabled aria-disabled="true" aria-label={`${typeof children === 'string' ? children : 'สลิป'} (${SLIP_WAIT})`} data-testid={testId}>{children}</button>
+    </span>
+  );
 }
 
 export const useHrMe = () => {

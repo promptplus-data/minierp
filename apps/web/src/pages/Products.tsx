@@ -1,12 +1,12 @@
-/** M03 products: cursor-paged table (NFR-12: 20 per page), search, create / edit modal. */
+/** M03 products: lazy table (20 rows at a time, more on scroll), search, create / edit modal. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { Product } from '@erp/contracts';
 import { d } from '@erp/core';
 import { api, errText } from '../api';
 import { useAuth } from '../auth';
-import { productPage } from '../data';
-import { fmt, Modal, Pager, Pill, SkeletonRows, useCursorPager, useDebounced, useToast } from '../ui';
+import { fmt, Modal, Pill, SkeletonRows, useDebounced, useToast } from '../ui';
+import { LoadMore, useLoadMore } from '../ui/lists';
 import { ErrorBanner, checkFields, requiredMsg } from '../errors';
 
 const PAGE = 20;
@@ -15,17 +15,12 @@ export default function Products() {
   const { can } = useAuth();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(dq);
   const [edit, setEdit] = useState<Product | 'new' | null>(null);
   const seeCost = can('data.cost') === 1;
   const canEdit = can('data.master') === 1;
 
-  const list = useQuery({
-    queryKey: ['products', dq, pager.cursor],
-    queryFn: () => api('GET', '/api/products', { query: { q: dq, limit: PAGE, cursor: pager.cursor, all: true }, schema: productPage }),
-    placeholderData: keepPreviousData,
-  });
-  const showSkeleton = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore(['products'], '/api/products', Product, { q: dq, all: true }, PAGE);
+  const showSkeleton = list.isLoading;
   const cols = seeCost ? 10 : 9;
 
   return (
@@ -47,7 +42,7 @@ export default function Products() {
             <tr><th>รหัส</th><th>ชื่อสินค้า</th><th>หมวดหมู่</th><th>บาร์โค้ด</th><th>หน่วยนับ</th><th className="n">ราคาขาย</th>{seeCost && <th className="n">ต้นทุน</th>}<th>VAT ขาย</th><th>สถานะ</th><th /></tr>
           </thead>
           <tbody>
-            {showSkeleton ? <SkeletonRows cols={cols} rows={8} /> : (list.data?.items ?? []).map((p) => (
+            {showSkeleton ? <SkeletonRows cols={cols} rows={8} /> : list.rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono small">{p.sku}</td>
                 <td>{p.name} {p.isScg && <Pill k="acc">SCG</Pill>} {p.kind === 'service' && <Pill k="mut">บริการ</Pill>}</td>
@@ -61,12 +56,11 @@ export default function Products() {
                 <td>{canEdit && <button className="btn sm" onClick={() => setEdit(p)}>แก้ไข</button>}</td>
               </tr>
             ))}
-            {!showSkeleton && list.data && !list.data.items.length && <tr><td colSpan={cols} className="empty">ไม่พบสินค้า "{dq}" ลองค้นด้วยชื่ออื่น</td></tr>}
+            {!showSkeleton && list.data && !list.rows.length && <tr><td colSpan={cols} className="empty">ไม่พบสินค้า "{dq}" ลองค้นด้วยชื่ออื่น</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching}
-        onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="products-more" />
       {edit && <ProductModal product={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
     </div>
   );

@@ -18,7 +18,7 @@ import { ReceiptModal } from '../../stock/forms';
 import { fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast } from '../../ui';
 import { ageText, downloadErrorRows, GrAlertBanner, readAsBase64, STATUS_PILL, STATUS_TH, thOrDash, useDashboard } from './shared';
 import { ErrorBanner } from '../../errors';
-import { DocLink, DocLinks } from '../../doclink';
+import { DocLink } from '../../doclink';
 
 const FIELD_TH: Record<(typeof DELIVERY_FIELDS)[number], string> = {
   product_code: 'รหัสสินค้า', product_name: 'ชื่อสินค้า', qty: 'จำนวน', unit: 'หน่วย', unit_price: 'ราคาต่อหน่วย',

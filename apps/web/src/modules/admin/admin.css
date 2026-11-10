@@ -71,3 +71,6 @@ input.qty.w56{width:56px}input.qty.w74{width:74px}
   table.admt td.c-act .row{justify-content:flex-start!important}
   table.admt td.c-act .small{text-align:left!important}
 }
+/* payslip button before the payroll run is published: the wrapper carries the tooltip (disabled buttons get no hover) */
+.adm-slip-wait{display:inline-flex;cursor:not-allowed}
+.adm-slip-wait .btn[disabled]{pointer-events:none}

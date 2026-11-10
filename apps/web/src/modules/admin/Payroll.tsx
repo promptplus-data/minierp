@@ -1,13 +1,14 @@
 /** REQ-M17-02 monthly payroll (draft → approved → paid, locked when paid), REQ-M17-06 labour cost, SSO settings. */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { HrLabourCostRow, HrPayrollRun, HrPayrollSummary, HrSettings, page, type HrPayrollLine } from '@erp/contracts';
+import { HrLabourCostRow, HrPayrollRun, HrPayrollSummary, HrSettings, type HrPayrollLine } from '@erp/contracts';
 import { d } from '@erp/core';
 import { ApiFail, api } from '../../api';
-import { Modal, Pager, Pill, SkeletonRows, fmt, fq, th, thTime, useCursorPager, useToast } from '../../ui';
-import { PAY_STATUS, admErr, periodTH, prevPeriod, thisPeriod, todayYmd } from './common';
+import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
+import { EditableNote, NoteField } from '../../ui/NoteField';
+import { PAY_STATUS, SlipLink, admErr, periodTH, prevPeriod, thisPeriod, todayYmd } from './common';
 import { ErrorBanner } from '../../errors';
 
 type Editable = 'days' | 'ot' | 'allowance' | 'tax' | 'advance';
@@ -15,16 +16,11 @@ type Editable = 'days' | 'ot' | 'allowance' | 'tax' | 'advance';
 export default function Payroll() {
   const qc = useQueryClient();
   const toast = useToast();
-  const pager = useCursorPager('runs');
-  const runs = useQuery({
-    queryKey: ['hr-runs', pager.cursor],
-    queryFn: () => api('GET', '/api/hr/payroll', { query: { limit: 12, cursor: pager.cursor }, schema: page(HrPayrollSummary) }),
-    placeholderData: keepPreviousData,
-  });
+  const runs = useLoadMore(['hr-runs'], '/api/hr/payroll', HrPayrollSummary, {}, 12);
   const [period, setPeriod] = useState<string | null>(null);
   useEffect(() => {
-    if (!period && runs.data?.items[0]) setPeriod(runs.data.items[0].period);
-  }, [period, runs.data]);
+    if (!period && runs.rows[0]) setPeriod(runs.rows[0].period);
+  }, [period, runs.rows]);
   const run = useQuery({
     queryKey: ['hr-run', period],
     enabled: !!period,
@@ -41,6 +37,7 @@ export default function Payroll() {
     void qc.invalidateQueries({ queryKey: ['hr-runs'] });
     void qc.invalidateQueries({ queryKey: ['hr-run', p] });
     void qc.invalidateQueries({ queryKey: ['hr-cost'] });
+    void qc.invalidateQueries({ queryKey: ['hr-slip-periods'] });
   };
   const act = async (path: string, msg: string, body: unknown = {}) => {
     setBusy(true);
@@ -84,15 +81,15 @@ export default function Payroll() {
         <span className="row">
           <select value={period ?? ''} onChange={(e) => setPeriod(e.target.value)} aria-label="งวดเงินเดือน" data-testid="pay-period">
             {!period && <option value="">ยังไม่มีงวด</option>}
-            {period && !runs.data?.items.some((x) => x.period === period) && <option value={period}>{periodTH(period)}</option>}
-            {(runs.data?.items ?? []).map((x) => <option key={x.period} value={x.period}>{periodTH(x.period)}</option>)}
+            {period && !runs.rows.some((x) => x.period === period) && <option value={period}>{periodTH(period)}</option>}
+            {runs.rows.map((x) => <option key={x.period} value={x.period}>{periodTH(x.period)}</option>)}
           </select>
           {r && <Pill k={PAY_STATUS[r.status][1]}>{PAY_STATUS[r.status][0]}{r.status === 'paid' && r.paidBy ? ` · ${r.paidBy} · ${r.payDate ? th(r.payDate) : ''}` : ''}</Pill>}
           <button className="btn sm" onClick={() => setNewOpen(true)} data-testid="pay-new">+ ทำเงินเดือนงวดใหม่</button>
         </span>
         {r && (
           <span className="row">
-            <Link className="btn sm" to={`/payslip/${r.period}`} data-testid="slip-all">พิมพ์สลิปทั้งหมด</Link>
+            <SlipLink to={`/payslip/${r.period}`} published={r.published} testId="slip-all">พิมพ์สลิปทั้งหมด</SlipLink>
             {draft && <button className="btn sm" disabled={busy} onClick={() => void act('recalc', 'คำนวณใหม่จากข้อมูลพนักงาน วันลา และยอดขายแล้ว')}>คำนวณใหม่</button>}
             {draft && <button className="btn sm pri" disabled={busy} onClick={() => void act('approve', `อนุมัติเงินเดือน${periodTH(r.period)}แล้ว`)} data-testid="pay-approve">อนุมัติงวดนี้</button>}
             {r.status === 'approved' && <button className="btn sm" disabled={busy} onClick={() => void act('reopen', 'กลับเป็นร่างแล้ว แก้ไขได้')}>กลับเป็นร่าง</button>}
@@ -123,7 +120,7 @@ export default function Payroll() {
                   <td className="n">{inp(l, 'tax', 'w74')}</td>
                   <td className="n">{inp(l, 'advance', 'w74')}</td>
                   <td className="n"><b data-testid={`pl-net-${l.code}`}>{fmt(l.net)}</b></td>
-                  <td><Link className="btn sm" to={`/payslip/${period}?emp=${l.employeeId}`}>สลิป</Link></td>
+                  <td><SlipLink to={`/payslip/${period}?emp=${l.employeeId}`} published={!!r?.published} testId={`slip-${l.code}`}>สลิป</SlipLink></td>
                 </tr>
               ))}
               {T && (
@@ -138,6 +135,16 @@ export default function Payroll() {
         </div>
       )}
       {r && (
+        <div className="kv" style={{ margin: '10px 0' }} data-testid="pay-note">
+          <span>หมายเหตุงวดนี้</span>
+          <EditableNote note={r.note} canEdit testId="pay-note-edit" onSave={async (note) => {
+            const out = await api('PATCH', `/api/hr/payroll/${r.period}`, { body: { note }, schema: HrPayrollRun });
+            qc.setQueryData(['hr-run', r.period], out);
+            void qc.invalidateQueries({ queryKey: ['hr-runs'] });
+          }} />
+        </div>
+      )}
+      {r && (
         <p className="small muted">
           ประกันสังคม {d(r.ssoRate).times(100).toString()}% ฐานค่าจ้าง {fmt(r.ssoFloor)}–{fmt(r.ssoCap)} บาท (ตั้งได้ที่แท็บตั้งค่าเงินเดือน) · ภาษีเป็นประมาณการ ภ.ง.ด.1 แก้ได้
           · หักลาไม่รับค่าจ้าง / ลาเกินสิทธิ์ดึงจากเมนูวันลา · คอมมิชชันคิดจากยอดขายก่อน VAT ที่พนักงานออกบิล (ไม่นับบิลยกเลิก)
@@ -149,17 +156,17 @@ export default function Payroll() {
         <table data-testid="runs-table">
           <thead><tr><th>งวด</th><th>สถานะ</th><th className="n">คน</th><th className="n">รวมเงินได้</th><th className="n">ประกันสังคม</th><th className="n">สุทธิ</th></tr></thead>
           <tbody>
-            {runs.isLoading ? <SkeletonRows cols={6} rows={3} /> : (runs.data?.items ?? []).map((x) => (
+            {runs.isLoading ? <SkeletonRows cols={6} rows={3} /> : runs.rows.map((x) => (
               <tr key={x.period} className="click" onClick={() => setPeriod(x.period)}>
-                <td>{periodTH(x.period)}</td><td><Pill k={PAY_STATUS[x.status][1]}>{PAY_STATUS[x.status][0]}</Pill></td><td className="n">{x.headcount}</td>
+                <td>{periodTH(x.period)}{x.note && <div className="small muted">{x.note}</div>}</td><td><Pill k={PAY_STATUS[x.status][1]}>{PAY_STATUS[x.status][0]}</Pill></td><td className="n">{x.headcount}</td>
                 <td className="n">{fmt(x.totals.gross)}</td><td className="n">{fmt(x.totals.sso)}</td><td className="n">{fmt(x.totals.net)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!runs.data?.nextCursor} count={runs.data?.items.length} loading={runs.isFetching} onPrev={pager.prev} onNext={() => pager.next(runs.data?.nextCursor ?? null)} />
-      {newOpen && <NewRunModal existing={(runs.data?.items ?? []).map((x) => x.period)} onClose={() => setNewOpen(false)} onCreated={(p) => { setNewOpen(false); setPeriod(p); refresh(p); }} />}
+      <LoadMore hasMore={!!runs.hasNextPage} loading={runs.isFetchingNextPage} onMore={() => void runs.fetchNextPage()} count={runs.rows.length} testId="runs-more" />
+      {newOpen && <NewRunModal existing={runs.rows.map((x) => x.period)} onClose={() => setNewOpen(false)} onCreated={(p) => { setNewOpen(false); setPeriod(p); refresh(p); }} />}
       {payOpen && r && (
         <PayModal period={r.period} net={T?.net ?? '0'} onClose={() => setPayOpen(false)} onPay={async (payDate) => { setPayOpen(false); await act('pay', `บันทึกจ่ายเงินเดือน${periodTH(r.period)}แล้ว · งวดนี้ล็อก`, { payDate }); }} />
       )}
@@ -171,11 +178,12 @@ function NewRunModal({ existing, onClose, onCreated }: { existing: string[]; onC
   const toast = useToast();
   const def = existing.includes(thisPeriod()) ? prevPeriod(thisPeriod()) : thisPeriod();
   const [p, setP] = useState(existing.includes(def) ? '' : def);
+  const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const go = async () => {
     if (!/^\d{4}-\d{2}$/.test(p)) return setErr('เลือกเดือน');
     try {
-      await api('POST', '/api/hr/payroll', { body: { period: p }, schema: HrPayrollRun });
+      await api('POST', '/api/hr/payroll', { body: { period: p, note: note.trim() || undefined }, schema: HrPayrollRun });
       toast(`สร้างเงินเดือน${periodTH(p)}แล้ว ระบบดึงค่าจ้าง วันลา และค่าคอมให้`);
       onCreated(p);
     } catch (e) {
@@ -186,6 +194,7 @@ function NewRunModal({ existing, onClose, onCreated }: { existing: string[]; onC
     <Modal onClose={onClose} label="ทำเงินเดือนงวดใหม่">
       <h3>ทำเงินเดือนงวดใหม่</h3>
       <label className="f">เดือน<input type="month" value={p} onChange={(e) => setP(e.target.value)} data-testid="pay-new-period" style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '7px 10px' }} /></label>
+      <NoteField value={note} onChange={setNote} testId="pay-new-note" placeholder="เช่น รวมโบนัสสงกรานต์ / จ่ายช้า 2 วัน" />
       <p className="small muted" style={{ margin: 0 }}>ระบบสร้างรายการของพนักงานที่ทำงานอยู่ทุกคน (ไม่รวมเจ้าของกิจการและบุคคลภายนอก) จากค่าจ้าง ประกันสังคม วันลาที่อนุมัติ และยอดขายของแต่ละคน แก้ OT เบี้ย เบิกล่วงหน้า และภาษีได้จนกว่าจะอนุมัติ</p>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" onClick={() => void go()} data-testid="pay-new-ok">สร้าง</button></div>

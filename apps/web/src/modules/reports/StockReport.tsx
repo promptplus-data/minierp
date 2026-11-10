@@ -1,12 +1,11 @@
 /** M11-02 stock on hand with FIFO value as of a date, slow movers, below reorder point. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ReportStock } from '@erp/contracts';
-import { api, errText } from '../../api';
 import { useWarehouses } from '../../data';
-import { fmt, fq, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../../ui';
-import { DownloadButtons, Field, bkkToday } from './shared';
+import { fmt, fq, Pill, SkeletonRows, th, useDebounced } from '../../ui';
+import { DownloadButtons, Field, bkkToday, useReportPages } from './shared';
 import { ErrorBanner } from '../../errors';
+import { LoadMore } from '../../ui/lists';
 import { RouteLink } from '../../doclink';
 
 export default function StockReport() {
@@ -18,13 +17,9 @@ export default function StockReport() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
   const filt = { asOf, warehouseId, only, slowDays, q: dq };
-  const pager = useCursorPager(JSON.stringify(filt));
-  const r = useQuery({
-    queryKey: ['rp', 'stock', filt, pager.cursor], placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/reports/stock', { query: { ...filt, cursor: pager.cursor }, schema: ReportStock }),
-  });
+  const r = useReportPages('stock', '/api/reports/stock', filt, ReportStock);
   const data = r.data;
-  const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
+  const loading = r.isLoading;
   const cost = data?.costVisible ?? false;
   const cols = 8 + (cost ? 2 : 0);
   const t = data?.totals;
@@ -66,7 +61,7 @@ export default function StockReport() {
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(data?.nextCursor ?? null)} count={data?.rows.length} loading={loading} />
+      <LoadMore hasMore={!!r.hasNextPage} loading={r.isFetchingNextPage} onMore={() => void r.fetchNextPage()} count={data?.rows.length} testId="stock-more" />
     </>
   );
 }

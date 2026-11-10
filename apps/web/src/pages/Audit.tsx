@@ -1,9 +1,9 @@
-/** BR-18 audit log (owner / manager): cursor-paged, search, hash-chain verify. */
+/** BR-18 audit log (owner / manager): lazy list (20 rows at a time), search, hash-chain verify. */
 import { useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { AuditEntry, page } from '@erp/contracts';
+import { AuditEntry } from '@erp/contracts';
 import { api, errText } from '../api';
-import { Pager, Pill, SkeletonRows, thTime, useCursorPager, useDebounced, useToast, type PillKind } from '../ui';
+import { Pill, SkeletonRows, thTime, useDebounced, useToast, type PillKind } from '../ui';
+import { LoadMore, useLoadMore } from '../ui/lists';
 import { ErrorBanner } from '../errors';
 import { Link } from 'react-router-dom';
 import { DocLink, DocText } from '../doclink';
@@ -45,13 +45,8 @@ export default function Audit() {
   const toast = useToast();
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 300);
-  const pager = useCursorPager(dq);
-  const list = useQuery({
-    queryKey: ['audit', dq, pager.cursor],
-    queryFn: () => api('GET', '/api/audit-log', { query: { q: dq, limit: 20, cursor: pager.cursor }, schema: page(AuditEntry) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore(['audit'], '/api/audit-log', AuditEntry, { q: dq }, 20);
+  const loading = list.isLoading;
   const verify = async () => {
     try {
       const r = await api<{ ok: boolean; brokenAt: string | null; rows: number }>('GET', '/api/audit-log/verify');
@@ -71,7 +66,7 @@ export default function Audit() {
         <table data-testid="audit-table">
           <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การกระทำ</th><th>เรื่อง</th><th>เลขที่</th><th>รายละเอียด</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={6} /> : (list.data?.items ?? []).map((a) => {
+            {loading ? <SkeletonRows cols={6} /> : list.rows.map((a) => {
               const [label, k] = ACT[a.action] ?? [a.action, 'mut' as PillKind];
               return (
                 <tr key={a.id}>
@@ -80,11 +75,11 @@ export default function Audit() {
                 </tr>
               );
             })}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={6} className="empty">ไม่พบรายการ</td></tr>}
+            {!loading && list.data && !list.rows.length && <tr><td colSpan={6} className="empty">ไม่พบรายการ</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} testId="audit-more" />
       <p className="small muted" style={{ margin: '8px 0 0' }}>ทุกการเพิ่ม แก้ไข ยกเลิก และอนุมัติ ลงชื่อผู้ใช้และเวลาอัตโนมัติ แก้หรือลบ log ไม่ได้ (ต่อกันเป็น hash chain)</p>
     </div>
   );

@@ -1,11 +1,12 @@
 /** M12 export to accounting programs: PEAK (templates), FlowAccount, Express, journal, general CSV/Excel; GL codes; history. */
 import { useState } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { EXPORT_COMBOS, ExportGl, ExportRun, page, type ExportDataset, type ExportTemplate } from '@erp/contracts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { EXPORT_COMBOS, ExportGl, ExportRun, type ExportDataset, type ExportTemplate } from '@erp/contracts';
 import { GL_LABELS } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { Pager, SkeletonRows, thTime, useCursorPager, useToast } from '../../ui';
+import { SkeletonRows, thTime, useToast } from '../../ui';
+import { LoadMore, useLoadMore } from '../../ui/lists';
 import { Field, bkkToday, downloadFile, monthEnd, monthStart, prevMonth, thisMonth } from './shared';
 
 const TPL: [ExportTemplate, string][] = [['peak', 'PEAK'], ['flowaccount', 'FlowAccount'], ['express', 'Express'], ['journal', 'Journal (เดบิต/เครดิต)'], ['generic', 'Excel / CSV ทั่วไป']];
@@ -82,12 +83,8 @@ export default function Export() {
   });
   const setMonth = (m: string) => { setFrom(`${m}-01`); setTo(monthEnd(m)); };
 
-  const pager = useCursorPager('runs');
-  const runs = useQuery({
-    queryKey: ['rp', 'runs', pager.cursor], enabled: canExport, placeholderData: keepPreviousData,
-    queryFn: () => api('GET', '/api/acct-export/runs', { query: { cursor: pager.cursor, limit: 10 }, schema: page(ExportRun) }),
-  });
-  const loading = runs.isLoading || (runs.isFetching && runs.isPlaceholderData);
+  const runs = useLoadMore(['rp', 'runs'], '/api/acct-export/runs', ExportRun, {}, 10, canExport);
+  const loading = runs.isLoading && canExport;
 
   return (
     <>
@@ -130,18 +127,18 @@ export default function Export() {
             <table>
               <thead><tr><th>วันที่</th><th>รูปแบบ</th><th>ข้อมูล</th><th>ช่วงเวลา</th><th className="n">แถว</th><th>โดย</th><th>ไฟล์</th></tr></thead>
               <tbody>
-                {loading ? <SkeletonRows cols={7} rows={4} /> : (runs.data?.items ?? []).map((h) => (
+                {loading ? <SkeletonRows cols={7} rows={4} /> : runs.rows.map((h) => (
                   <tr key={h.id}>
                     <td className="small nw">{thTime(h.createdAt)}</td><td>{tplName(h.template)}</td><td>{DS[h.dataset]}{h.onlyNew ? <div className="small muted">เฉพาะที่ยังไม่ส่งออก</div> : null}</td>
                     <td className="small nw">{h.from ? `${h.from} – ${h.to}` : 'ข้อมูลหลัก'}</td><td className="n">{h.rows}</td><td className="small nw">{h.createdBy}</td>
                     <td><FileLinks run={h} />{h.changedAfter.length > 0 && <div className="small" style={{ color: 'var(--bad)', marginTop: 4 }}>เอกสารยกเลิกหลังส่งออก: {h.changedAfter.map((x) => x.no).join(', ')} · แก้ในโปรแกรมบัญชีด้วย</div>}</td>
                   </tr>
                 ))}
-                {!loading && !runs.data?.items.length && <tr><td colSpan={7} className="empty">ยังไม่เคยส่งออก</td></tr>}
+                {!loading && !runs.rows.length && <tr><td colSpan={7} className="empty">ยังไม่เคยส่งออก</td></tr>}
               </tbody>
             </table>
           </div>
-          <Pager page={pager.page} hasNext={!!runs.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(runs.data?.nextCursor ?? null)} count={runs.data?.items.length} loading={loading} />
+          <LoadMore hasMore={!!runs.hasNextPage} loading={runs.isFetchingNextPage} onMore={() => void runs.fetchNextPage()} count={runs.rows.length} />
         </div>
       )}
     </>
