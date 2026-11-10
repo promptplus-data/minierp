@@ -7,7 +7,7 @@ import { z } from 'zod';
 import {
   ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
   GrListQuery, ImportCommitReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettings, StockCountEntryReq,
-  StockCountOpenReq, StockCountQuery, VendorReturnReq, pageQuery,
+  StockCountOpenReq, StockCountQuery, StockCountRecountReq, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny } from '../../lib/context';
 import type { ErpModule } from '../types';
@@ -91,6 +91,7 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   app.post('/api/stock-counts/:id/entries', authed(async (tx, ctx, req) => sx.countEntry(tx, ctx, params(req).id, StockCountEntryReq.parse(req.body))));
   app.post('/api/stock-counts/:id/submit', authed(async (tx, ctx, req) => sx.submitCount(tx, deps, ctx, params(req).id)));
   app.post('/api/stock-counts/:id/cancel', authed(async (tx, ctx, req) => sx.cancelCount(tx, ctx, params(req).id)));
+  app.post('/api/stock-counts/:id/recount', authed(async (tx, ctx, req) => sx.recountLines(tx, ctx, params(req).id, StockCountRecountReq.parse(req.body))));
   app.get('/api/stock/ledger', authed(async (tx, ctx, req) => sx.ledger(tx, ctx, LedgerQuery.parse(req.query))));
   app.get('/api/stock/reorder', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['inv.view', 'inv.receive', 'fin.ap'], { readOnly: true });

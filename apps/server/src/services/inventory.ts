@@ -49,7 +49,23 @@ async function insertStockDocWithId(tx: Tx, ctx: Ctx, id: string, doc: StockDocI
 
 // ---------- reads ----------
 
-export async function balances(tx: Tx, q: { q?: string; limit: number; cursor?: string; warehouseId?: string; productId?: string }) {
+/**
+ * Open sales-order quantity not delivered yet, per product × warehouse (REQ-M06-01 reserved). A sales order without a
+ * warehouse reserves in the default sellable warehouse (the one its delivery would cut by default). Held POS bills do
+ * not reserve: they are carts parked at the counter, not commitments, and stock is checked when they are paid.
+ * Reserved never blocks a sale or delivery (only on hand does, BR-07); it is shown so staff do not promise the same goods twice.
+ */
+export const RESERVED_CTE = `
+  reserved as (
+    select l.product_id, coalesce(so.warehouse_id, (select w0.id from warehouses w0 where w0.active and w0.kind = 'normal' order by w0.is_pos, w0.code limit 1)) warehouse_id,
+           sum(greatest(l.base_qty - coalesce((select sum(dl.base_qty) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id
+                                                where dl.so_line_id = l.id and dv.status = 'active'), 0), 0)) q
+      from sales_order_lines l join sales_orders so on so.id = l.so_id
+     where so.status = 'active' and so.dlv_status <> 'delivered'
+     group by 1, 2
+  )`;
+
+export async function balances(tx: Tx, q: { q?: string; limit: number; cursor?: string; warehouseId?: string; productId?: string; damaged?: 'exclude' | 'include' | 'only' }) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where = [`p.kind = 'stock'`, `p.active`, `w.active`];
@@ -58,6 +74,10 @@ export async function balances(tx: Tx, q: { q?: string; limit: number; cursor?: 
     params.push(q.warehouseId);
     where.push(`w.id = $${params.length}`);
   }
+  // Damaged-goods warehouses are not sellable stock: left out of the totals unless asked for (or that warehouse is picked).
+  const damaged = q.damaged ?? (q.warehouseId ? 'include' : 'exclude');
+  if (damaged === 'exclude') where.push(`w.kind <> 'damaged'`);
+  if (damaged === 'only') where.push(`w.kind = 'damaged'`);
   if (q.productId) {
     if (!isUuid(q.productId)) throw E.validation('Unknown product');
     params.push(q.productId);
@@ -72,15 +92,21 @@ export async function balances(tx: Tx, q: { q?: string; limit: number; cursor?: 
     where.push(`(p.sku, w.code) > ($${params.length - 1}, $${params.length})`);
   }
   params.push(q.limit + 1);
-  const r = await tx.query<{ product_id: string; warehouse_id: string; sku: string; code: string; qty: string }>(
-    `select p.id product_id, w.id warehouse_id, p.sku, w.code,
-            coalesce((select sum(l.remaining) from stock_lots l where l.product_id = p.id and l.warehouse_id = w.id), 0)::text qty
+  const r = await tx.query<{ product_id: string; warehouse_id: string; sku: string; code: string; qty: string; reserved: string; damaged: boolean }>(
+    `with ${RESERVED_CTE}
+     select p.id product_id, w.id warehouse_id, p.sku, w.code, w.kind = 'damaged' damaged,
+            coalesce((select sum(l.remaining) from stock_lots l where l.product_id = p.id and l.warehouse_id = w.id), 0)::text qty,
+            coalesce(r.q, 0)::text reserved
        from products p cross join warehouses w
+       left join reserved r on r.product_id = p.id and r.warehouse_id = w.id
       where ${where.join(' and ')}
       order by p.sku, w.code limit $${params.length}`,
     params,
   );
-  return pageOf(r.rows, q.limit, (x) => [x.sku, x.code], (x) => ({ productId: x.product_id, warehouseId: x.warehouse_id, qty: qty4(x.qty) }));
+  return pageOf(r.rows, q.limit, (x) => [x.sku, x.code], (x) => ({
+    productId: x.product_id, warehouseId: x.warehouse_id, qty: qty4(x.qty), reserved: qty4(x.reserved),
+    available: x.damaged ? '0' : qty4(d(x.qty).minus(d(x.reserved))), damaged: x.damaged,
+  }));
 }
 
 export async function lots(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string; warehouseId?: string; productId?: string }) {
@@ -169,8 +195,9 @@ async function takeOut(tx: Tx, ctx: Ctx, warehouseId: string, lines: { p: Produc
 export async function transfer(tx: Tx, deps: Deps, ctx: Ctx, req: { fromWarehouseId: string; toWarehouseId: string; lines: LineIn[]; note?: string }): Promise<StockDoc> {
   requireAny(ctx, ['inv.adj', 'inv.receive']);
   if (req.fromWarehouseId === req.toWarehouseId) throw E.validation('Pick a destination different from the source');
-  const from = await requireWarehouse(tx, req.fromWarehouseId);
-  const to = await requireWarehouse(tx, req.toWarehouseId);
+  // Damaged goods may move between warehouses (e.g. to the store they go back to the vendor from), so both ends opt in.
+  const from = await requireWarehouse(tx, req.fromWarehouseId, { damaged: true });
+  const to = await requireWarehouse(tx, req.toWarehouseId, { damaged: true });
   const lines = await baseLines(tx, req.lines);
   const no = await nextDocNo(tx, ctx.tenantId, 'TR', deps.today());
   const docId = await newId(tx);
@@ -196,7 +223,7 @@ export async function transfer(tx: Tx, deps: Deps, ctx: Ctx, req: { fromWarehous
 
 export async function issue(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: string; lines: LineIn[]; reason: string }): Promise<StockDoc> {
   requirePerm(ctx, 'inv.adj');
-  const wh = await requireWarehouse(tx, req.warehouseId);
+  const wh = await requireWarehouse(tx, req.warehouseId, { damaged: true });
   const lines = await baseLines(tx, req.lines);
   const no = await nextDocNo(tx, ctx.tenantId, 'ADJ', deps.today());
   const docId = await newId(tx);
@@ -210,30 +237,40 @@ export async function issue(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: st
   return doc;
 }
 
-interface AdjRow { id: string; requested_by_id: string; no: string; warehouse_id: string; lines: { productId: string; qtyDelta: string }[]; reason: string; status: 'pending' | 'approved' | 'rejected'; requested_by: string; decided_by: string | null; result_doc_no: string | null; created_at: Date }
-const ADJ_SELECT = `select a.id, a.requested_by requested_by_id, a.no, a.warehouse_id, a.lines, a.reason, a.status, ru.name requested_by, du.name decided_by, a.result_doc_no, a.created_at
+type AdjLineState = 'approved' | 'rejected' | 'recount';
+interface AdjLine { productId: string; qtyDelta: string; state?: AdjLineState }
+interface AdjRow { id: string; requested_by_id: string; no: string; warehouse_id: string; lines: AdjLine[]; reason: string; note: string; status: 'pending' | 'approved' | 'rejected'; requested_by: string; decided_by: string | null; result_doc_no: string | null; created_at: Date; count_no: string | null }
+const ADJ_SELECT = `select a.id, a.requested_by requested_by_id, a.no, a.warehouse_id, a.lines, a.reason, a.note, a.status, ru.name requested_by, du.name decided_by, a.result_doc_no, a.created_at,
+    (select c.no from stock_count_lines cl join stock_counts c on c.id = cl.count_id where cl.adjust_request_id = a.id limit 1) count_no
   from adjust_requests a join users ru on ru.id = a.requested_by left join users du on du.id = a.decided_by`;
 const toAdj = (r: AdjRow) => ({
-  id: r.id, no: r.no, warehouseId: r.warehouse_id, lines: r.lines, reason: r.reason, status: r.status, requestedBy: r.requested_by,
-  decidedBy: r.decided_by, resultDocNo: r.result_doc_no, createdAt: r.created_at.toISOString(),
+  id: r.id, no: r.no, warehouseId: r.warehouse_id, lines: r.lines, reason: r.reason, note: r.note, status: r.status, requestedBy: r.requested_by,
+  decidedBy: r.decided_by, resultDocNo: r.result_doc_no, createdAt: r.created_at.toISOString(), countNo: r.count_no,
 });
+const adjById = async (tx: Tx, id: string) => toAdj((await tx.query<AdjRow>(`${ADJ_SELECT} where a.id = $1`, [id])).rows[0]!);
+const signed = (q: string) => `${d(q).gt(0) ? '+' : ''}${q}`;
 
-export async function requestAdjust(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: string; lines: { productId: string; qtyDelta: string }[]; reason: string }) {
+export async function requestAdjust(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: string; lines: { productId: string; qtyDelta: string }[]; reason: string; note?: string }) {
   requireAny(ctx, ['inv.adj', 'inv.count']);
-  const wh = await requireWarehouse(tx, req.warehouseId);
+  // A write-off of damaged goods is an adjustment of the damaged-goods warehouse.
+  const wh = await requireWarehouse(tx, req.warehouseId, { damaged: true });
   const products = await loadProducts(tx, req.lines.map((l) => l.productId));
+  const seen = new Set<string>();
   for (const l of req.lines) {
     if (products.get(l.productId)!.kind !== 'stock') throw E.validation('Services have no stock');
     if (d(l.qtyDelta).isZero()) throw E.validation('qtyDelta must not be 0');
+    if (seen.has(l.productId)) throw E.validation(`${products.get(l.productId)!.sku} appears twice`);
+    seen.add(l.productId);
   }
   const no = await nextDocNo(tx, ctx.tenantId, 'RQ', deps.today());
   const lines = req.lines.map((l) => ({ productId: l.productId, qtyDelta: qty4(l.qtyDelta) }));
+  const note = req.note?.trim() ?? '';
   const r = await tx.query<{ id: string }>(
-    `insert into adjust_requests (tenant_id, no, warehouse_id, lines, reason, requested_by) values ($1,$2,$3,$4,$5,$6) returning id`,
-    [ctx.tenantId, no, wh.id, JSON.stringify(lines), req.reason, ctx.userId],
+    `insert into adjust_requests (tenant_id, no, warehouse_id, lines, reason, note, requested_by) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+    [ctx.tenantId, no, wh.id, JSON.stringify(lines), req.reason, note, ctx.userId],
   );
-  await writeAudit(tx, ctx, [{ action: 'request', object: 'stock-adjust', ref: no, detail: `${wh.name} · ${lines.map((l) => `${products.get(l.productId)!.sku} ${d(l.qtyDelta).gt(0) ? '+' : ''}${l.qtyDelta}`).join(', ')} · ${req.reason}` }]);
-  return toAdj((await tx.query<AdjRow>(`${ADJ_SELECT} where a.id = $1`, [r.rows[0]!.id])).rows[0]!);
+  await writeAudit(tx, ctx, [{ action: 'request', object: 'stock-adjust', ref: no, detail: `${wh.name} · ${lines.map((l) => `${products.get(l.productId)!.sku} ${signed(l.qtyDelta)}`).join(', ')} · ${req.reason}${note ? ' · ' + note : ''}` }]);
+  return adjById(tx, r.rows[0]!.id);
 }
 
 export async function listAdjust(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string; status?: string; q?: string }) {
@@ -245,9 +282,9 @@ export async function listAdjust(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: 
     params.push(q.status);
     where.push(`a.status = $${params.length}`);
   }
-  if (q.q?.trim()) {
-    params.push(`%${q.q.trim().replace(/[\\%_]/g, '\\$&')}%`);
-    where.push(`a.no ilike $${params.length}`);
+  for (const w of searchTokens(q.q)) {
+    params.push(`%${likeEscape(w)}%`);
+    where.push(`(a.no ilike $${params.length} or a.reason ilike $${params.length} or a.note ilike $${params.length})`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);
@@ -268,35 +305,114 @@ async function lockPending(tx: Tx, id: string): Promise<AdjRow> {
   return a;
 }
 
-/** Approval applies the deltas: decreases consume FIFO lots (shortage -> 409, request stays pending), increases add a lot at current FIFO average cost. */
+/**
+ * Sends count lines back to counting (สั่งนับใหม่): the previous count is kept in prev_counted_qty, the round number
+ * goes up and the count reopens. The snapshot and opened_at stay, so moves during the whole round remain netted.
+ */
+export async function resetCountLines(tx: Tx, countId: string, productIds: string[]): Promise<void> {
+  const c = await tx.query<{ round: number }>(`update stock_counts set status = 'counting', round = round + 1 where id = $1 returning round`, [countId]);
+  await tx.query(
+    `update stock_count_lines set state = 'counting', prev_counted_qty = coalesce(counted_qty, prev_counted_qty), counted_qty = null, counted_by = null,
+            counted_at = null, moved_qty = null, adjust_request_id = null, round = $3
+      where count_id = $1 and product_id = any($2::uuid[])`,
+    [countId, productIds, c.rows[0]!.round],
+  );
+}
+
+/** Marks lines of a pending request as sent back to recount; a request with nothing left to decide is closed as rejected. */
+export async function markRecount(tx: Tx, ctx: Ctx, a: { id: string; lines: AdjLine[] }, productIds: string[]): Promise<void> {
+  const ids = new Set(productIds);
+  const lines = a.lines.map((l) => (ids.has(l.productId) && !l.state ? { ...l, state: 'recount' as const } : l));
+  const done = lines.every((l) => l.state);
+  await tx.query(
+    `update adjust_requests set lines = $2, status = case when $3 then 'rejected' else status end,
+            decided_by = case when $3 then $4::uuid else decided_by end, decided_at = case when $3 then now() else decided_at end where id = $1`,
+    [a.id, JSON.stringify(lines), done, ctx.userId],
+  );
+}
+
+/**
+ * Line-by-line decision on a pending adjustment request (REQ-M06-06 partial approval). Approved lines are applied in one
+ * ADJ document: decreases consume FIFO lots (shortage → 409, nothing written), increases add a lot at the current FIFO
+ * average cost. Lines not listed are rejected. recount sends lines of a stock count back to counting. Self-approval is
+ * forbidden (owner excepted).
+ */
+export async function decideAdjust(tx: Tx, deps: Deps, ctx: Ctx, id: string, req: { approve: string[]; reject: string[]; recount: string[]; note?: string }) {
+  requirePerm(ctx, 'inv.adjApprove');
+  const a = await lockPending(tx, id);
+  const open = a.lines.filter((l) => !l.state);
+  const openIds = new Set(open.map((l) => l.productId));
+  const listed = [...req.approve, ...req.reject, ...req.recount];
+  if (new Set(listed).size !== listed.length) throw E.validation('A line can have only one decision');
+  const bad = listed.find((p) => !openIds.has(p));
+  if (bad) throw E.validation(`Product ${bad} is not an open line of ${a.no}`);
+  if (req.approve.length && a.requested_by_id === ctx.userId && ctx.role !== 'owner') throw E.forbidden('You cannot approve your own adjustment request', { reason: 'SELF_APPROVAL' });
+  const countLines = await tx.query<{ count_id: string; product_id: string }>(`select count_id, product_id from stock_count_lines where adjust_request_id = $1`, [a.id]);
+  if (req.recount.length) {
+    const fromCount = new Set(countLines.rows.map((x) => x.product_id));
+    if (req.recount.some((p) => !fromCount.has(p))) throw E.validation('Only lines of a stock count can be sent back to recount');
+  }
+  const approve = new Set(req.approve);
+  const recount = new Set(req.recount);
+  const stateOf = (pid: string): AdjLineState => (approve.has(pid) ? 'approved' : recount.has(pid) ? 'recount' : 'rejected');
+  const products = await loadProducts(tx, a.lines.map((l) => l.productId));
+  const approved = open.filter((l) => approve.has(l.productId));
+
+  let doc: StockDoc | null = null;
+  if (approved.length) {
+    const no = await nextDocNo(tx, ctx.tenantId, 'ADJ', deps.today());
+    const docId = await newId(tx);
+    const decreases = approved.filter((l) => d(l.qtyDelta).lt(0)).map((l) => ({ p: products.get(l.productId)!, baseQty: qty4(d(l.qtyDelta).neg()) }));
+    const { plans } = await takeOut(tx, ctx, a.warehouse_id, decreases, { docType: 'ADJ', docNo: no, docId, note: `ปรับยอด: ${a.reason}` });
+    const out: StockDoc['lines'] = plans.map((p) => ({ productId: p.productId, qty: d(p.qty).neg().toFixed(), unitCost: qty4(d(p.cogs).div(d(p.qty))) }));
+    for (const l of approved.filter((x) => d(x.qtyDelta).gt(0))) {
+      const unitCost = await currentAvgCost(tx, l.productId);
+      const lotId = await addLot(tx, ctx, { productId: l.productId, warehouseId: a.warehouse_id, qty: l.qtyDelta, unitCost, ref: no });
+      await recordIn(tx, ctx, a.warehouse_id, l.productId, [{ lotId, qty: l.qtyDelta, unitCost }], { docType: 'ADJ', docNo: no, docId, note: `ปรับยอด: ${a.reason}` });
+      out.push({ productId: l.productId, qty: l.qtyDelta, unitCost });
+    }
+    doc = await insertStockDocWithId(tx, ctx, docId, { no, type: 'ADJ', date: deps.today(), warehouseId: a.warehouse_id, reason: `${a.no} · ${a.reason}`, lines: out });
+  }
+  // Lines decided earlier (sent back to recount from the count page) keep their state.
+  const lines = a.lines.map((l) => (l.state ? l : { ...l, state: stateOf(l.productId) }));
+  const partial = lines.some((l) => l.state !== lines[0]!.state);
+  const note = req.note?.trim() ?? '';
+  await tx.query(
+    `update adjust_requests set status = $2, decided_by = $3, decided_at = now(), result_doc_no = $4, lines = $5,
+            note = case when $6 = '' then note when note = '' then $6 else note || ' · ' || $6 end where id = $1`,
+    [a.id, approved.length ? 'approved' : 'rejected', ctx.userId, doc?.no ?? null, JSON.stringify(partial ? lines : a.lines), note],
+  );
+  // Stock-count lines follow the decision; recount lines reopen the count.
+  for (const st of ['approved', 'rejected'] as const) {
+    const ids = open.filter((l) => stateOf(l.productId) === st).map((l) => l.productId);
+    if (ids.length) await tx.query(`update stock_count_lines set state = $3 where adjust_request_id = $1 and product_id = any($2::uuid[])`, [a.id, ids, st]);
+  }
+  if (req.recount.length) await resetCountLines(tx, countLines.rows[0]!.count_id, req.recount);
+
+  await deps.hooks.beforeCommit?.('approveAdjust', tx);
+  const sku = (pid: string) => products.get(pid)!.sku;
+  const parts = [
+    approved.length ? `อนุมัติ ${approved.map((l) => `${sku(l.productId)} ${signed(l.qtyDelta)}`).join(', ')}` : '',
+    open.filter((l) => stateOf(l.productId) === 'rejected').length ? `ไม่อนุมัติ ${open.filter((l) => stateOf(l.productId) === 'rejected').map((l) => sku(l.productId)).join(', ')}` : '',
+    req.recount.length ? `สั่งนับใหม่ ${req.recount.map(sku).join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+  await writeAudit(tx, ctx, [{
+    action: approved.length ? 'approve' : 'reject', object: 'stock-adjust', ref: doc?.no ?? a.no,
+    detail: `${a.no} · ${parts} · ขอโดย ${a.requested_by}${note ? ' · ' + note : ''}`,
+  }]);
+  return { request: await adjById(tx, a.id), doc };
+}
+
+/** Approves every open line (the whole request). */
 export async function approveAdjust(tx: Tx, deps: Deps, ctx: Ctx, id: string) {
   requirePerm(ctx, 'inv.adjApprove');
   const a = await lockPending(tx, id);
-  if (a.requested_by_id === ctx.userId && ctx.role !== 'owner') throw E.forbidden('You cannot approve your own adjustment request', { reason: 'SELF_APPROVAL' });
-  const products = await loadProducts(tx, a.lines.map((l) => l.productId));
-  const no = await nextDocNo(tx, ctx.tenantId, 'ADJ', deps.today());
-  const docId = await newId(tx);
-  const decreases = a.lines.filter((l) => d(l.qtyDelta).lt(0)).map((l) => ({ p: products.get(l.productId)!, baseQty: qty4(d(l.qtyDelta).neg()) }));
-  const { plans } = await takeOut(tx, ctx, a.warehouse_id, decreases, { docType: 'ADJ', docNo: no, docId, note: `ปรับยอด: ${a.reason}` });
-  const out: StockDoc['lines'] = plans.map((p) => ({ productId: p.productId, qty: d(p.qty).neg().toFixed(), unitCost: qty4(d(p.cogs).div(d(p.qty))) }));
-  for (const l of a.lines.filter((x) => d(x.qtyDelta).gt(0))) {
-    const unitCost = await currentAvgCost(tx, l.productId);
-    const lotId = await addLot(tx, ctx, { productId: l.productId, warehouseId: a.warehouse_id, qty: l.qtyDelta, unitCost, ref: no });
-    await recordIn(tx, ctx, a.warehouse_id, l.productId, [{ lotId, qty: l.qtyDelta, unitCost }], { docType: 'ADJ', docNo: no, docId, note: `ปรับยอด: ${a.reason}` });
-    out.push({ productId: l.productId, qty: l.qtyDelta, unitCost });
-  }
-  const doc = await insertStockDocWithId(tx, ctx, docId, { no, type: 'ADJ', date: deps.today(), warehouseId: a.warehouse_id, reason: `${a.no} · ${a.reason}`, lines: out });
-  await tx.query(`update adjust_requests set status = 'approved', decided_by = $2, decided_at = now(), result_doc_no = $3 where id = $1`, [a.id, ctx.userId, no]);
-  await deps.hooks.beforeCommit?.('approveAdjust', tx);
-  await writeAudit(tx, ctx, [{ action: 'approve', object: 'stock-adjust', ref: no, detail: `${a.no} · ${a.lines.map((l) => `${products.get(l.productId)!.sku} ${d(l.qtyDelta).gt(0) ? '+' : ''}${l.qtyDelta}`).join(', ')} · ขอโดย ${a.requested_by}` }]);
-  return { request: toAdj((await tx.query<AdjRow>(`${ADJ_SELECT} where a.id = $1`, [a.id])).rows[0]!), doc };
+  const r = await decideAdjust(tx, deps, ctx, id, { approve: a.lines.filter((l) => !l.state).map((l) => l.productId), reject: [], recount: [] });
+  return { request: r.request, doc: r.doc! };
 }
 
-export async function rejectAdjust(tx: Tx, ctx: Ctx, id: string, note?: string) {
+export async function rejectAdjust(tx: Tx, deps: Deps, ctx: Ctx, id: string, note?: string) {
   requirePerm(ctx, 'inv.adjApprove');
   const a = await lockPending(tx, id);
-  await tx.query(`update adjust_requests set status = 'rejected', decided_by = $2, decided_at = now() where id = $1`, [a.id, ctx.userId]);
-  await writeAudit(tx, ctx, [{ action: 'reject', object: 'stock-adjust', ref: a.no, detail: `${a.reason}${note ? ' · ' + note : ''}` }]);
-  return toAdj((await tx.query<AdjRow>(`${ADJ_SELECT} where a.id = $1`, [a.id])).rows[0]!);
+  return (await decideAdjust(tx, deps, ctx, id, { approve: [], reject: a.lines.filter((l) => !l.state).map((l) => l.productId), recount: [], note })).request;
 }
-

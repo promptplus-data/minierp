@@ -32,7 +32,7 @@ async function toBoms(tx: Tx, ctx: Ctx, rows: BomRow[]): Promise<Bom[]> {
   if (!rows.length) return [];
   const ids = rows.flatMap((r) => [r.product_id, ...r.components.map((c) => c.productId)]);
   const products = await loadProducts(tx, ids);
-  const wh = (await tx.query<{ id: string }>(`select id from warehouses where active order by is_pos, code limit 1`)).rows[0]?.id ?? null; // production usually draws from the back store
+  const wh = (await tx.query<{ id: string }>(`select id from warehouses where active and kind = 'normal' order by is_pos, code limit 1`)).rows[0]?.id ?? null; // production usually draws from the back store
   return Promise.all(rows.map(async (r) => {
     const p = products.get(r.product_id)!;
     const costs = seeCost(ctx) ? await peekCosts(tx, wh, r.components.map((c) => ({ productId: c.productId, qty: c.qtyPerUnit }))) : [];

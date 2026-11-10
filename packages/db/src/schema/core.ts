@@ -60,6 +60,10 @@ export const warehouses = pgTable('warehouses', {
   name: text('name').notNull(),
   isPos: boolean('is_pos').notNull().default(false),
   active: boolean('active').notNull().default(true),
+  /** 'normal' | 'damaged' (คลังของเสีย: never POS / sellable). 0630. */
+  kind: text('kind').notNull().default('normal'),
+  /** Created by the system (the auto-created damaged warehouse). */
+  isSystem: boolean('is_system').notNull().default(false),
   createdAt: createdAt(),
 }, (t) => [uniqueIndex('warehouses_tenant_code').on(t.tenantId, t.code)]);
 
@@ -193,6 +197,8 @@ export const docs = pgTable('docs', {
   refund: text('refund'),
   condition: text('condition'),
   reason: text('reason'),
+  /** Credit note: free note from the return screen (0630; TODO merge with docs.note). */
+  cnNote: text('cn_note'),
   /** Lower-cased haystack for the returns bill picker (pg_trgm GIN index). */
   searchText: text('search_text').notNull().default(''),
   createdAt: createdAt(),
@@ -228,6 +234,8 @@ export const docLines = pgTable('doc_lines', {
   cogs: money('cogs'),
   /** Returns: the sold line this CN line refers to. */
   srcLineId: uuid('src_line_id'),
+  /** Credit-note line: 'good' | 'damaged' (0630). */
+  returnCondition: text('return_condition'),
   // Module C (retail, migration 0300): promo / bundle / price-list snapshot of POS lines.
   retailPromoId: uuid('retail_promo_id'),
   retailPromoName: text('retail_promo_name'),
@@ -322,6 +330,7 @@ export const adjustRequests = pgTable('adjust_requests', {
   decidedBy: uuid('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   resultDocNo: text('result_doc_no'),
+  note: text('note').notNull().default(''),
   createdAt: createdAt(),
 }, (t) => [
   uniqueIndex('adjust_requests_tenant_no').on(t.tenantId, t.no),

@@ -14,7 +14,7 @@ import { endOfDay, nextOffset, offsetOf } from './sources';
 interface Row {
   product_id: string; sku: string; name: string; category: string; units: { name: string }[]; reorder_point: string;
   qty: string; value: string; last_out: string | null; first_in: string | null; low: boolean; slow: boolean;
-  n: number; tq: string; tv: string; nlow: number; nslow: number;
+  n: number; tq: string; tv: string; nlow: number; nslow: number; dq: string; dv: string; tdq: string; tdv: string;
 }
 
 export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQuery, all = false): Promise<ReportStock> {
@@ -45,12 +45,17 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
         group by ml.lot_id
      ),
      lot_q as (
-       select l.product_id, l.unit_cost, l.received_at, l.remaining - coalesce(a.delta, 0) q
-         from stock_lots l left join after_cut a on a.lot_id = l.id
+       select l.product_id, l.unit_cost, l.received_at, l.remaining - coalesce(a.delta, 0) q,
+              -- damaged-goods warehouses are reported apart unless the report is filtered to that warehouse
+              (w.kind = 'damaged' and $2::uuid is null) dmg
+         from stock_lots l left join after_cut a on a.lot_id = l.id join warehouses w on w.id = l.warehouse_id
         where ($2::uuid is null or l.warehouse_id = $2) and ($1::timestamptz is null or l.received_at < $1::timestamptz or l.created_at < $1::timestamptz)
      ),
      per as (
-       select product_id, sum(q) qty, sum(q * unit_cost) value, min(received_at) filter (where q > 0) first_in from lot_q group by product_id
+       select product_id, sum(q) filter (where not dmg) qty, sum(q * unit_cost) filter (where not dmg) value,
+              min(received_at) filter (where q > 0 and not dmg) first_in,
+              sum(q) filter (where dmg) dqty, sum(q * unit_cost) filter (where dmg) dvalue
+         from lot_q group by product_id
      ),
      outs as (
        select m.product_id, max(coalesce(sd.date, st.date, (m.at at time zone 'Asia/Bangkok')::date)) last_out
@@ -61,7 +66,7 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
      ),
      agg as (
        select p.id product_id, p.sku, p.name, p.category, p.units, p.reorder_point,
-              coalesce(per.qty, 0) qty, coalesce(per.value, 0) value,
+              coalesce(per.qty, 0) qty, coalesce(per.value, 0) value, coalesce(per.dqty, 0) dq, coalesce(per.dvalue, 0) dv,
               o.last_out::text last_out,
               to_char(per.first_in at time zone 'Asia/Bangkok', 'YYYY-MM-DD') first_in,
               (p.reorder_point > 0 and coalesce(per.qty, 0) < p.reorder_point) low,
@@ -69,7 +74,8 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
          from products p left join per on per.product_id = p.id left join outs o on o.product_id = p.id
         where ${where.join(' and ')}
      )
-     select product_id, sku, name, category, units, reorder_point::text, qty::text, value::text, last_out, first_in, low, slow,
+     select product_id, sku, name, category, units, reorder_point::text, qty::text, value::text, last_out, first_in, low, slow, dq::text, dv::text,
+            (sum(dq) over ())::text tdq, (sum(dv) over ())::text tdv,
             count(*) over ()::int n, (sum(qty) over ())::text tq, (sum(value) over ())::text tv,
             (count(*) filter (where low) over ())::int nlow, (count(*) filter (where slow) over ())::int nslow
        from agg ${filter} order by sku ${limitSql}`,
@@ -78,8 +84,8 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
   // Totals when the page is empty (offset past the end or no match) still need the counts.
   const first = r.rows[0];
   const totals = first
-    ? { products: first.n, qty: qty4(first.tq), value: seeCost ? money(first.tv) : null, low: first.nlow, slow: first.nslow }
-    : { products: 0, qty: '0', value: seeCost ? '0.00' : null, low: 0, slow: 0 };
+    ? { products: first.n, qty: qty4(first.tq), value: seeCost ? money(first.tv) : null, low: first.nlow, slow: first.nslow, damagedQty: qty4(first.tdq), damagedValue: seeCost ? money(first.tdv) : null }
+    : { products: 0, qty: '0', value: seeCost ? '0.00' : null, low: 0, slow: 0, damagedQty: '0', damagedValue: seeCost ? '0.00' : null };
   const idle = (x: Row) => {
     const since = x.last_out ?? x.first_in;
     return since ? Math.max(0, Math.round((Date.parse(asOf) - Date.parse(since)) / 86_400_000)) : null;
@@ -92,6 +98,7 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
       qty: qty4(x.qty), value: seeCost ? money(x.value) : null,
       avgCost: seeCost ? (d(x.qty).gt(0) ? qty4(d(x.value).div(d(x.qty))) : '0') : null,
       reorderPoint: qty4(x.reorder_point), lastOut: x.last_out, idleDays: idle(x), low: x.low, slow: x.slow,
+      damagedQty: qty4(x.dq), damagedValue: seeCost ? money(x.dv) : null,
     })),
   };
 }

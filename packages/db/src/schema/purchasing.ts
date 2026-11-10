@@ -103,10 +103,11 @@ export const stockCounts = pgTable('stock_counts', {
   id: id(), tenantId: tenantId(), no: text('no').notNull(), warehouseId: uuid('warehouse_id').notNull(), category: text('category'),
   status: text('status').notNull().default('counting'), openedBy: uuid('opened_by').notNull(), openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
   submittedBy: uuid('submitted_by'), submittedAt: timestamp('submitted_at', { withTimezone: true }), adjustRequestId: uuid('adjust_request_id'), adjustRequestNo: text('adjust_request_no'),
-  note: text('note'),
+  note: text('note'), round: integer('round').notNull().default(1),
 });
 
 export const stockCountLines = pgTable('stock_count_lines', {
   id: id(), tenantId: tenantId(), countId: uuid('count_id').notNull(), productId: uuid('product_id').notNull(), systemQty: qty('system_qty').notNull(),
   countedQty: qty('counted_qty'), movedQty: qty('moved_qty'), countedBy: uuid('counted_by'), countedAt: timestamp('counted_at', { withTimezone: true }),
+  state: text('state').notNull().default('counting'), round: integer('round').notNull().default(1), prevCountedQty: qty('prev_counted_qty'), adjustRequestId: uuid('adjust_request_id'),
 });
