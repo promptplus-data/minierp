@@ -29,7 +29,7 @@ beforeAll(async () => {
   env = await setupEnv({ hooks: { beforeCommit: (op) => { if (failOp && op === failOp) { failOp = ''; throw new Error(`simulated crash in ${op}`); } } } });
   await withTenant(env.pool, env.seed.tenantId, (c) => seedSales(c, env.seed.tenantId));
   await seedRetail(env.pool, env.seed.tenantId);
-  [owner, suda, chai, boy, prae] = await Promise.all(['charoen', 'suda', 'chai', 'boy', 'prae'].map((u) => login(env.app, u)));
+  [owner, suda, chai, boy, prae] = await Promise.all([login(env.app, 'charoen'), login(env.app, 'suda'), login(env.app, 'chai'), login(env.app, 'boy'), login(env.app, 'prae')]);
   shift = await openShift(prae, '1000.00', 'POS-01');
   baseline = await lotsMinusLedger();
 });

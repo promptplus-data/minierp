@@ -19,7 +19,7 @@ const C = (k: string) => env.seed.customers[k]!;
 
 beforeAll(async () => {
   env = await setupEnv();
-  [owner, suda, chai, boy, prae] = await Promise.all(['charoen', 'suda', 'chai', 'boy', 'prae'].map((u) => login(env.app, u)));
+  [owner, suda, chai, boy, prae] = await Promise.all([login(env.app, 'charoen'), login(env.app, 'suda'), login(env.app, 'chai'), login(env.app, 'boy'), login(env.app, 'prae')]);
   shift = await openShift(prae);
 });
 afterAll(async () => { await env.close(); });
