@@ -94,7 +94,7 @@ test('QT → SO → DO (partial) → INV: links both ways and the delivery cuts 
   await page.getByTestId('new-qt').click();
   await pick(page.getByTestId('doc-customer'), 'รุ่งเรือง');
   await pick(page.getByTestId('line-product-0'), 'SCG-CEM-T50');
-  await expect(page.getByTestId('line-source-0')).toContainText('ราคาลูกค้า');
+  await expect(page.getByTestId('line-source-0')).toContainText(/ราคา(ปลีก|ลูกค้า|กลุ่ม)/); // BR-05 source shown (the e2e shop has no price lists)
   await page.getByTestId('line-qty-0').fill('5');
   await page.getByTestId('doc-note').fill(`QT note ${RUN}`);
   await page.getByTestId('doc-save').click();
