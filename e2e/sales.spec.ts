@@ -8,20 +8,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import path from 'node:path';
 import { EDITION, PP, approve, login } from './helpers';
+import { pick } from './sales-helpers';
 
 test.describe.configure({ mode: 'serial' });
 
 const DIR = path.join(__dirname, 'screenshots');
 const docs = { qt: '', so: '', do1: '', do2: '', inv: '', bn: '', rc: '', soCredit: '', project: '' };
-
-/** Select the option whose text contains `contains`. */
-async function pick(sel: Locator, contains: string) {
-  await expect(sel.locator('option').filter({ hasText: contains }).first()).toBeAttached();
-  const opts = await sel.locator('option').allTextContents();
-  const hit = opts.find((o) => o.includes(contains));
-  if (!hit) throw new Error(`"${contains}" not in ${opts.join(' | ')}`);
-  await sel.selectOption({ label: hit });
-}
 
 async function docNo(page: Page, kind: string): Promise<string> {
   await expect(page).toHaveURL(new RegExp(`/b2b/${kind}/`));
@@ -168,7 +160,7 @@ test('project: new SO as a project (50/50), switch to 30/40/30, deposit, deliver
   await page.getByTestId('new-project').click();
   await page.getByTestId('pj-way-new').click();
   await pick(page.getByTestId('doc-customer'), 'รุ่งเรือง');
-  await expect(page.getByTestId('so-project')).toHaveValue('new');
+  await expect(page.getByTestId('so-project-input')).toHaveValue(/ขายโครงการ/);
   await page.getByTestId('pj-name').fill('บ้านคุณสมชาย หมู่บ้านลานนา แปลง 5');
   await page.getByTestId('pj-template').selectOption('50/50');
   await pick(page.getByTestId('line-product-0'), 'SCG-CEM-T50');
@@ -206,7 +198,7 @@ test('project: new SO as a project (50/50), switch to 30/40/30, deposit, deliver
   await expect(page.getByTestId('pj-installments').getByRole('link', { name: /^INV/ })).toHaveCount(1);
 
   await page.getByTestId('pj-variation').click();
-  await expect(page.getByTestId('so-project')).not.toHaveValue('');
+  await expect(page.getByTestId('so-project-input')).toHaveValue(/เพิ่มเข้าโครงการเดิม/);
   await pick(page.getByTestId('line-product-0'), 'RB9-10');
   await expect(page.getByTestId('line-price-0')).not.toHaveValue('');
   await page.getByTestId('doc-save').click();
