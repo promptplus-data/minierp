@@ -268,7 +268,7 @@ function BillingNoteModal({ customerId: initial, onClose }: { customerId: string
       <h3>ออกใบวางบิล</h3>
       <p className="small muted" style={{ margin: 0 }}>รวมใบกำกับที่ยังไม่ได้วางบิลของลูกค้ารายเดียวกัน · กำหนดวันนัดรับเช็คได้</p>
       <div className="fgrid">
-        <label className="f">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setSel(null); }} noCash testId="bn-customer" /></label>
+        <div className="f" role="group">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setSel(null); }} noCash testId="bn-customer" /></div>
         <label className="f">นัดรับเช็ค / ชำระภายใน<input type="date" value={collect} onChange={(e) => setCollect(e.target.value)} data-testid="bn-collect" /></label>
         <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} /></label>
       </div>
@@ -352,7 +352,7 @@ function ReceiptModal({ customerId: initial, onClose }: { customerId: string; on
   return (
     <Modal onClose={onClose} wide label="รับชำระ">
       <h3>รับชำระหนี้</h3>
-      <label className="f">ลูกค้า<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="rc-customer" /></label>
+      <div className="f" role="group">ลูกค้า<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="rc-customer" /></div>
       {customerId && (
         <div className="tw">
           <table data-testid="rc-invoices">

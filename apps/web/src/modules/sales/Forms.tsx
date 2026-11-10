@@ -122,7 +122,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         {mode === 'INV' && 'ใบกำกับภาษีที่ตัดสต็อกทันที (ไม่ผ่านใบสั่งขาย) · ถ้าลูกค้าฝากของไว้ ออกใบส่งของภายหลังได้โดยไม่ตัดสต็อกซ้ำ'}
       </p>
       <div className="fgrid">
-        <label className="f">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setShipTo(''); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" requireTaxId={mode === 'INV' && vatShop} /></label>
+        <div className="f" role="group">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setShipTo(''); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" requireTaxId={mode === 'INV' && vatShop} /></div>
         {mode === 'QT' && <label className="f">เรียน (ผู้ติดต่อ)<input type="text" value={attn} onChange={(e) => setAttn(e.target.value)} placeholder="เช่น คุณอรุณ (หุ้นส่วนผู้จัดการ)" /></label>}
         {vatShop ? (
           <label className="f">ราคาในเอกสาร
@@ -133,12 +133,12 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         ) : <div><div className="small muted">ภาษี</div>ร้านไม่จด VAT · ไม่มีภาษีมูลค่าเพิ่ม</div>}
         {mode === 'QT' && <label className="f">ยืนราคาถึง (เว้นว่าง = {settings.data?.quoteValidDays ?? 15} วัน)<input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} /></label>}
         {mode !== 'QT' && (
-          <label className="f">{mode === 'SO' ? 'ส่งของจากคลัง' : 'ตัดสต็อกจากคลัง'}
+          <div className="f" role="group">{mode === 'SO' ? 'ส่งของจากคลัง' : 'ตัดสต็อกจากคลัง'}
             <WarehouseSelect value={wh} onChange={setWarehouseId} testId="doc-wh" />
-          </label>
+          </div>
         )}
-        {mode === 'SO' && <label className="f">ที่อยู่ส่งของ / หน้างาน<AddressPicker customerId={customerId} value={shipTo} onChange={setShipTo} testId="so-ship-to" /></label>}
-        <label className="f">พนักงานขาย<SalespersonSelect value={salespersonId} onChange={setSalespersonId} testId="doc-salesperson" /></label>
+        {mode === 'SO' && <div className="f" role="group">ที่อยู่ส่งของ / หน้างาน<AddressPicker customerId={customerId} value={shipTo} onChange={setShipTo} testId="so-ship-to" /></div>}
+        <div className="f" role="group">พนักงานขาย<SalespersonSelect value={salespersonId} onChange={setSalespersonId} testId="doc-salesperson" /></div>
         {mode === 'INV' && (
           <label className="f">การชำระ
             <select value={pay} onChange={(e) => setPay(e.target.value as 'credit' | 'cash' | 'transfer')} data-testid="inv-pay">
@@ -150,9 +150,9 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       {mode === 'INV' && <label className="row small"><input type="checkbox" checked={goodsLeft} onChange={(e) => setGoodsLeft(e.target.checked)} /> ลูกค้าฝากของไว้ที่ร้าน (ส่งภายหลังด้วยใบส่งของ)</label>}
       {mode === 'SO' && (
         <>
-          <label className="f">ประเภทการขาย
+          <div className="f" role="group">ประเภทการขาย
             <SaleTypeSelect value={pjMode} onChange={setPjMode} projects={projects.data?.items ?? []} />
-          </label>
+          </div>
           {pjMode === 'new' && (
             <>
               <div className="fgrid">
@@ -256,9 +256,9 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
     <Modal onClose={onClose} wide label="สร้างใบส่งของ">
       <h3>สร้างใบส่งของ</h3>
       <p className="small muted" style={{ margin: 0 }}>อ้างอิงใบสั่งขายหรือบิลที่ลูกค้าฝากของไว้ แล้วใส่จำนวนที่ส่งรอบนี้ ส่งหลายรอบได้จนครบ</p>
-      <label className="f">อ้างอิงใบขาย (ที่ยังส่งไม่ครบ)
+      <div className="f" role="group">อ้างอิงใบขาย (ที่ยังส่งไม่ครบ)
         <DeliverySourceSelect value={pick} selected={s ?? null} onChange={(k, x) => { setPick(k); setPicked(x); }} />
-      </label>
+      </div>
       {!!initial && src.isLoading && <div className="sk" />}
       {s ? (
         <>
@@ -276,8 +276,8 @@ export function DeliveryModal({ initial, onClose }: { initial?: { kind: 'SO' | '
             </table>
           </div>
           <div className="fgrid">
-            <label className="f">ส่งที่<AddressPicker customerId={s.customer.id ?? ''} value={shipTo} onChange={setShipTo} testId="dlv-ship-to" placeholder={s.project?.site || 'ที่อยู่ลูกค้า'} /></label>
-            {s.kind === 'SO' && <label className="f">ตัดสต็อกจากคลัง<WarehouseSelect value={warehouseId} onChange={setWarehouseId} testId="dlv-wh" /></label>}
+            <div className="f" role="group">ส่งที่<AddressPicker customerId={s.customer.id ?? ''} value={shipTo} onChange={setShipTo} testId="dlv-ship-to" placeholder={s.project?.site || 'ที่อยู่ลูกค้า'} /></div>
+            {s.kind === 'SO' && <div className="f" role="group">ตัดสต็อกจากคลัง<WarehouseSelect value={warehouseId} onChange={setWarehouseId} testId="dlv-wh" /></div>}
             <label className="f">ทะเบียนรถ / คนขับ<input type="text" value={vehicle} onChange={(e) => setVehicle(e.target.value)} placeholder="เช่น 3ฒก-4521 · ลุงแดง" /></label>
           </div>
           <label className="f">หมายเหตุ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ลงของหน้าไซต์ ประตู 2" data-testid="dlv-note" /></label>
@@ -377,7 +377,7 @@ export function AbbInvoiceModal({ onClose }: { onClose: () => void }) {
       <h3>ออกใบกำกับภาษีเต็มรูปแทนใบกำกับอย่างย่อ</h3>
       <p className="small muted" style={{ margin: 0 }}>ลูกค้าขอใบกำกับเต็มรูปภายหลัง: ระบบยกเลิกใบกำกับอย่างย่อเดิม (ระบุเหตุผลอ้างเลขใบใหม่) และออกใบกำกับเต็มรูปที่อ้างอิงเลขเดิม สต็อกและยอดกะไม่เปลี่ยน</p>
       <label className="f">เลขที่ใบกำกับอย่างย่อ<input type="text" value={abbNo} onChange={(e) => setAbbNo(e.target.value)} placeholder="เช่น ABB2610-0012" data-testid="abb-no" /></label>
-      <label className="f">ลูกค้า (ต้องมีเลขประจำตัวผู้เสียภาษี)<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="abb-customer" requireTaxId /></label>
+      <div className="f" role="group">ลูกค้า (ต้องมีเลขประจำตัวผู้เสียภาษี)<CustomerSelect value={customerId} onChange={setCustomerId} noCash testId="abb-customer" requireTaxId /></div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={!abbNo.trim() || !customerId || busy || !(can('sales.doc') || can('pos.sell'))} onClick={() => void go()} data-testid="abb-save">ออกใบกำกับเต็มรูป</button></div>
     </Modal>

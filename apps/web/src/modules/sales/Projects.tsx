@@ -177,11 +177,11 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
           <p className="small muted">เช่น แปลงมาจากใบเสนอราคา หรือคุยกับลูกค้าแล้วทำใบสั่งขายไว้ก่อน</p>
           {sos.isLoading ? <div className="sk" /> : free.length ? (
             <>
-              <label className="f">ใบสั่งขายที่ยังไม่ผูกโครงการ
+              <div className="f" role="group">ใบสั่งขายที่ยังไม่ผูกโครงการ
                 <SearchSelect<SalesOrderSummary> value={sel?.no ?? null} onChange={(no) => setPick(no ?? '')} items={free} getId={(o) => o.no}
                   getLabel={(o) => `${o.no} · ${o.customer.name}`} getSub={(o) => `฿${fmt(o.total)} · ${o.itemsPreview}`} getSearch={(o) => o.itemsPreview}
                   testId="pj-pick-so" ariaLabel="ใบสั่งขายที่ยังไม่ผูกโครงการ" />
-              </label>
+              </div>
               <button className="btn" style={{ marginTop: 8 }} onClick={() => sel && setWay(sel)} data-testid="pj-way-so">ตั้งเป็นโครงการ</button>
             </>
           ) : <div className="small muted">ไม่มีใบสั่งขายที่ยังไม่ผูกโครงการ</div>}

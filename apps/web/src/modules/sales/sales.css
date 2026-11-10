@@ -57,3 +57,6 @@ table.lines select[aria-label="หน่วยส่วนลด"]{min-width:62p
 .line-stock{color:var(--muted);margin-top:2px}.line-stock.bad{color:var(--bad);font-weight:600}
 .bad-text{color:var(--bad)}.warn-text{color:var(--warn)}
 .profit-sum{text-align:right;margin-top:4px}
+/* picker fields are a div (a <label> would refocus the SearchSelect input and reopen its list) */
+div.f[role=group]{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+div.f[role=group] > *{color:var(--fg)}
