@@ -1,7 +1,7 @@
 /** REQ-M11-01: sales and gross profit by day / month / product / category / customer / seller / sale type. */
 import type { Tx } from '@erp/db';
 import type { ReportSales, ReportSalesBy, ReportSalesQuery, ReportSalesRow } from '@erp/contracts';
-import { d, money, qty4, round2 } from '@erp/core';
+import { d, money, qty4, round2 , searchTokens } from '@erp/core';
 import { can, type Ctx } from '../../lib/context';
 import { likeEscape } from '../../lib/paging';
 import { SALE_LINES_CTE, checkRange, nextOffset, offsetOf } from './sources';
@@ -42,7 +42,7 @@ export async function salesReport(tx: Tx, ctx: Ctx, q: ReportSalesQuery, all = f
   const seeCost = can(ctx, 'data.cost') === 1;
   const params: unknown[] = [q.from, q.to, q.saleType ?? null];
   const where = [`($3::text is null or sl.sale_type = $3)`];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(${g.label} ilike $${params.length} or ${g.sub} ilike $${params.length})`);
   }

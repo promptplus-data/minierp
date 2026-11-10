@@ -21,3 +21,4 @@ export * from './importfmt';
 export * from './retail';
 export * from './hr';
 export * from './consent';
+export * from './search';

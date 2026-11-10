@@ -5,7 +5,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { StockCount } from '@erp/contracts';
-import { addDays, d, apDaysOverdue, money, qty4, sum } from '@erp/core';
+import { addDays, d, apDaysOverdue, money, qty4, sum , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requireAny, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -184,7 +184,7 @@ export async function ledger(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; c
   }
   // Text search filters the outer query only, so the running-balance window still sees every move.
   const outer: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     outer.push(`(x.doc_no ilike $${params.length} or x.name ilike $${params.length} or x.sku ilike $${params.length} or x.note ilike $${params.length})`);
   }
@@ -229,7 +229,7 @@ export async function reorder(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; 
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }

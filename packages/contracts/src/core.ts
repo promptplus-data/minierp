@@ -59,11 +59,11 @@ export const ProductUpsert = Product.omit({ id: true, cost: true }).partial({ ba
 
 export const Customer = z.object({
   id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable(),
-  group: z.enum(['retail', 'whole', 'contr']), creditLimit: Dec,
+  group: z.enum(['retail', 'whole', 'contr']), creditLimit: Dec, address: z.string().default(''), note: z.string().default(''),
   term: z.discriminatedUnion('t', [z.object({ t: z.literal('cash') }), z.object({ t: z.literal('days'), x: z.number().int() }), z.object({ t: z.literal('nextDay'), x: z.number().int() }), z.object({ t: z.literal('eom') })]),
 });
 export type Customer = z.infer<typeof Customer>;
-export const CustomerCreate = Customer.omit({ id: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true });
+export const CustomerCreate = Customer.omit({ id: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true, address: true, note: true });
 export const Vendor = z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable() });
 export type Vendor = z.infer<typeof Vendor>;
 export const Warehouse = z.object({ id: z.string(), name: z.string(), isPos: z.boolean(), active: z.boolean() });

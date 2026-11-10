@@ -1,4 +1,5 @@
 /** Shared helpers of the sales module: parties, vat mode, line building, totals, BR-08 credit and BR-16 below-cost gates, void auth. */
+import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { SalesLine, SalesLineIn, SalesParty, SalesTerm, SalesTotals } from '@erp/contracts';
 import {
@@ -130,7 +131,7 @@ export async function pageNewest<R extends { created_at: Date; id: string }, T>(
   const cur = decodeCursor(q.cursor, 2);
   const w = [...where];
   const p = [...params];
-  for (const word of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const word of searchTokens(q.q)) {
     p.push(`%${likeEscape(word)}%`);
     w.push(`x.search_text like $${p.length}`);
   }

@@ -96,6 +96,8 @@ export const customers = pgTable('customers', {
   branch: text('branch'),
   phone: text('phone'),
   group: text('grp').notNull().default('retail'),
+  address: text('address').notNull().default(''),
+  note: text('note').notNull().default(''),
   creditLimit: money('credit_limit').notNull().default('0'),
   term: jsonb('term').notNull().default({ t: 'cash' }),
   createdAt: createdAt(),

@@ -5,6 +5,7 @@
  * that is registered, approved and has a POS ID; other machines issue full tax invoices only (REQ-M07-04).
  * A shop that has not set up the registry yet keeps the Phase 1 behaviour.
  */
+import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { PosDevice } from '@erp/contracts';
 import { z } from 'zod';
@@ -38,7 +39,7 @@ export async function listDevices(tx: Tx, ctx: Ctx, q: { q?: string; limit: numb
     params.push(q.status);
     where.push(`d.status = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(d.code ilike $${params.length} or d.name ilike $${params.length} or coalesce(d.rd_pos_id,'') ilike $${params.length})`);
   }

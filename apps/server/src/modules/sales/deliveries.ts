@@ -5,7 +5,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { SalesDelivery, SalesDeliveryReq, SalesDeliverySource, SalesDeliverySummary, SalesPageQuery } from '@erp/contracts';
-import { d, fmtTHB, money, qty4, sum } from '@erp/core';
+import { d, fmtTHB, money, qty4, sum, searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -200,13 +200,13 @@ export async function deliverySources(tx: Tx, q: SalesPageQuery) {
     params.push(q.customerId);
     cust = `and x.customer_id = $1`;
   }
-  const words = (q.q ?? '').trim().toLowerCase();
+  const words = searchTokens(q.q);
   const sos = await tx.query<{ id: string; no: string; date: string; customer_id: string; c_name: string; ship_to: string; project_id: string | null; pj_name: string | null; pj_site: string | null; pj_status: string | null; warehouse_id: string | null; search_text: string }>(
     `select x.id, x.no, x.date::text, x.customer_id, c.name c_name, x.ship_to, x.project_id, pj.name pj_name, pj.site pj_site, pj.status pj_status, x.warehouse_id, x.search_text
        from sales_orders x join customers c on c.id = x.customer_id left join sales_projects pj on pj.id = x.project_id
       where x.status = 'active' and x.dlv_status <> 'delivered' ${cust} order by x.created_at desc limit 50`, params);
   for (const s of sos.rows) {
-    if (words && !words.split(/\s+/).every((w) => s.search_text.includes(w))) continue;
+    if (!words.every((w) => s.search_text.includes(w))) continue;
     const lines = (await orderLines(tx, s.id)).map((l) => ({ id: l.id, productId: l.product_id!, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), delivered: qty4(l.delivered), remaining: qty4(d(l.qty).minus(d(l.delivered))) }));
     out.push({
       kind: 'SO', no: s.no, date: s.date, customer: { id: s.customer_id, name: s.c_name }, shipTo: s.ship_to || s.pj_site || '',
@@ -217,7 +217,7 @@ export async function deliverySources(tx: Tx, q: SalesPageQuery) {
     `select x.id, x.no, x.date::text, x.customer_id, x.customer_name, x.search_text from docs x join sales_invoices si on si.doc_id = x.id
       where x.status = 'active' and si.goods_left ${cust} order by x.created_at desc limit 50`, params);
   for (const v of invs.rows) {
-    if (words && !words.split(/\s+/).every((w) => v.search_text.includes(w))) continue;
+    if (!words.every((w) => v.search_text.includes(w))) continue;
     const il = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; qty: string; returned_qty: string; delivered: string }>(
       `select l.id, l.product_id, l.name, l.unit_name, l.qty::text, l.returned_qty::text,
               coalesce((select sum(dl.qty) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id where dl.inv_line_id = l.id and dv.status = 'active'), 0)::text delivered

@@ -1,6 +1,6 @@
 /** Customer returns (REQ-M08-06): searchable bill picker + credit note with stock back at original cost. */
 import type { Tx } from '@erp/db';
-import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4, sum } from '@erp/core';
+import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4, sum , searchTokens } from '@erp/core';
 import { z } from 'zod';
 import type { EligibleQuery, ReturnReq, SalesDoc } from '@erp/contracts';
 import { verifyApproval } from '../lib/approval';
@@ -28,7 +28,7 @@ export async function eligible(tx: Tx, deps: Deps, q: Eligible) {
     params.push(addDays(deps.today(), -Number(q.days)));
     where.push(`d.date >= $${params.length}::date`);
   }
-  for (const w of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`d.search_text like $${params.length}`);
   }

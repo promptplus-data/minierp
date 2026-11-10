@@ -251,3 +251,20 @@ input.qty.bad{border-color:var(--bad);color:var(--bad)}
   .tile .im{height:58px}
   .md{padding:16px}
 }
+
+/* ---------- SearchSelect (ui/SearchSelect.tsx) ---------- */
+.ss{position:relative;min-width:160px}
+.ss>input{width:100%;padding-right:28px}
+.ss-caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--muted);font-size:12px}
+.ss.bad>input{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
+.ss-list{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);min-width:260px;max-height:320px;overflow:auto;margin:0;padding:4px;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.16)}
+.ss-list li{display:flex;flex-direction:column;gap:1px;padding:8px 10px;border-radius:8px;cursor:pointer;min-height:40px;justify-content:center}
+.ss-list li.hi{background:var(--accent-soft)}
+.ss-list li.sel .ss-l{font-weight:600;color:var(--accent)}
+.ss-list li.dis{opacity:.55;cursor:not-allowed}
+.ss-s{font-size:12px;color:var(--muted)}
+.ss-list li.ss-create{color:var(--accent);font-weight:600;border-top:1px solid var(--line);margin-top:2px}
+.ss-list li.ss-info{cursor:default;color:var(--muted);font-size:12px;align-items:center}
+html[data-touch] .ss-list li{min-height:48px}
+html[data-touch] .ss-list{max-height:min(420px,50vh)}
+.loadmore{display:flex;justify-content:center;padding:10px}

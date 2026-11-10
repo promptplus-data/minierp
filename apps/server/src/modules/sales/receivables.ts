@@ -6,7 +6,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { ArAging, ArBillingNote, ArBillingNoteSummary, ArOpenInvoice, ArReceipt, ArReceiptReq, ArReceiptSummary, ArStatement, SalesPageQuery } from '@erp/contracts';
-import { addDays, agingBucket, AGING_BUCKETS, d, daysOverdue, fmtTHB, money, receiptTotals, sum, WhtError, type AgingBucket } from '@erp/core';
+import { addDays, agingBucket, AGING_BUCKETS, d, daysOverdue, fmtTHB, money, receiptTotals, sum, WhtError, type AgingBucket , searchTokens } from '@erp/core';
 import type { z } from 'zod';
 import type { ArAgingQuery, ArBillingNoteReq, ArInvoicesQuery } from '@erp/contracts';
 import { writeAudit } from '../../lib/audit';
@@ -220,7 +220,7 @@ export async function aging(tx: Tx, deps: Deps, q: z.infer<typeof ArAgingQuery>)
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [asOf];
   const where = [OPEN];
-  for (const w of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${w.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
     where.push(`(lower(c.name) like $${params.length} or lower(c.code) like $${params.length})`);
   }
@@ -274,7 +274,7 @@ export async function openInvoices(tx: Tx, deps: Deps, q: z.infer<typeof ArInvoi
   }
   const bnSub = `(select b.no from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = x.id and b.status = 'active' limit 1)`;
   if (q.unbilled) where.push(`${bnSub} is null`);
-  for (const w of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${w.replace(/[\\%_]/g, (c) => '\\' + c)}%`);
     where.push(`x.search_text like $${params.length}`);
   }

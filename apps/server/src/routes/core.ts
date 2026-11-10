@@ -8,7 +8,7 @@ import { requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
 import { signToken, type Authed } from '../plugins/auth';
 import { auditLog, verifyAudit } from '../services/admin';
 import { login, sessionUser, unlockUser } from '../services/auth';
-import { createCustomer, createProduct, listCustomers, listProducts, listVendors, listWarehouses, updateProduct } from '../services/master';
+import { createCustomer, createProduct, listCustomers, getCustomer, listProducts, listVendors, listWarehouses, updateProduct } from '../services/master';
 
 export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): void {
   app.post('/api/auth/login', async (req) => {
@@ -44,6 +44,7 @@ export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): vo
   }));
 
   app.get('/api/customers', authed(async (tx, _ctx, req) => listCustomers(tx, pageQuery.parse(req.query))));
+  app.get('/api/customers/:id', authed(async (tx, _ctx, req) => getCustomer(tx, (req.params as { id: string }).id)));
   app.post('/api/customers', authed(async (tx, ctx, req, reply) => {
     requireAny(ctx, ['data.master', 'sales.doc', 'pos.sell']);
     const c = await createCustomer(tx, ctx, CustomerCreate.parse(req.body));

@@ -5,7 +5,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { ReportStock, ReportStockQuery, ReportStockRow } from '@erp/contracts';
-import { addDays, d, money, qty4 } from '@erp/core';
+import { addDays, d, money, qty4 , searchTokens } from '@erp/core';
 import { can, type Ctx, type Deps } from '../../lib/context';
 import { E, isUuid } from '../../lib/errors';
 import { likeEscape } from '../../lib/paging';
@@ -26,7 +26,7 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
   const cut = asOf >= deps.today() ? null : endOfDay(asOf);
   const params: unknown[] = [cut, q.warehouseId ?? null, slowFrom, asOf];
   const where = [`p.kind = 'stock'`, `p.active`];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }

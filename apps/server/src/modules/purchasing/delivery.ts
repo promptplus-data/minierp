@@ -4,6 +4,7 @@
  * one DRAFT goods receipt per delivery-note number (dedupe against received GRs and open drafts) → unmatched lines
  * mapped or created (product-code aliases remembered) → confirm = the normal manual receipt (lots + AP).
  */
+import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { GrDraft } from '@erp/contracts';
 import {
@@ -283,7 +284,7 @@ export async function listDrafts(tx: Tx, deps: Deps, ctx: Ctx, q: { q?: string; 
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [q.status];
   const where = ['g.status = $1'];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(coalesce(g.dn_no,'') ilike $${params.length} or coalesce(g.po_no,'') ilike $${params.length} or coalesce(g.dealer_name,'') ilike $${params.length})`);
   }
@@ -485,7 +486,7 @@ export async function listAliases(tx: Tx, ctx: Ctx, q: { q?: string; limit: numb
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where = ['a.active'];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(a.external_code ilike $${params.length} or p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }

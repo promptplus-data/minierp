@@ -3,7 +3,7 @@ import type { Tx } from '@erp/db';
 import type { PriceList } from '@erp/contracts';
 import { z } from 'zod';
 import { PriceListInput, PriceListUpdate } from '@erp/contracts';
-import { money, qty4 } from '@erp/core';
+import { money, qty4 , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { requirePerm, type Ctx } from '../../lib/context';
 import { E, isUuid } from '../../lib/errors';
@@ -31,7 +31,7 @@ export async function listPriceLists(tx: Tx, ctx: Ctx, q: { q?: string; limit: n
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(l.name ilike $${params.length} or coalesce(c.name,'') ilike $${params.length} or coalesce(c.code,'') ilike $${params.length})`);
   }

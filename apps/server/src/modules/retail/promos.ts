@@ -3,6 +3,7 @@
  * Below-cost promos need the owner at CREATION (REQ-M15-03); POS bills then sell at the promo price without asking
  * again (see ./pos.ts). Bills snapshot the promo, so closing or editing never changes issued bills (REQ-M15-04).
  */
+import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { Promo, PromoInput } from '@erp/contracts';
 import { z } from 'zod';
@@ -202,7 +203,7 @@ export async function listPromos(tx: Tx, deps: Deps, ctx: Ctx, q: { q?: string; 
     params.push(q.kind);
     where.push(`p.kind = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(p.name ilike $${params.length} or p.code ilike $${params.length} or coalesce(p.sku,'') ilike $${params.length})`);
   }

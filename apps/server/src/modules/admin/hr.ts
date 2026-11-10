@@ -2,6 +2,7 @@
  * M17 HR: employees with their login user (REQ-M17-01, REQ-M01-10), leave (REQ-M17-04/05), monthly payroll with
  * core.payRow (REQ-M17-02), payslips (REQ-M17-03) and labour cost (REQ-M17-06). Nothing here is ever deleted (BR-18).
  */
+import { searchTokens } from '@erp/core';
 import { randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import type { z } from 'zod';
@@ -98,7 +99,7 @@ export async function listEmployees(tx: Tx, ctx: Ctx, q: In<typeof HrEmployeeQue
     params.push(q.status);
     where.push(`e.status = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(e.name ilike $${params.length} or e.code ilike $${params.length} or e.position ilike $${params.length} or coalesce(u.username,'') ilike $${params.length})`);
   }
@@ -268,7 +269,7 @@ export async function listLeaves(tx: Tx, ctx: Ctx, q: In<typeof HrLeaveQuery>) {
     params.push(q.employeeId);
     where.push(`l.employee_id = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(e.name ilike $${params.length} or l.no ilike $${params.length} or l.reason ilike $${params.length})`);
   }

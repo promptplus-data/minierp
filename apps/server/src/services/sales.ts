@@ -1,4 +1,5 @@
 /** POS sale, sales documents, void (M07, M08). */
+import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { DocSummary, PageQuery, PosSaleReq, SalesDoc } from '@erp/contracts';
 import {
@@ -323,7 +324,7 @@ export async function listDocs(tx: Tx, q: PageQuery & DocFilters) {
     params.push(q.category === '-' ? '' : q.category);
     where.push(`exists (select 1 from doc_lines x join products p on p.id = x.product_id where x.doc_id = d.id and coalesce(p.category,'') = $${params.length})`);
   }
-  for (const w of (q.q ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(d.search_text like $${params.length} or lower(d.no) like $${params.length})`);
   }

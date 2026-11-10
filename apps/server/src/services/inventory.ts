@@ -1,7 +1,7 @@
 /** Inventory (M05, M06): balances, lots, manual receipt, transfer, issue, adjustment request / approval. */
 import type { Tx } from '@erp/db';
 import type { StockDoc } from '@erp/contracts';
-import { allocate, d, fmtTHB, money, movingAverage, qty4, sum } from '@erp/core';
+import { allocate, d, fmtTHB, money, movingAverage, qty4, sum , searchTokens } from '@erp/core';
 import { writeAudit } from '../lib/audit';
 import { can, requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
 import { nextDocNo } from '../lib/docno';
@@ -63,7 +63,7 @@ export async function balances(tx: Tx, q: { q?: string; limit: number; cursor?: 
     params.push(q.productId);
     where.push(`p.id = $${params.length}`);
   }
-  for (const word of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const word of searchTokens(q.q)) {
     params.push(`%${likeEscape(word)}%`);
     where.push(`(p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }

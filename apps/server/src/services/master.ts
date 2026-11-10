@@ -1,7 +1,7 @@
 /** Master data (M03): products, customers, vendors, warehouses. */
 import type { Tx } from '@erp/db';
 import type { Customer, PageQuery, Product, Vendor, Warehouse } from '@erp/contracts';
-import { money, qty4 } from '@erp/core';
+import { money, qty4 , searchTokens } from '@erp/core';
 import { can, type Ctx } from '../lib/context';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
@@ -46,7 +46,7 @@ export async function listProducts(tx: Tx, ctx: Ctx, q: PageQuery & { all?: bool
   const params: unknown[] = [];
   const where: string[] = [];
   if (!q.all) where.push('active');
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(name ilike $${params.length} or sku ilike $${params.length} or coalesce(barcode,'') ilike $${params.length})`);
   }
@@ -110,20 +110,20 @@ export async function updateProduct(tx: Tx, ctx: Ctx, id: string, p: Partial<Pro
   return toProduct(r.rows[0], ctx);
 }
 
-interface CustomerRow { id: string; code: string; name: string; tax_id: string | null; branch: string | null; phone: string | null; grp: Customer['group']; credit_limit: string; term: Customer['term'] }
+interface CustomerRow { id: string; code: string; name: string; tax_id: string | null; branch: string | null; phone: string | null; grp: Customer['group']; credit_limit: string; term: Customer['term']; address: string; note: string }
 const toCustomer = (r: CustomerRow): Customer => ({
-  id: r.id, code: r.code, name: r.name, taxId: r.tax_id, branch: r.branch, phone: r.phone, group: r.grp, creditLimit: money(r.credit_limit), term: r.term,
+  id: r.id, code: r.code, name: r.name, taxId: r.tax_id, branch: r.branch, phone: r.phone, group: r.grp, creditLimit: money(r.credit_limit), term: r.term, address: r.address, note: r.note,
 });
-const CUSTOMER_COLS = `id, code, name, tax_id, branch, phone, grp, credit_limit::text, term`;
+const CUSTOMER_COLS = `id, code, name, tax_id, branch, phone, grp, credit_limit::text, term, address, note`;
 
 export async function listCustomers(tx: Tx, q: PageQuery) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     const i = params.length;
-    where.push(`(name ilike $${i} or code ilike $${i} or coalesce(phone,'') ilike $${i} or coalesce(tax_id,'') ilike $${i})`);
+    where.push(`(name ilike $${i} or code ilike $${i} or coalesce(phone,'') ilike $${i} or regexp_replace(coalesce(phone,''),'[^0-9]','','g') ilike $${i} or coalesce(tax_id,'') ilike $${i} or address ilike $${i})`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);
@@ -137,7 +137,14 @@ export async function listCustomers(tx: Tx, q: PageQuery) {
   return pageOf(r.rows, q.limit, (c) => [c.code, c.id], toCustomer);
 }
 
-export async function createCustomer(tx: Tx, ctx: Ctx, c: Omit<Customer, 'id' | 'code' | 'taxId' | 'branch' | 'phone' | 'group' | 'creditLimit' | 'term'> & Partial<Customer>): Promise<Customer> {
+export async function getCustomer(tx: Tx, id: string): Promise<Customer> {
+  if (!isUuid(id)) throw E.notFound('Customer not found');
+  const r = await tx.query<CustomerRow>(`select ${CUSTOMER_COLS} from customers where id = $1`, [id]);
+  if (!r.rows[0]) throw E.notFound('Customer not found');
+  return toCustomer(r.rows[0]);
+}
+
+export async function createCustomer(tx: Tx, ctx: Ctx, c: Pick<Customer, 'name'> & Partial<Customer>): Promise<Customer> {
   let code = c.code;
   if (!code) {
     // C + 5 digits, next after the highest numeric code. Unique index catches the rare race (409).
@@ -145,8 +152,8 @@ export async function createCustomer(tx: Tx, ctx: Ctx, c: Omit<Customer, 'id' | 
     code = 'C' + String((r.rows[0]?.n ?? 0) + 1).padStart(5, '0');
   }
   const r = await tx.query<CustomerRow>(
-    `insert into customers (tenant_id, code, name, tax_id, branch, phone, grp, credit_limit, term) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning ${CUSTOMER_COLS}`,
-    [ctx.tenantId, code, c.name, c.taxId ?? null, c.branch ?? null, c.phone ?? null, c.group ?? 'retail', c.creditLimit ?? '0', JSON.stringify(c.term ?? { t: 'cash' })],
+    `insert into customers (tenant_id, code, name, tax_id, branch, phone, grp, credit_limit, term, address, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning ${CUSTOMER_COLS}`,
+    [ctx.tenantId, code, c.name.trim(), c.taxId || null, c.branch || null, c.phone || null, c.group ?? 'retail', c.creditLimit ?? '0', JSON.stringify(c.term ?? { t: 'cash' }), c.address ?? '', c.note ?? ''],
   );
   return toCustomer(r.rows[0]!);
 }
@@ -155,9 +162,9 @@ export async function listVendors(tx: Tx, q: PageQuery) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
-  if (q.q) {
-    params.push(`%${likeEscape(q.q.trim())}%`);
-    where.push(`(name ilike $1 or code ilike $1)`);
+  for (const w of searchTokens(q.q)) {
+    params.push(`%${likeEscape(w)}%`);
+    where.push(`(name ilike $${params.length} or code ilike $${params.length} or coalesce(phone,'') ilike $${params.length} or coalesce(tax_id,'') ilike $${params.length})`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);

@@ -6,7 +6,7 @@
  */
 import type { Tx } from '@erp/db';
 import type { Bom, Mo } from '@erp/contracts';
-import { bomSuggest, d, fmtTHB, money, moUnitCost, qty4, sum, yieldPct } from '@erp/core';
+import { bomSuggest, d, fmtTHB, money, moUnitCost, qty4, sum, yieldPct , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requireAny, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -60,7 +60,7 @@ export async function listBoms(tx: Tx, ctx: Ctx, q: { q?: string; limit: number;
     params.push(q.productId);
     where.push(`b.product_id = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }
@@ -214,7 +214,7 @@ export async function listMos(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; 
     params.push(q.status);
     where.push(`m.status = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(m.no ilike $${params.length} or p.name ilike $${params.length} or p.sku ilike $${params.length})`);
   }

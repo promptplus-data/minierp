@@ -7,7 +7,7 @@ import type { Tx } from '@erp/db';
 import type { ApBill, ApBillDetail, ApPayment, GrDetail, GrSummary, VendorReturn } from '@erp/contracts';
 import {
   addDays, agingSummary, checkAllocations, d, apDaysOverdue, fmtTHB, money, qty4, sum, termLabel, vendorReturnAmounts, whtAmount,
-  type BillDiscountMode, type PaymentTerm,
+  type BillDiscountMode, type PaymentTerm, searchTokens,
 } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requirePerm, type Ctx, type Deps } from '../../lib/context';
@@ -18,7 +18,7 @@ import { applyOut, lockLots, planTakes } from '../../lib/stock';
 import { billDiscountMode } from './grhook';
 
 const seeCost = (ctx: Ctx) => can(ctx, 'data.cost') === 1;
-const words = (q?: string) => (q ?? '').trim().split(/\s+/).filter(Boolean);
+const words = (q?: string) => searchTokens(q);
 
 // ---------- settings ----------
 export async function getSettings(tx: Tx) {

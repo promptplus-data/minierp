@@ -13,7 +13,7 @@ import type {
   AdmTenantQuery, LicensePayload, SharePayload,
 } from '@erp/contracts';
 import { SharePayload as SharePayloadSchema } from '@erp/contracts';
-import { d, money, type Role } from '@erp/core';
+import { d, money, type Role , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { E, isUuid } from '../../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../../lib/paging';
@@ -44,7 +44,7 @@ export async function listTenants(tx: Tx, q: In<typeof AdmTenantQuery>) {
     params.push(q.status);
     where.push(`status = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(name ilike $${params.length} or code ilike $${params.length} or tax_id ilike $${params.length} or region ilike $${params.length} or customer_code ilike $${params.length})`);
   }
@@ -222,7 +222,7 @@ export async function listCentral(tx: Tx, today: string, q: { q?: string; limit:
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [today];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(c.sku ilike $${params.length} or c.name ilike $${params.length} or c.category ilike $${params.length} or coalesce(c.barcode,'') ilike $${params.length})`);
   }
@@ -362,7 +362,7 @@ export async function listLicenses(tx: Tx, q: { q?: string; limit: number; curso
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(l.shop_name ilike $${params.length} or l.tax_id ilike $${params.length} or l.license_id ilike $${params.length} or l.region ilike $${params.length})`);
   }
@@ -435,7 +435,7 @@ export async function listShares(tx: Tx, q: { q?: string; licenseId?: string; li
     params.push(q.licenseId);
     where.push(`license_id = $${params.length}`);
   }
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(shop_name ilike $${params.length} or tax_id ilike $${params.length} or license_id ilike $${params.length})`);
   }
@@ -457,7 +457,7 @@ export async function listAdmAudit(tx: Tx, a: AdmCtx, q: { q?: string; limit: nu
   const cur = decodeCursor(q.cursor, 1);
   const params: unknown[] = [];
   const where: string[] = [];
-  for (const w of (q.q ?? '').trim().split(/\s+/).filter(Boolean)) {
+  for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     where.push(`(admin_name ilike $${params.length} or action ilike $${params.length} or object ilike $${params.length} or coalesce(ref,'') ilike $${params.length} or detail ilike $${params.length})`);
   }
