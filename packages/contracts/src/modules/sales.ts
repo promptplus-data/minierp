@@ -44,8 +44,39 @@ export const SalesSettingsUpdate = z.object({ quoteValidDays: z.number().int().m
 export const SalesPriceQuery = z.object({
   customerId: z.string().optional(), productId: z.string(), unitIdx: z.coerce.number().int().min(0).default(0),
   qty: Dec.default('1'), vatMode: SalesVatMode.optional(), date: ISODate.optional(),
+  /** 'quote': BR-05 for a quotation (no quotation step); default 'order' (a valid quotation price comes first). */
+  doc: z.enum(['quote', 'order']).default('order'), warehouseId: z.string().optional(),
 });
-export const SalesPrice = z.object({ unitPrice: Dec, source: z.enum(['quote', 'customerList', 'groupList', 'retail']), ref: z.string().nullable() });
+/** Manager PIN for a price below the BR-05 price or a discount over the role cap (pos.discCap); the reason is required. */
+export const SalesPriceApproval = Approval.extend({ reason: z.string().min(1).max(300) });
+/** Approval recorded on a document. */
+export const SalesApprovalNote = z.object({ by: z.string(), detail: z.string() });
+/** Cost and profit, only for users with data.cost (owner / manager / accounting). Before VAT. */
+export const SalesProfit = z.object({ cost: Dec, revenue: Dec, profit: Dec, marginPct: Dec });
+
+// ---------- customer address book / salespeople (pickers) ----------
+export const CustomerAddress = z.object({ id: z.string(), kind: z.enum(['saved', 'customer', 'project']), label: z.string(), address: z.string() });
+export type CustomerAddress = z.infer<typeof CustomerAddress>;
+export const CustomerAddressReq = z.object({ address: z.string().trim().min(1).max(300), label: z.string().max(80).default('') });
+export const SalesPerson = z.object({ id: z.string(), name: z.string(), phone: z.string().nullable(), role: z.string() });
+export type SalesPerson = z.infer<typeof SalesPerson>;
+export const SalesPriceSource = z.enum(['quote', 'customerList', 'groupList', 'promo', 'retail']);
+export type SalesPriceSource = z.infer<typeof SalesPriceSource>;
+/** BR-05 price for one line. `unitCost` / `listPrice` per the document's VAT basis; unitCost only for data.cost users. */
+export const SalesPrice = z.object({ unitPrice: Dec, source: SalesPriceSource, ref: z.string().nullable(), retailPrice: Dec });
+/**
+ * POST /api/sales/line-check: live below-cost / profit check of the lines being edited (server is the authority).
+ * Everyone gets belowCost per line; unitCost / profit only come back for data.cost users.
+ */
+export const SalesLineCheckReq = z.object({
+  vatMode: SalesVatMode.default('exc'), billDiscount: DecNN.default('0'), warehouseId: z.string().optional(),
+  lines: z.array(z.object({ productId: z.string().optional(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional() })).max(200),
+});
+export const SalesLineCheck = z.object({
+  lines: z.array(z.object({ belowCost: z.boolean(), unitCost: Dec.nullable(), profit: Dec.nullable() })),
+  profit: z.object({ cost: Dec, revenue: Dec, profit: Dec, marginPct: Dec }).nullable(),
+});
+export type SalesLineCheck = z.infer<typeof SalesLineCheck>;
 export type SalesPrice = z.infer<typeof SalesPrice>;
 
 // ---------- price lists (BR-05 steps 2 and 3) ----------
@@ -82,6 +113,10 @@ export type SalesLineIn = z.infer<typeof SalesLineIn>;
 export const SalesLine = z.object({
   id: z.string(), lineNo: z.number().int(), productId: z.string().nullable(), unitIdx: z.number().int().nullable(), sku: z.string().nullable(),
   name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, discount: Discount.nullable(), discAmt: Dec, net: Dec, vat: SalesLineVat, free: z.boolean(),
+  /** BR-05 price when saved (document VAT basis) and where it came from. */
+  listPrice: Dec.nullable().default(null), priceSource: z.string().nullable().default(null), priceRef: z.string().nullable().default(null),
+  /** FIFO unit cost per line unit and the line profit before VAT: data.cost users only (null otherwise). */
+  unitCost: Dec.nullable().default(null), profit: Dec.nullable().default(null),
 });
 export type SalesLine = z.infer<typeof SalesLine>;
 
@@ -92,6 +127,7 @@ export const SalesQuoteReq = z.object({
   customerId: z.string(), date: ISODate.optional(), validUntil: ISODate.optional(), attn: z.string().max(200).default(''),
   vatMode: SalesVatMode.optional(), term: SalesTerm.optional(), salespersonId: z.string().optional(), note: z.string().max(1000).default(''),
   billDiscount: DecNN.default('0'), lines: z.array(SalesLineIn).min(1).max(200), status: z.enum(['draft', 'sent']).default('draft'),
+  belowCostApproval: Approval.optional(), priceApproval: SalesPriceApproval.optional(),
 });
 export type SalesQuoteReq = z.infer<typeof SalesQuoteReq>;
 export const SalesQuoteStatusReq = z.object({ status: z.enum(['draft', 'sent', 'accepted', 'lost']) });
@@ -99,6 +135,7 @@ export const SalesQuote = z.object({
   id: z.string(), no: z.string(), date: z.string(), validUntil: z.string(), customer: SalesParty, attn: z.string(), vatMode: SalesVatMode, term: SalesTerm,
   salesperson: SalesUserRef.nullable(), note: z.string(), billDiscount: Dec, lines: z.array(SalesLine), totals: SalesTotals,
   status: SalesQuoteStatus, revision: z.number().int(), orders: z.array(SalesDocRef), editable: z.boolean(),
+  belowCostApproval: SalesApprovalNote.nullable().default(null), priceApproval: SalesApprovalNote.nullable().default(null), profit: SalesProfit.nullable().default(null),
   createdBy: z.string(), voided: SalesVoided.nullable(),
 });
 export type SalesQuote = z.infer<typeof SalesQuote>;
@@ -120,6 +157,7 @@ export const SalesProjectTemplate = z.enum(['30/40/30', '50/50', '100%', 'custom
 export const SalesNewProject = z.object({
   name: z.string().min(1).max(200), site: z.string().max(300).default(''), contact: z.string().max(200).default(''),
   template: SalesProjectTemplate.default('30/40/30'), installments: z.array(SalesInstallmentIn).min(1).max(24).optional(), startDate: ISODate.optional(),
+  note: z.string().max(1000).default(''),
 });
 export const SalesOrderReq = z.object({
   customerId: z.string(), quoteNo: z.string().optional(), date: ISODate.optional(), vatMode: SalesVatMode.optional(), term: SalesTerm.optional(),
@@ -128,6 +166,7 @@ export const SalesOrderReq = z.object({
   project: z.discriminatedUnion('mode', [SalesNewProject.extend({ mode: z.literal('new') }), z.object({ mode: z.literal('existing'), projectId: z.string() })]).optional(),
   creditApproval: Approval.optional(),   // BR-08: over the credit limit or overdue bills
   belowCostApproval: Approval.optional(), // BR-16: owner only
+  priceApproval: SalesPriceApproval.optional(), // price below BR-05 / discount over the role cap
 });
 export type SalesOrderReq = z.infer<typeof SalesOrderReq>;
 export const SalesDlvStatus = z.enum(['open', 'partial', 'delivered']);
@@ -139,6 +178,7 @@ export const SalesOrder = z.object({
   billDiscount: Dec, lines: z.array(SalesOrderLine), totals: SalesTotals, dlvStatus: SalesDlvStatus, status: z.enum(['active', 'void']),
   creditApproval: z.object({ by: z.string(), detail: z.string() }).nullable(), belowCostApproval: z.object({ by: z.string(), detail: z.string() }).nullable(),
   deliveries: z.array(SalesDocRef.extend({ invoiceNo: z.string().nullable() })), invoices: z.array(SalesDocRef),
+  priceApproval: SalesApprovalNote.nullable().default(null), profit: SalesProfit.nullable().default(null),
   createdBy: z.string(), voided: SalesVoided.nullable(),
 });
 export type SalesOrder = z.infer<typeof SalesOrder>;
@@ -190,7 +230,7 @@ export const SalesInvoiceReq = z.discriminatedUnion('source', [
     source: z.literal('direct'), customerId: z.string(), vatMode: SalesVatMode.optional(), term: SalesTerm.optional(), salespersonId: z.string().optional(),
     warehouseId: z.string(), lines: z.array(SalesOrderLineIn.omit({ quoteLineId: true })).min(1).max(200), billDiscount: DecNN.default('0'),
     /** The customer leaves the goods at the shop: stock is cut now, the goods go out later on a delivery order. */
-    goodsLeft: z.boolean().default(false), belowCostApproval: Approval.optional(), ...InvoiceCommon,
+    goodsLeft: z.boolean().default(false), belowCostApproval: Approval.optional(), priceApproval: SalesPriceApproval.optional(), ...InvoiceCommon,
   }),
 ]);
 export type SalesInvoiceReq = z.infer<typeof SalesInvoiceReq>;
@@ -225,7 +265,7 @@ export type SalesCreditNoteSummary = z.infer<typeof SalesCreditNoteSummary>;
 export const SalesProjectReq = SalesNewProject.extend({ soNo: z.string() });
 export const SalesInstallmentsReq = z.object({ rows: z.array(SalesInstallmentIn.extend({ id: z.string().optional(), dueDate: ISODate })).min(1).max(24) });
 export const SalesDepositType = z.enum(['guarantee', 'advance']);
-export const SalesDepositReq = z.object({ type: SalesDepositType, amount: DecNN, method: PaymentMethod, date: ISODate.optional() });
+export const SalesDepositReq = z.object({ type: SalesDepositType, amount: DecNN, method: PaymentMethod, date: ISODate.optional(), note: z.string().max(500).default('') });
 export const SalesDepositActionReq = z.object({ method: PaymentMethod.optional(), approval: Approval.optional(), reason: z.string().max(300).default('') });
 export const SalesInstallment = z.object({
   id: z.string(), n: z.number().int(), label: z.string(), pct: Dec, dueDate: z.string(), status: z.enum(['open', 'billed']),
@@ -234,12 +274,12 @@ export const SalesInstallment = z.object({
 export const SalesDeposit = z.object({
   id: z.string(), no: z.string(), date: z.string(), type: SalesDepositType, amount: Dec, method: z.string(), applied: Dec, remaining: Dec,
   status: z.enum(['active', 'forfeited', 'refunded', 'void']), invoiceNo: z.string().nullable(), forfeitNo: z.string().nullable(),
-  refund: z.object({ amount: Dec, method: z.string(), date: z.string(), by: z.string() }).nullable(),
+  refund: z.object({ amount: Dec, method: z.string(), date: z.string(), by: z.string() }).nullable(), note: z.string().default(''),
 });
 export type SalesDeposit = z.infer<typeof SalesDeposit>;
 export const SalesProjectFigures = z.object({ value: Dec, delivered: Dec, billed: Dec, collected: Dec, outstanding: Dec, unbilled: Dec });
 export const SalesProject = z.object({
-  id: z.string(), no: z.string(), name: z.string(), customer: SalesParty, site: z.string(), contact: z.string(), template: z.string(),
+  id: z.string(), no: z.string(), name: z.string(), customer: SalesParty, site: z.string(), contact: z.string(), template: z.string(), note: z.string().default(''),
   status: z.enum(['active', 'void']), mainSoNo: z.string().nullable(), figures: SalesProjectFigures,
   orders: z.array(SalesDocRef.extend({ total: Dec, dlvStatus: SalesDlvStatus, isMain: z.boolean() })),
   installments: z.array(SalesInstallment), deposits: z.array(SalesDeposit),
@@ -330,6 +370,8 @@ export type ArReceiptSummary = z.infer<typeof ArReceiptSummary>;
 export const salesRoutes = {
   salesSettings: 'GET /api/sales/settings', salesSettingsUpdate: 'PATCH /api/sales/settings',
   salesPrice: 'GET /api/sales/price', salesCustomerCredit: 'GET /api/sales/customers/:id/credit',
+  salesCustomerAddresses: 'GET /api/sales/customers/:id/addresses', salesCustomerAddressCreate: 'POST /api/sales/customers/:id/addresses',
+  salesPeople: 'GET /api/sales/salespeople', salesLineCheck: 'POST /api/sales/line-check',
   salesQuotes: 'GET /api/sales/quotations', salesQuoteCreate: 'POST /api/sales/quotations', salesQuote: 'GET /api/sales/quotations/:no',
   salesQuoteUpdate: 'PATCH /api/sales/quotations/:no', salesQuoteStatus: 'POST /api/sales/quotations/:no/status', salesQuoteVoid: 'POST /api/sales/quotations/:no/void',
   salesOrders: 'GET /api/sales/orders', salesOrderCreate: 'POST /api/sales/orders', salesOrder: 'GET /api/sales/orders/:no', salesOrderVoid: 'POST /api/sales/orders/:no/void',

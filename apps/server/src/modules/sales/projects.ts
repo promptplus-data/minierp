@@ -51,8 +51,8 @@ export async function createProjectForOrder(tx: Tx, deps: Deps, ctx: Ctx, so: { 
   const rows = scheduleOf(p, start);
   const no = await nextDocNo(tx, ctx.tenantId, 'PJ', deps.today());
   const id = (await tx.query<{ id: string }>(
-    `insert into sales_projects (tenant_id, no, name, customer_id, site, contact, template, main_so_id, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
-    [ctx.tenantId, no, p.name, so.customerId, p.site, p.contact, p.installments?.length ? 'custom' : p.template, so.id, ctx.userId],
+    `insert into sales_projects (tenant_id, no, name, customer_id, site, contact, template, main_so_id, created_by, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+    [ctx.tenantId, no, p.name, so.customerId, p.site, p.contact, p.installments?.length ? 'custom' : p.template, so.id, ctx.userId, p.note ?? ''],
   )).rows[0]!.id;
   for (const [i, r] of rows.entries()) {
     await tx.query(`insert into sales_project_installments (tenant_id, project_id, n, label, pct, due_date) values ($1,$2,$3,$4,$5,$6)`, [ctx.tenantId, id, i + 1, r.label, r.pct, r.dueDate]);
@@ -84,7 +84,7 @@ export async function createProject(tx: Tx, deps: Deps, ctx: Ctx, req: z.infer<t
 
 // ---------- read ----------
 interface ProjectRow extends PartyCols {
-  id: string; no: string; name: string; customer_id: string; site: string; contact: string; template: string; status: 'active' | 'void'; main_so_no: string | null;
+  id: string; no: string; name: string; customer_id: string; site: string; contact: string; template: string; status: 'active' | 'void'; main_so_no: string | null; note: string;
   created_by_name: string; created_at: Date; void_by_name: string | null; void_at: Date | null; void_reason: string | null;
 }
 
@@ -92,7 +92,7 @@ async function projectRow(tx: Tx, id: string, forUpdate = false): Promise<Projec
   if (!isUuid(id)) throw E.notFound('Project not found');
   if (forUpdate) await tx.query(`select id from sales_projects where id = $1 for update`, [id]);
   const r = await tx.query<ProjectRow>(
-    `select x.id, x.no, x.name, x.customer_id, x.site, x.contact, x.template, x.status, so.no main_so_no, cu.name created_by_name, x.created_at, vu.name void_by_name,
+    `select x.id, x.no, x.name, x.customer_id, x.site, x.contact, x.template, x.status, so.no main_so_no, x.note, cu.name created_by_name, x.created_at, vu.name void_by_name,
             x.void_at, x.void_reason, ${partyCols}
        from sales_projects x join customers c on c.id = x.customer_id join users cu on cu.id = x.created_by left join sales_orders so on so.id = x.main_so_id
        left join users vu on vu.id = x.void_by where x.id = $1`,
@@ -121,10 +121,10 @@ async function installments(tx: Tx, projectId: string): Promise<InstRow[]> {
   return r.rows;
 }
 
-interface DepRow { id: string; no: string; date: string; type: 'guarantee' | 'advance'; amount: string; method: string; status: SalesDeposit['status']; closed_amount: string; inv_no: string | null; forfeit_no: string | null; refund: { amount: string; method: string; date: string; by: string } | null; created_at: Date }
+interface DepRow { id: string; no: string; date: string; type: 'guarantee' | 'advance'; amount: string; method: string; status: SalesDeposit['status']; closed_amount: string; inv_no: string | null; forfeit_no: string | null; refund: { amount: string; method: string; date: string; by: string } | null; note: string; created_at: Date }
 async function deposits(tx: Tx, projectId: string): Promise<DepRow[]> {
   const r = await tx.query<DepRow>(
-    `select dp.id, dp.no, dp.date::text, dp.type, dp.amount::text, dp.method, dp.status, dp.closed_amount::text, iv.no inv_no, fv.no forfeit_no, dp.refund, dp.created_at
+    `select dp.id, dp.no, dp.date::text, dp.type, dp.amount::text, dp.method, dp.status, dp.closed_amount::text, iv.no inv_no, fv.no forfeit_no, dp.refund, dp.note, dp.created_at
        from sales_deposits dp left join docs iv on iv.id = dp.invoice_doc_id left join docs fv on fv.id = dp.forfeit_doc_id
       where dp.project_id = $1 order by dp.created_at`,
     [projectId],
@@ -192,7 +192,7 @@ export async function getProject(tx: Tx, _deps: Deps, id: string): Promise<Sales
   ]);
   const mainId = (await tx.query<{ main_so_id: string | null }>(`select main_so_id from sales_projects where id = $1`, [id])).rows[0]?.main_so_id;
   return {
-    id: p.id, no: p.no, name: p.name, customer: partyOf(p), site: p.site, contact: p.contact, template: p.template, status: p.status, mainSoNo: p.main_so_no,
+    id: p.id, no: p.no, name: p.name, customer: partyOf(p), site: p.site, contact: p.contact, template: p.template, note: p.note, status: p.status, mainSoNo: p.main_so_no,
     figures: await projectFigures(tx, id),
     orders: orders.rows.map((o) => ({ no: o.no, date: o.date, status: o.status, total: o.total, dlvStatus: o.dlv_status, isMain: o.id === mainId })),
     installments: inst.map((i, idx) => {
@@ -201,7 +201,7 @@ export async function getProject(tx: Tx, _deps: Deps, id: string): Promise<Sales
     }),
     deposits: pool.rows.map((x) => ({
       id: x.id, no: x.no, date: x.date, type: x.type, amount: money(x.amount), method: x.method, applied: x.applied, remaining: x.remaining, status: x.status,
-      invoiceNo: x.inv_no, forfeitNo: x.forfeit_no, refund: x.refund,
+      invoiceNo: x.inv_no, forfeitNo: x.forfeit_no, refund: x.refund, note: x.note,
     })),
     deliveries: dlv.rows.map((x) => ({ no: x.no, date: x.date, status: x.status, soNo: x.so_no, total: x.total, itemsPreview: x.preview ?? '', vehicle: x.vehicle })),
     invoices: invs.rows.map((x) => ({ no: x.no, date: x.date, status: x.status, total: x.total, arBalance: x.status === 'void' ? '0.00' : x.ar_balance, source: x.source })),
@@ -335,8 +335,8 @@ export async function receiveDeposit(tx: Tx, deps: Deps, ctx: Ctx, id: string, r
     invNo = inv.no;
   }
   const depId = (await tx.query<{ id: string }>(
-    `insert into sales_deposits (tenant_id, no, date, project_id, customer_id, type, amount, method, invoice_doc_id, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
-    [ctx.tenantId, no, date, id, p.customer_id, req.type, money(req.amount), req.method, invoiceId, ctx.userId],
+    `insert into sales_deposits (tenant_id, no, date, project_id, customer_id, type, amount, method, invoice_doc_id, created_by, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
+    [ctx.tenantId, no, date, id, p.customer_id, req.type, money(req.amount), req.method, invoiceId, ctx.userId, req.note ?? ''],
   )).rows[0]!.id;
   if (invoiceId) await tx.query(`update sales_invoices set deposit_id = $2 where doc_id = $1`, [invoiceId, depId]);
   await writeAudit(tx, ctx, [{ action: 'create', object: 'deposit', ref: no, detail: `${DEP_TH[req.type]} · ${p.name} · ฿${fmtTHB(req.amount)} · ${req.method}${invNo ? ` · ใบกำกับ ${invNo}` : ' · ยังไม่เกิด VAT'}` }]);

@@ -20,6 +20,8 @@ export async function ok<T = any>(p: Promise<{ status: number; body: any }>, sta
 }
 
 export const pin = (env: Env, user = 'suda') => ({ approverUserId: env.seed.users[user]!, pin: '1234' });
+/** Manager PIN + reason for a price below the BR-05 price / a discount over the role cap (sales role has pos.price 'apv'). */
+export const apv = (env: Env, user = 'suda') => ({ ...pin(env, user), reason: 'ราคาพิเศษตามที่ตกลงกับลูกค้า' });
 
 /** Balance of one invoice straight from the database (superuser). */
 export async function arOf(env: Env, no: string): Promise<string> {

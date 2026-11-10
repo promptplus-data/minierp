@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { seedMinimalTenant } from '@erp/db';
 import { login } from '../helpers';
-import { arOf, ok, setupSales, type SalesEnv } from './sales-helpers';
+import { apv, arOf, ok, setupSales, type SalesEnv } from './sales-helpers';
 
 let env: SalesEnv;
 let P: Record<string, string>;
@@ -11,7 +11,7 @@ let WH2: string;
 const inv: Record<string, string> = {};
 
 const direct = async (customerId: string, qty: string, price: string, date?: string) =>
-  (await ok(env.boy.post('/api/sales/invoices', { source: 'direct', customerId, warehouseId: WH2, date, lines: [{ productId: P.p3, qty, unitPrice: price }] }), 201)).doc.no as string;
+  (await ok(env.boy.post('/api/sales/invoices', { source: 'direct', customerId, warehouseId: WH2, date, lines: [{ productId: P.p3, qty, unitPrice: price }], priceApproval: apv(env) }), 201)).doc.no as string;
 
 beforeAll(async () => {
   env = await setupSales();

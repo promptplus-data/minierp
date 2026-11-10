@@ -42,6 +42,7 @@ export const salesProjects = pgTable('sales_projects', {
   site: text('site').notNull(),
   contact: text('contact').notNull(),
   template: text('template').notNull(),
+  note: text('note').notNull(),
   mainSoId: uuid('main_so_id'),
   status: text('status').notNull(),
   voidBy: uuid('void_by'),
@@ -84,6 +85,8 @@ export const salesQuotes = pgTable('sales_quotes', {
   vat: money('vat').notNull(),
   total: money('total').notNull(),
   status: text('status').notNull(),
+  belowCostApproval: jsonb('below_cost_approval'),
+  priceApproval: jsonb('price_approval'),
   revision: integer('revision').notNull(),
   voidBy: uuid('void_by'),
   voidAt: timestamp('void_at', { withTimezone: true }),
@@ -111,6 +114,9 @@ export const salesQuoteLines = pgTable('sales_quote_lines', {
   discAmt: money('disc_amt').notNull(),
   net: money('net').notNull(),
   vat: text('vat').notNull(),
+  listPrice: qty('list_price'),
+  priceSource: text('price_source'),
+  priceRef: text('price_ref'),
 });
 
 export const salesQuoteRevisions = pgTable('sales_quote_revisions', {
@@ -147,6 +153,7 @@ export const salesOrders = pgTable('sales_orders', {
   dlvStatus: text('dlv_status').notNull(),
   creditApproval: jsonb('credit_approval'),
   belowCostApproval: jsonb('below_cost_approval'),
+  priceApproval: jsonb('price_approval'),
   status: text('status').notNull(),
   voidBy: uuid('void_by'),
   voidAt: timestamp('void_at', { withTimezone: true }),
@@ -175,6 +182,9 @@ export const salesOrderLines = pgTable('sales_order_lines', {
   netAfterBill: money('net_after_bill').notNull(),
   vat: text('vat').notNull(),
   quoteLineId: uuid('quote_line_id'),
+  listPrice: qty('list_price'),
+  priceSource: text('price_source'),
+  priceRef: text('price_ref'),
 });
 
 export const salesDeliveries = pgTable('sales_deliveries', {
@@ -233,6 +243,7 @@ export const salesDeposits = pgTable('sales_deposits', {
   forfeitDocId: uuid('forfeit_doc_id'),
   refund: jsonb('refund'),
   closedAmount: money('closed_amount').notNull(),
+  note: text('note').notNull(),
   status: text('status').notNull(),
   voidBy: uuid('void_by'),
   voidAt: timestamp('void_at', { withTimezone: true }),
@@ -259,6 +270,7 @@ export const salesInvoices = pgTable('sales_invoices', {
   textLines: jsonb('text_lines').notNull(),
   attn: text('attn').notNull(),
   note: text('note').notNull(),
+  priceApproval: jsonb('price_approval'),
   salespersonId: uuid('salesperson_id'),
   createdAt: createdAt(),
 });
@@ -330,4 +342,16 @@ export const arReceiptLines = pgTable('ar_receipt_lines', {
   settled: money('settled').notNull(),
   whtBase: money('wht_base').notNull(),
   wht: money('wht').notNull(),
+});
+
+/** Ship-to address book of a customer (0620_sales_b2b.sql). */
+export const customerAddresses = pgTable('customer_addresses', {
+  id: id(),
+  tenantId: tenantId(),
+  customerId: uuid('customer_id').notNull(),
+  label: text('label').notNull(),
+  address: text('address').notNull(),
+  active: boolean('active').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: createdAt(),
 });

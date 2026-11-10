@@ -16,9 +16,10 @@ import { applyOut, lockLots, planTakes, type Planned } from '../../lib/stock';
 import { requireWarehouse } from '../../services/master';
 import { getDoc, getDocRow, getLines, registerVoidGuard } from '../../services/sales';
 import {
-  belowCostGate, buildLines, creditGate, discAmt, haystack, inSeq, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
+  belowCostGate, buildLines, creditGate, priceGate, discAmt, haystack, inSeq, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
   totalsOf, userRef, type BuiltLine, type CustomerRow, type PartyCols,
 } from './common';
+import { makePricer } from './pricing';
 
 export interface InvoiceLineIn {
   productId: string; name: string; unitName: string; unitFactor: string; qty: string; baseQty: string; unitPrice: string; discount: string;
@@ -146,6 +147,15 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   const date = req.date ?? deps.today();
   const audits: AuditInput[] = [];
 
+  // BR-05 price per line and the price / discount approval (same gate as the sales order)
+  const pricer = await makePricer(tx, { customerId: customer.id, date, vatMode, doc: 'order' });
+  for (const l of lines) {
+    const r = await pricer(l.product!, l.unitIdx!, l.qty);
+    Object.assign(l, { listPrice: r.unitPrice, priceSource: r.source, priceRef: r.ref });
+  }
+  const pg = await priceGate(tx, deps, ctx, lines, totals, req.priceApproval, `ใบกำกับ ${customer.name}`);
+  audits.push(...pg.audit);
+
   const no = await nextDocNo(tx, ctx.tenantId, 'INV', date);
   // BR-07 / BR-21: lock and plan FIFO now (the invoice cuts stock even when the goods stay at the shop).
   const stock = lines.filter((l) => l.product!.kind === 'stock');
@@ -167,12 +177,13 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
     search: lines.map((l) => `${l.name} ${l.product!.sku}`),
     ext: { kind: settle.kind, source: 'direct', term, dueDate: dueDate(date, term), goodsLeft: req.goodsLeft, attn: req.attn, note: req.note, salespersonId: salesperson },
   }, no);
+  if (pg.approval) await tx.query(`update sales_invoices set price_approval = $2 where doc_id = $1`, [inv.id, JSON.stringify(pg.approval)]);
   for (const [i, l] of lines.entries()) {
     const pl = planOf.get(l);
     if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: 'INV', docNo: no, docId: inv.id, docLineId: inv.lineIds[i]!, note: req.goodsLeft ? 'ขายเชื่อ · ลูกค้าฝากของไว้ที่ร้าน' : 'ขายส่ง / เงินเชื่อ' });
   }
   audits.push({ action: 'create', object: 'INV', ref: no, detail: `${customer.name} · ฿${fmtTHB(totals.total)} · ${lines.length} รายการ · ${wh.name}${req.goodsLeft ? ' · ฝากของไว้ที่ร้าน' : ''} · ${settle.kind === 'cash' ? 'เงินสด' : `ครบกำหนด ${dueDate(date, term)}`}` });
-  await writeAudit(tx, ctx, audits);
+  await writeAudit(tx, ctx, audits.map((a) => ({ ref: no, ...a })));
   return getInvoice(tx, deps, ctx, no);
 }
 

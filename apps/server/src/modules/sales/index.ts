@@ -7,7 +7,7 @@
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  ArAgingQuery, ArBillingNoteReq, ArInvoicesQuery, ArReceiptReq, ArStatementQuery, SalesAbbInvoiceReq, SalesDeliveryReq, SalesDepositActionReq, SalesDepositReq,
+  ArAgingQuery, ArBillingNoteReq, CustomerAddressReq, SalesLineCheckReq, ArInvoicesQuery, ArReceiptReq, ArStatementQuery, SalesAbbInvoiceReq, SalesDeliveryReq, SalesDepositActionReq, SalesDepositReq,
   SalesInstallmentsReq, SalesInvoiceReq, SalesOrderReq, SalesPageQuery, SalesPriceListReq, SalesPriceQuery, SalesProjectReq, SalesQuoteReq, SalesQuoteStatusReq,
   SalesSettings, SalesSettingsUpdate, VoidReq,
 } from '@erp/contracts';
@@ -16,16 +16,16 @@ import { writeAudit } from '../../lib/audit';
 import { requireAny, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import type { ErpModule } from '../types';
 import { creditInfo, loadCustomer, loadShop, resolveVatMode } from './common';
+import { addCustomerAddress, customerAddresses, lineCheck, salesPeople } from './extras';
 import { createDelivery, deliverySources, getDelivery, listDeliveries, voidDelivery } from './deliveries';
 import { createInvoice, getInvoice, invoiceFromAbb, listCreditNotes, listInvoices } from './invoices';
 import { createOrder, getOrder, listOrders, voidOrder } from './orders';
-import { createPriceList, docUnitPrice, getPriceList, listPriceLists, resolvePrice, updatePriceList } from './pricing';
+import { createPriceList, getPriceList, listPriceLists, resolveB2bPrice, updatePriceList } from './pricing';
 import {
   billInstallment, createProject, forfeitDeposit, getProject, listProjects, receiveDeposit, refundDeposit, setInstallments, voidDeposit, voidProject,
 } from './projects';
 import { createQuote, getQuote, listQuotes, setQuoteStatus, updateQuote, voidQuote } from './quotes';
 import { aging, createBillingNote, createReceipt, dueSoon, getBillingNote, getReceipt, listBillingNotes, listReceipts, openInvoices, statement, voidBillingNote, voidReceipt } from './receivables';
-import { loadProducts } from '../../services/master';
 
 const param = (req: FastifyRequest, k: string) => (req.params as Record<string, string>)[k] ?? '';
 const readSales = (ctx: Ctx) => requireAny(ctx, ['sales.doc', 'fin.ar', 'pos.sell', 'sales.project'], { readOnly: true });
@@ -65,10 +65,21 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/sales/price', authed(async (tx, ctx, req) => {
     readSales(ctx);
     const q = SalesPriceQuery.parse(req.query);
-    const r = await resolvePrice(tx, q.customerId, q.productId, q.unitIdx, q.qty, q.date ?? d.today());
-    const p = (await loadProducts(tx, [q.productId])).get(q.productId)!;
-    const mode = await resolveVatMode(tx, ctx, q.vatMode);
-    return { unitPrice: docUnitPrice(r, mode, p.vat), source: r.source, ref: r.ref };
+    const vatMode = await resolveVatMode(tx, ctx, q.vatMode);
+    return resolveB2bPrice(tx, { customerId: q.customerId, productId: q.productId, unitIdx: q.unitIdx, qty: q.qty, date: q.date ?? d.today(), vatMode, doc: q.doc });
+  }));
+  app.post('/api/sales/line-check', authed(async (tx, ctx, req) => {
+    requireAny(ctx, ['sales.doc'], { readOnly: true });
+    return lineCheck(tx, ctx, SalesLineCheckReq.parse(req.body));
+  }));
+  app.get('/api/sales/salespeople', authed(async (tx, ctx) => { readSales(ctx); return salesPeople(tx); }));
+  app.get('/api/sales/customers/:id/addresses', authed(async (tx, ctx, req) => {
+    requireAny(ctx, ['sales.doc', 'inv.receive', 'sales.project'], { readOnly: true });
+    return customerAddresses(tx, param(req, 'id'));
+  }));
+  app.post('/api/sales/customers/:id/addresses', authed(async (tx, ctx, req, reply) => {
+    reply.status(201);
+    return addCustomerAddress(tx, ctx, param(req, 'id'), CustomerAddressReq.parse(req.body));
   }));
   app.get('/api/sales/customers/:id/credit', authed(async (tx, ctx, req) => {
     readSales(ctx);
@@ -85,7 +96,7 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   // ---------- quotations ----------
   app.get('/api/sales/quotations', authed(async (tx, ctx, req) => { readSales(ctx); return listQuotes(tx, d, SalesPageQuery.parse(req.query)); }));
   app.post('/api/sales/quotations', authed(async (tx, ctx, req, reply) => { reply.status(201); return createQuote(tx, d, ctx, SalesQuoteReq.parse(req.body)); }));
-  app.get('/api/sales/quotations/:no', authed(async (tx, ctx, req) => { readSales(ctx); return getQuote(tx, d, param(req, 'no')); }));
+  app.get('/api/sales/quotations/:no', authed(async (tx, ctx, req) => { readSales(ctx); return getQuote(tx, d, ctx, param(req, 'no')); }));
   app.patch('/api/sales/quotations/:no', authed(async (tx, ctx, req) => updateQuote(tx, d, ctx, param(req, 'no'), SalesQuoteReq.parse(req.body))));
   app.post('/api/sales/quotations/:no/status', authed(async (tx, ctx, req) => setQuoteStatus(tx, d, ctx, param(req, 'no'), SalesQuoteStatusReq.parse(req.body).status)));
   app.post('/api/sales/quotations/:no/void', authed(async (tx, ctx, req) => voidQuote(tx, d, ctx, param(req, 'no'), VoidReq.parse(req.body))));
@@ -93,7 +104,7 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   // ---------- sales orders ----------
   app.get('/api/sales/orders', authed(async (tx, ctx, req) => { readSales(ctx); return listOrders(tx, ProjectListQuery.parse(req.query)); }));
   app.post('/api/sales/orders', authed(async (tx, ctx, req, reply) => { reply.status(201); return createOrder(tx, d, ctx, SalesOrderReq.parse(req.body)); }));
-  app.get('/api/sales/orders/:no', authed(async (tx, ctx, req) => { readSales(ctx); return getOrder(tx, param(req, 'no')); }));
+  app.get('/api/sales/orders/:no', authed(async (tx, ctx, req) => { readSales(ctx); return getOrder(tx, ctx, param(req, 'no')); }));
   app.post('/api/sales/orders/:no/void', authed(async (tx, ctx, req) => voidOrder(tx, d, ctx, param(req, 'no'), VoidReq.parse(req.body))));
 
   // ---------- delivery orders ----------

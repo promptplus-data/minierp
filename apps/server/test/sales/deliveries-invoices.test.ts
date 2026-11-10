@@ -1,7 +1,7 @@
 /** REQ-M08-04/05/06/10/12: partial delivery orders (FIFO, BR-07), invoices from deliveries / direct / goods left, ABB → full INV, void chain. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lotsOf, openShift, saleBody, stockQty } from '../helpers';
-import { arOf, ok, pin, setupSales, type SalesEnv } from './sales-helpers';
+import { apv, arOf, ok, pin, setupSales, type SalesEnv } from './sales-helpers';
 
 let env: SalesEnv;
 let P: Record<string, string>;
@@ -16,7 +16,7 @@ beforeAll(async () => {
 afterAll(async () => { await env.close(); });
 
 const order = async (lines: { productId: string; qty: string; unitPrice: string; unitIdx?: number }[], extra: Record<string, unknown> = {}) =>
-  ok(env.boy.post('/api/sales/orders', { customerId: C.c1, warehouseId: WH2, lines, ...extra }), 201);
+  ok(env.boy.post('/api/sales/orders', { customerId: C.c1, warehouseId: WH2, lines, priceApproval: apv(env), ...extra }), 201);
 const deliver = (soNo: string, lines: { srcLineId: string; qty: string }[], extra: Record<string, unknown> = {}) =>
   env.chai.post('/api/sales/deliveries', { soNo, lines, ...extra });
 

@@ -3,7 +3,7 @@ import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { SalesLine, SalesLineIn, SalesParty, SalesTerm, SalesTotals } from '@erp/contracts';
 import {
-  approverRoles, calcDoc, checkBelowCost, d, daysOverdue, fmtTHB, lineDiscount, money, netUnitPricesExVat, qty4, sum, takeLots,
+  approverRoles, calcDoc, checkBelowCost, d, daysOverdue, discountPct, exceedsCap, fmtTHB, lineDiscount, money, netUnitPricesExVat, qty4, sum, takeLots,
   type DocLine as CoreLine, type LineDiscount, type VatMode,
 } from '@erp/core';
 import { verifyApproval, type Approval } from '../../lib/approval';
@@ -66,6 +66,8 @@ export async function lumpVatMode(tx: Tx, ctx: Ctx): Promise<'inc' | 'none'> {
 export interface BuiltLine {
   product: ProductRow | null; unitIdx: number | null; name: string; unitName: string; unitFactor: string;
   qty: string; baseQty: string; unitPrice: string; discount: LineDiscount | null; vat: 'v7' | 'exempt';
+  /** BR-05 price for this line (document VAT basis) and its source; set by priceLines. Null for free-text lines. */
+  listPrice?: string | null; priceSource?: string | null; priceRef?: string | null;
 }
 
 /** Validates and resolves request lines. Free-text lines (no productId) only when allowFree (quotations). */
@@ -107,11 +109,13 @@ export const TOTAL_COLS = (a: string) => `${a}.gross::text, ${a}.line_disc::text
 export interface LineRowBase {
   id: string; line_no: number; product_id: string | null; unit_idx: number | null; sku: string | null; name: string; unit_name: string; qty: string;
   unit_price: string; discount: LineDiscount | null; disc_amt: string; net: string; vat: 'v7' | 'exempt';
+  list_price?: string | null; price_source?: string | null; price_ref?: string | null;
 }
 export const lineJson = (l: LineRowBase): SalesLine => ({
   id: l.id, lineNo: l.line_no, productId: l.product_id, unitIdx: l.unit_idx, sku: l.sku, name: l.name, unitName: l.unit_name, qty: qty4(l.qty),
   unitPrice: qty4(l.unit_price), discount: l.discount ? { kind: l.discount.kind, value: String(l.discount.value) } : null, discAmt: money(l.disc_amt),
   net: money(l.net), vat: l.vat, free: !l.product_id,
+  listPrice: l.list_price != null ? money(l.list_price) : null, priceSource: l.price_source ?? null, priceRef: l.price_ref ?? null, unitCost: null, profit: null,
 });
 
 /** Lower-cased search haystack: number, customer, products, amount. */
@@ -239,10 +243,17 @@ export const planUnitCosts = (lines: BuiltLine[], plans: Map<BuiltLine, Planned>
 /** BR-16: owner sells below cost himself (logged) or another user needs the owner's PIN. Quotations are never checked. */
 export async function belowCostGate(
   tx: Tx, deps: Deps, ctx: Ctx, lines: BuiltLine[], vatMode: VatMode, billDisc: string, unitCosts: (string | null)[], approval: Approval | undefined, what: string,
+  /** Lines already approved below cost upstream (quotation lines carried unchanged into the order). */
+  preApproved?: { lines: Set<number>; by: string },
 ): Promise<{ approval: Record<string, unknown> | null; audit: AuditInput | null }> {
   const sell = netUnitPricesExVat(lines.map((l) => ({ ...coreLine(l), baseQty: l.baseQty })), vatMode, billDisc);
-  const below = checkBelowCost(lines.map((_, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: unitCosts[i] })));
-  if (!below.length) return { approval: null, audit: null };
+  const all = checkBelowCost(lines.map((_, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: unitCosts[i] })));
+  const below = all.filter((i) => !preApproved?.lines.has(i));
+  if (!below.length) {
+    if (!all.length) return { approval: null, audit: null };
+    const msg = `ขายต่ำกว่าทุน ${all.length} รายการ (อนุมัติแล้วในใบเสนอราคา) · อนุมัติโดย ${preApproved!.by}`;
+    return { approval: { by: preApproved!.by, detail: msg, at: new Date().toISOString() }, audit: { action: 'approve', object: 'below-cost', detail: `${what} · ${msg}` } };
+  }
   const seeCost = can(ctx, 'data.cost') === 1;
   const detail = below.map((i) => ({ productId: lines[i]!.product?.id, name: lines[i]!.name, ...(seeCost ? { sell: money(sell[i]!), cost: money(unitCosts[i]!) } : {}) }));
   const text = below.map((i) => `${lines[i]!.name} (ขาย ${money(sell[i]!)} < ทุน ${money(unitCosts[i]!)})`).join(', ');
@@ -255,6 +266,76 @@ export async function belowCostGate(
   } else throw E.belowCost(`${below.length} line(s) below cost`, { lines: detail });
   const msg = `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · อนุมัติโดย ${by}`;
   return { approval: { by, detail: msg, at: new Date().toISOString() }, audit: { action: 'approve', object: 'below-cost', detail: `${what} · ${msg}` } };
+}
+
+// ---------- price below BR-05 / discount over the role cap ----------
+export interface PriceApprovalIn extends Approval { reason: string }
+
+/**
+ * A unit price below the BR-05 price (list / promo / quotation) needs pos.price = 1 or a manager / owner PIN; a
+ * discount (line + bill) over the role cap pos.discCap needs the PIN too (same rule as POS). The approver gives a
+ * reason; both are recorded on the document and in the audit log. Raising a price above the list is free.
+ */
+export async function priceGate(
+  tx: Tx, deps: Deps, ctx: Ctx, lines: BuiltLine[], totals: { gross: string; lineDisc: string; billDisc: string }, approval: PriceApprovalIn | undefined, what: string,
+): Promise<{ approval: Record<string, unknown> | null; audit: AuditInput[] }> {
+  const lowered = lines.flatMap((l, i) => (l.product && l.listPrice != null && d(l.unitPrice).lt(d(l.listPrice)) ? [i] : []));
+  const cap = can(ctx, 'pos.discCap');
+  const capPct = typeof cap === 'number' ? cap : 0;
+  const pct = discountPct(totals.gross, d(totals.lineDisc).plus(d(totals.billDisc)));
+  const overCap = exceedsCap(pct, capPct);
+  const priceNeeds = lowered.length > 0 && can(ctx, 'pos.price') !== 1;
+  const text = lowered.map((i) => `${lines[i]!.name} ${money(lines[i]!.unitPrice)} (ราคาตามระบบ ${money(lines[i]!.listPrice!)})`).join(', ');
+  if (!overCap && !priceNeeds) {
+    // allowed to change prices: logged, no PIN
+    return { approval: null, audit: lowered.length ? [{ action: 'update', object: 'price-change', detail: `${what} · ลดราคาจากราคาตามระบบ: ${text}` }] : [] };
+  }
+  const need = {
+    need: 'priceApproval', pct, cap: capPct, overCap, priceChanged: priceNeeds,
+    lines: lowered.map((i) => ({ line: i + 1, name: lines[i]!.name, unitPrice: money(lines[i]!.unitPrice), listPrice: money(lines[i]!.listPrice!) })),
+  };
+  if (!approval) throw E.forbidden(overCap ? `Discount ${pct}% is over your cap of ${capPct}%` : 'A price below the list price needs approval', need);
+  if (!approval.reason?.trim()) throw E.validation('The approval needs a reason', { ...need, approvalError: 'REASON' });
+  const a = await verifyApproval(tx, deps.pool, ctx, approval, approverRoles('pos.discCap'), `${what} · ส่วนลด ${pct}%`);
+  if (!a.ok) throw E.forbidden('Price approval rejected', { ...need, approvalError: a.reason });
+  const parts = [overCap ? `ส่วนลด ${pct}% (สิทธิ์ ${capPct}%)` : '', priceNeeds ? `เปลี่ยนราคา: ${text}` : ''].filter(Boolean).join(' · ');
+  const detail = `${parts} · เหตุผล: ${approval.reason.trim()} · อนุมัติโดย ${a.approver.name}`;
+  return {
+    approval: { by: a.approver.id, name: a.approver.name, reason: approval.reason.trim(), detail, at: new Date().toISOString() },
+    audit: [{ action: 'approve', object: 'discount', detail: `${what} · ${detail}` }],
+  };
+}
+
+// ---------- cost / profit (data.cost only) ----------
+/** Per line: FIFO unit cost per line unit, profit before VAT; and the document total. Null cost = no cost (service / free text). */
+export function profitOf(lines: Pick<BuiltLine, 'qty' | 'unitPrice' | 'discount' | 'vat' | 'baseQty' | 'unitFactor'>[], vatMode: VatMode, billDisc: string, unitCosts: (string | null)[]) {
+  const sell = netUnitPricesExVat(lines.map((l) => ({ ...coreLine(l), baseQty: l.baseQty })), vatMode, billDisc);
+  let cost = d(0);
+  let revenue = d(0);
+  const rows = lines.map((l, i) => {
+    const rev = d(sell[i] ?? 0).times(d(l.baseQty));
+    revenue = revenue.plus(rev);
+    const uc = unitCosts[i];
+    if (uc == null) return { unitCost: null, profit: null };
+    const c = d(uc).times(d(l.baseQty));
+    cost = cost.plus(c);
+    return { unitCost: money(d(uc).times(d(l.unitFactor))), profit: money(rev.minus(c)) };
+  });
+  const profit = revenue.minus(cost);
+  return {
+    lines: rows,
+    total: { cost: money(cost), revenue: money(revenue), profit: money(profit), marginPct: revenue.gt(0) ? profit.div(revenue).times(100).toFixed(2) : '0.00' },
+  };
+}
+
+/** Rebuilds minimal BuiltLines from stored line rows (product, unit factor) to price their cost. */
+export async function storedLines(tx: Tx, rows: { product_id: string | null; unit_factor: string; qty: string; unit_price: string; discount: LineDiscount | null; vat: 'v7' | 'exempt'; name: string; unit_name: string; unit_idx: number | null }[]): Promise<BuiltLine[]> {
+  const ids = [...new Set(rows.flatMap((r) => (r.product_id ? [r.product_id] : [])))];
+  const products = ids.length ? await loadProducts(tx, ids) : new Map<string, ProductRow>();
+  return rows.map((r) => ({
+    product: r.product_id ? products.get(r.product_id) ?? null : null, unitIdx: r.unit_idx, name: r.name, unitName: r.unit_name, unitFactor: qty4(r.unit_factor),
+    qty: qty4(r.qty), baseQty: qty4(d(r.qty).times(d(r.unit_factor))), unitPrice: qty4(r.unit_price), discount: r.discount, vat: r.vat,
+  }));
 }
 
 // ---------- voids ----------
