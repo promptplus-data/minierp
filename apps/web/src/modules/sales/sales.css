@@ -50,3 +50,10 @@ a.btn{text-decoration:none;color:inherit}
 .agb.on{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
 @media (max-width:700px){.aging{grid-template-columns:repeat(2,minmax(0,1fr))}}
 table.lines select[aria-label="หน่วยส่วนลด"]{min-width:62px;flex:none}
+/* line editor: below cost (red line), stock per line, warnings, profit */
+.sales-lines tr.line-below td{background:color-mix(in srgb,var(--bad) 8%,transparent)}
+.sales-lines tr.line-below td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+.sales-lines input.bad,.sales-lines .ss.bad input{border-color:var(--bad);color:var(--bad)}
+.line-stock{color:var(--muted);margin-top:2px}.line-stock.bad{color:var(--bad);font-weight:600}
+.bad-text{color:var(--bad)}.warn-text{color:var(--warn)}
+.profit-sum{text-align:right;margin-top:4px}

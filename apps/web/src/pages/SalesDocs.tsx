@@ -1,10 +1,9 @@
 /** M08 sales documents: cursor-paged list, filter by type, search. */
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { DocSummary, page } from '@erp/contracts';
-import { api, errText } from '../api';
-import { fmt, Pager, Pill, SkeletonRows, th, useCursorPager, useDebounced } from '../ui';
+import { DocSummary } from '@erp/contracts';
+import { fmt, Pill, SkeletonRows, th, useDebounced } from '../ui';
+import { LoadMore, useLoadMore } from '../ui/lists';
 import { ErrorBanner } from '../errors';
 
 const TYPES = [['', 'ทั้งหมด'], ['ABB', 'ใบกำกับอย่างย่อ'], ['INV', 'ใบกำกับเต็มรูป'], ['RC', 'ใบเสร็จรับเงิน'], ['CN', 'ใบลดหนี้ / รับคืน']] as const;
@@ -19,13 +18,9 @@ export default function SalesDocs() {
   const filt = Object.fromEntries(['from', 'to', 'productId', 'customerId', 'createdBy', 'category'].flatMap((k) => (sp.get(k) ? [[k, sp.get(k)!]] : []))) as Record<string, string>;
   const fkey = JSON.stringify(filt);
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(`${type}|${dq}|${fkey}`);
-  const list = useQuery({
-    queryKey: ['docs', type, dq, fkey, pager.cursor],
-    queryFn: () => api('GET', '/api/sales/docs', { query: { type, q: dq, ...filt, limit: 20, cursor: pager.cursor }, schema: page(DocSummary) }),
-    placeholderData: keepPreviousData,
-  });
-  const loading = list.isLoading || (list.isFetching && list.isPlaceholderData);
+  const list = useLoadMore(['docs', 'list'], '/api/sales/docs', DocSummary, { type, q: dq, ...filt }, 20);
+  const items = list.rows;
+  const loading = list.isLoading;
   const open = (no: string) => nav(`/sales/${encodeURIComponent(no)}`);
   return (
     <div className="card">
@@ -49,7 +44,7 @@ export default function SalesDocs() {
         <table data-testid="docs-table">
           <thead><tr><th>เลขที่</th><th>ประเภท</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th className="n">ยอด</th><th>สถานะ</th></tr></thead>
           <tbody>
-            {loading ? <SkeletonRows cols={7} /> : (list.data?.items ?? []).map((x) => (
+            {loading ? <SkeletonRows cols={7} /> : items.map((x) => (
               <tr key={x.id} className="click" onClick={() => open(x.no)} style={x.status === 'void' ? { opacity: 0.65 } : undefined}>
                 <td className="mono"><a href={`/sales/${encodeURIComponent(x.no)}`} onClick={(e) => { e.preventDefault(); open(x.no); }}>{x.no}</a></td>
                 <td>{TYPE_TH[x.type] ?? x.type}</td>
@@ -60,11 +55,11 @@ export default function SalesDocs() {
                 <td>{x.status === 'void' ? <Pill k="bad">ยกเลิก</Pill> : <Pill k="ok">ปกติ</Pill>}</td>
               </tr>
             ))}
-            {!loading && list.data && !list.data.items.length && <tr><td colSpan={7} className="empty">ไม่พบเอกสาร</td></tr>}
+            {!loading && list.data && !items.length && <tr><td colSpan={7} className="empty">ไม่พบเอกสาร</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} count={list.data?.items.length} loading={list.isFetching} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={items.length} testId="docs-more" />
     </div>
   );
 }
