@@ -72,11 +72,22 @@ export const VendorCreate = z.object({
   branch: z.string().nullable().optional(), phone: z.string().nullable().optional(),
   term: z.discriminatedUnion('t', [z.object({ t: z.literal('cash') }), z.object({ t: z.literal('days'), x: z.number().int().min(1).max(365) })]).optional(),
 });
-export const Warehouse = z.object({ id: z.string(), name: z.string(), isPos: z.boolean(), active: z.boolean() });
+/** kind 'damaged' = คลังสินค้าชำรุด: never POS, never sellable, excluded from available stock. system = created automatically. */
+export const Warehouse = z.object({
+  id: z.string(), name: z.string(), isPos: z.boolean(), active: z.boolean(),
+  code: z.string().optional(), kind: z.enum(['normal', 'damaged']).default('normal'), system: z.boolean().default(false),
+});
 export type Warehouse = z.infer<typeof Warehouse>;
 
 // ---------- stock (M05, M06) ----------
-export const StockBalance = z.object({ productId: z.string(), warehouseId: z.string(), qty: Dec });
+/**
+ * qty = on hand. reserved = ordered on active sales orders and not delivered yet (REQ-M06-01); available = qty − reserved
+ * (may be negative: display only, sales are blocked by on hand alone, BR-07). damaged = row of a damaged-goods warehouse
+ * (available is always 0 there).
+ */
+export const StockBalance = z.object({ productId: z.string(), warehouseId: z.string(), qty: Dec, reserved: Dec.optional(), available: Dec.optional(), damaged: z.boolean().optional() });
+/** damaged: exclude (default without warehouseId) / include / only rows of damaged-goods warehouses. */
+export const StockQuery = pageQuery.extend({ warehouseId: z.string().optional(), productId: z.string().optional(), damaged: z.enum(['exclude', 'include', 'only']).optional() });
 export const StockLot = z.object({ id: z.string(), productId: z.string(), warehouseId: z.string(), receivedAt: z.string(), qty: Dec, unitCost: Dec, ref: z.string() });
 export const StockLineIn = z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec });
 export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on onprem)
@@ -87,7 +98,7 @@ export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on on
 });
 export const TransferReq = z.object({ fromWarehouseId: z.string(), toWarehouseId: z.string(), lines: z.array(StockLineIn).min(1), note: z.string().optional() });
 export const IssueReq = z.object({ warehouseId: z.string(), lines: z.array(StockLineIn).min(1), reason: z.string().min(1) });
-export const AdjustRequestReq = z.object({ warehouseId: z.string(), lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec })).min(1), reason: z.string().min(1) });
+export const AdjustRequestReq = z.object({ warehouseId: z.string(), lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec })).min(1), reason: z.string().min(1), note: z.string().max(500).optional() });
 export const StockShortage = z.object({ productId: z.string(), warehouseId: z.string(), need: Dec, have: Dec });
 /** Response of receipts / transfers / issues / adjustment approvals. Quantities in base units. */
 export const StockDoc = z.object({
@@ -96,8 +107,18 @@ export const StockDoc = z.object({
 });
 export type StockDoc = z.infer<typeof StockDoc>;
 export const AdjustRequest = z.object({
-  id: z.string(), no: z.string(), warehouseId: z.string(), lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec })), reason: z.string(),
+  id: z.string(), no: z.string(), warehouseId: z.string(),
+  /** state: per-line decision once decided line by line (partial approval); absent = follows the request status. */
+  lines: z.array(z.object({ productId: z.string(), qtyDelta: Dec, state: z.enum(['approved', 'rejected', 'recount']).optional() })), reason: z.string(),
   status: z.enum(['pending', 'approved', 'rejected']), requestedBy: z.string(), decidedBy: z.string().nullable(), resultDocNo: z.string().nullable(), createdAt: z.string(),
+  note: z.string().default(''), countNo: z.string().nullable().optional(),
+});
+/**
+ * Line-by-line decision on an adjustment request (partial approval). Every line goes to exactly one list; lines left out
+ * are rejected. recount is only for requests made by a stock count: the lines go back to counting (สั่งนับใหม่).
+ */
+export const AdjustDecideReq = z.object({
+  approve: z.array(z.string()).default([]), reject: z.array(z.string()).default([]), recount: z.array(z.string()).default([]), note: z.string().max(500).optional(),
 });
 export const AdjustListQuery = pageQuery.extend({ status: z.enum(['pending', 'approved', 'rejected']).optional() });
 
@@ -134,6 +155,8 @@ export const PosSaleReq = z.object({
 export type PosSaleReq = z.infer<typeof PosSaleReq>;
 export const DocLine = z.object({
   id: z.string(), productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, discount: Dec, net: Dec, returnedQty: Dec, cogs: Dec.nullable(),
+  /** Credit-note line: condition of the returned goods. */
+  returnCondition: z.enum(['good', 'damaged']).nullable().optional(),
   // Module C (M15 / BR-05) snapshot, present on POS lines priced by a promo, a bundle or a price list.
   listPrice: Dec.nullable().optional(),
   priceSource: z.enum(['customer', 'group', 'promo', 'bundle']).nullable().optional(),
@@ -163,9 +186,15 @@ export const VoidReq = z.object({ reason: z.string().min(1), approverUserId: z.s
 // ---------- returns (M08-06) ----------
 /** GET /returns/eligible — searchable bill picker, not a dropdown. */
 export const EligibleQuery = pageQuery.extend({ days: z.enum(['7', '30', '90', 'all']).default('30') });
+/**
+ * Line condition: good → back into a sellable warehouse (warehouseId, default the bill's), damaged → the damaged-goods
+ * warehouse (created automatically on the first damaged return). Both at the original FIFO cost. The top-level
+ * condition is the default for lines without one ('bad' = damaged, kept for older clients).
+ */
 export const ReturnReq = z.object({
-  sourceDocNo: z.string(), lines: z.array(z.object({ lineId: z.string(), qty: Dec })).min(1),
-  condition: z.enum(['good', 'bad']), warehouseId: z.string().optional(), refund: z.enum(['cash', 'transfer', 'credit']), reason: z.string().min(1),
+  sourceDocNo: z.string(), lines: z.array(z.object({ lineId: z.string(), qty: Dec, condition: z.enum(['good', 'damaged']).optional() })).min(1),
+  condition: z.enum(['good', 'bad']).default('good'), warehouseId: z.string().optional(), refund: z.enum(['cash', 'transfer', 'credit']), reason: z.string().min(1),
+  note: z.string().max(500).optional(),
   approval: Approval.optional(), // needed when the caller's sales.return is 'apv' (cashier, sales)
 });
 
@@ -196,7 +225,7 @@ export const coreRoutes = {
   posSale: 'POST /api/sales/pos', docs: 'GET /api/sales/docs', doc: 'GET /api/sales/docs/:no', voidDoc: 'POST /api/sales/docs/:no/void',
   returnsEligible: 'GET /api/returns/eligible', returnCreate: 'POST /api/returns',
   audit: 'GET /api/audit-log', auditVerify: 'GET /api/audit-log/verify',
-  vendors: 'GET /api/vendors', vendorCreate: 'POST /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', userUnlock: 'POST /api/users/:id/unlock',
+  vendors: 'GET /api/vendors', vendorCreate: 'POST /api/vendors', approvers: 'GET /api/users/approvers', adjustReject: 'POST /api/stock/adjust-requests/:id/reject', adjustDecide: 'POST /api/stock/adjust-requests/:id/decide', userUnlock: 'POST /api/users/:id/unlock',
   healthz: 'GET /healthz',
   // onprem only
   pairingCode: 'POST /api/devices/pairing-code', pair: 'GET /pair', setup: 'POST /api/setup',

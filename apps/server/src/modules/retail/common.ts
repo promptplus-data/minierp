@@ -13,11 +13,11 @@ export async function posVatMode(tx: Tx, tenantId: string): Promise<VatMode> {
 export async function posWarehouseId(tx: Tx, id?: string): Promise<string | null> {
   if (id) {
     if (!isUuid(id)) throw E.validation('Unknown warehouse');
-    const r = await tx.query<{ id: string }>(`select id from warehouses where id = $1 and active`, [id]);
+    const r = await tx.query<{ id: string }>(`select id from warehouses where id = $1 and active and kind = 'normal'`, [id]);
     if (!r.rows[0]) throw E.validation('Unknown warehouse');
     return r.rows[0].id;
   }
-  const r = await tx.query<{ id: string }>(`select id from warehouses where active order by is_pos desc, code limit 1`);
+  const r = await tx.query<{ id: string }>(`select id from warehouses where active and kind = 'normal' order by is_pos desc, code limit 1`);
   return r.rows[0]?.id ?? null;
 }
 

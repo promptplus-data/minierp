@@ -8,17 +8,15 @@ import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
 import { useShift, useWarehouses } from '../data';
 import { Slip } from '../pos/Receipt';
-import { ApprovalModal, fmt, fq, Modal, Pager, Pill, ReasonField, reasonInit, reasonText, SkeletonRows, th, useCursorPager, useDebounced, useToast, type ApprovalInput } from '../ui';
+import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, SkeletonRows, th, useDebounced, useToast, type ApprovalInput } from '../ui';
+import { LoadMore, useLoadMore } from '../ui/lists';
+import '../stock/stock.css';
 import { ErrorBanner, checkFields } from '../errors';
 
 export default function Returns() {
   const { can } = useAuth();
   const [open, setOpen] = useState(false);
-  const pager = useCursorPager('cn');
-  const cns = useQuery({
-    queryKey: ['docs', 'CN', '', pager.cursor],
-    queryFn: () => api('GET', '/api/sales/docs', { query: { type: 'CN', limit: 20, cursor: pager.cursor }, schema: page(DocSummary) }),
-  });
+  const cns = useLoadMore(['docs', 'CN', 'list'], '/api/sales/docs', DocSummary, { type: 'CN' }, 20);
   return (
     <>
       <div className="card">
@@ -27,25 +25,26 @@ export default function Returns() {
           <table data-testid="cn-table">
             <thead><tr><th>เลขที่</th><th>วันที่</th><th>ลูกค้า</th><th>สินค้า</th><th className="n">ยอด</th><th>สถานะ</th></tr></thead>
             <tbody>
-              {cns.isLoading ? <SkeletonRows cols={6} rows={3} /> : (cns.data?.items ?? []).map((x) => (
+              {cns.isLoading ? <SkeletonRows cols={6} rows={3} /> : cns.rows.map((x) => (
                 <tr key={x.id}>
                   <td className="mono"><Link to={`/sales/${encodeURIComponent(x.no)}`}>{x.no}</Link></td>
                   <td>{th(x.date)}</td><td>{x.customer.name}</td><td className="small">{x.itemsPreview}</td><td className="n">{fmt(x.total)}</td>
                   <td>{x.status === 'void' ? <Pill k="bad">ยกเลิก</Pill> : <Pill k="ok">ปกติ</Pill>}</td>
                 </tr>
               ))}
-              {cns.data && !cns.data.items.length && <tr><td colSpan={6} className="empty">ยังไม่มีการรับคืน</td></tr>}
+              {!cns.isLoading && !cns.rows.length && <tr><td colSpan={6} className="empty">ยังไม่มีการรับคืน</td></tr>}
             </tbody>
           </table>
         </div>
-        <Pager page={pager.page} hasNext={!!cns.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(cns.data?.nextCursor ?? null)} />
+        <LoadMore hasMore={!!cns.hasNextPage} loading={cns.isFetchingNextPage} onMore={() => void cns.fetchNextPage()} count={cns.rows.length} testId="cn-more" />
       </div>
       <div className="card">
         <h2>หลักการ</h2>
         <div className="small">
           • บิลเงินสด / หน้าร้าน → คืนเงินสดหรือโอน (เงินสดหักจากกะที่เปิดอยู่)<br />
           • ร้านจด VAT ออก "ใบลดหนี้" อ้างอิงใบกำกับเดิม · ร้านไม่จด VAT ออก "ใบรับคืนสินค้า / ใบคืนเงิน"<br />
-          • สินค้าสภาพดีคืนเข้าคลังที่ต้นทุนเดิมของบิล · สินค้าชำรุดไม่เข้าสต็อกขาย
+          • เลือกสภาพสินค้าทีละรายการ: ดี → คืนเข้าคลังขาย · ชำรุด → เข้า "คลังสินค้าชำรุด" (คลังของเสีย ไม่ขาย ระบบสร้างให้อัตโนมัติครั้งแรก) ทั้งสองแบบใช้ต้นทุนเดิมของบิล (FIFO)<br />
+          • ของในคลังสินค้าชำรุดตัดจำหน่ายได้ด้วย "ปรับยอด" (ต้องอนุมัติ) หรือโอนไปคลังอื่นเพื่อส่งคืนผู้ขาย
         </div>
       </div>
       {open && <ReturnModal onClose={() => setOpen(false)} />}
@@ -54,6 +53,7 @@ export default function Returns() {
 }
 
 type Days = '7' | '30' | '90' | 'all';
+type Cond = 'good' | 'damaged';
 const PERIODS: [Days, string][] = [['7', '7 วัน'], ['30', '30 วัน'], ['90', '90 วัน'], ['all', 'ทั้งหมด']];
 const eligiblePage = page(DocSummary);
 
@@ -120,7 +120,7 @@ function BillPicker({ onPick }: { onPick: (no: string) => void }) {
         )}
         <div className="row" style={{ justifyContent: 'space-between', marginTop: 6 }}>
           <span className="small muted">{items.length ? `แสดง ${items.length} บิล${res.hasNextPage ? ' · พิมพ์เพิ่มเพื่อกรองให้แคบลง' : ''}` : ''}</span>
-          {res.hasNextPage && <button className="btn sm" onClick={() => void res.fetchNextPage()} disabled={res.isFetchingNextPage} data-testid="bill-more">แสดงเพิ่ม</button>}
+          <LoadMore hasMore={!!res.hasNextPage} loading={res.isFetchingNextPage} onMore={() => void res.fetchNextPage()} testId="bill-more" />
         </div>
       </div>
     </div>
@@ -135,17 +135,19 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
   const shift = useShift();
   const [src, setSrc] = useState<string | null>(null);
   const [qty, setQty] = useState<Record<string, string>>({});
-  const [cond, setCond] = useState<'good' | 'bad'>('good');
+  const [cond, setCond] = useState<Record<string, Cond>>({});
   const [wh, setWh] = useState('');
-  const [refund, setRefund] = useState<'cash' | 'transfer'>('cash');
+  const [note, setNote] = useState('');
+  const [refund, setRefund] = useState<'cash' | 'transfer' | 'credit'>('cash');
   const [reason, setReason] = useState(reasonInit('ret'));
   const [err, setErr] = useState('');
   const [apv, setApv] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<SalesDoc | null>(null);
   const doc = useQuery({ queryKey: ['doc', src], enabled: !!src, queryFn: () => api('GET', `/api/sales/docs/${encodeURIComponent(src!)}`, { schema: SalesDoc }) });
-  const posWh = whs.data?.find((w) => w.isPos && w.active) ?? whs.data?.[0];
-  const whId = wh || posWh?.id || '';
+  // Good goods go back to a sellable warehouse ('' = the bill's own warehouse, chosen by the server).
+  const sellable = (whs.data ?? []).filter((w) => w.active && w.kind !== 'damaged');
+  const condOf = (lineId: string): Cond => cond[lineId] ?? 'good';
   const needPin = can('sales.return') === 'apv';
 
   const s = doc.data;
@@ -162,7 +164,9 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
   const total = sum(picked.map((x) => d(qty[x.l.id]!).times(x.unit))).toDecimalPlaces(2);
   const cashNoShift = refund === 'cash' && !shift.data;
 
-  const pick = (no: string) => { setSrc(no); setQty({}); setErr(''); };
+  const pick = (no: string) => { setSrc(no); setQty({}); setCond({}); setErr(''); };
+  const anyGood = picked.some((x) => condOf(x.l.id) === 'good');
+  const anyDamaged = picked.some((x) => condOf(x.l.id) === 'damaged');
 
   const submit = async (a?: ApprovalInput): Promise<string | null> => {
     const r = reasonText(reason);
@@ -171,12 +175,12 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
     try {
       const cn = await api('POST', '/api/returns', {
         body: {
-          sourceDocNo: s!.no, lines: picked.map((x) => ({ lineId: x.l.id, qty: qty[x.l.id]!.trim() })), condition: cond,
-          ...(cond === 'good' ? { warehouseId: whId } : {}), refund, reason: r, ...(a ? { approval: a } : {}),
+          sourceDocNo: s!.no, lines: picked.map((x) => ({ lineId: x.l.id, qty: qty[x.l.id]!.trim(), condition: condOf(x.l.id) })),
+          ...(anyGood && wh ? { warehouseId: wh } : {}), refund, reason: r, ...(note.trim() ? { note: note.trim() } : {}), ...(a ? { approval: a } : {}),
         },
         schema: SalesDoc,
       });
-      await Promise.all(['docs', 'eligible', 'stock', 'shift', 'doc', 'today'].map((key) => qc.invalidateQueries({ queryKey: [key] })));
+      await Promise.all(['docs', 'eligible', 'stock', 'shift', 'doc', 'today', 'warehouses'].map((key) => qc.invalidateQueries({ queryKey: [key] })));
       toast(`${cn.no} บันทึกรับคืนแล้ว`);
       setApv(false);
       setDone(cn);
@@ -234,7 +238,7 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
         <>
           <div className="tw">
             <table data-testid="return-lines">
-              <thead><tr><th>สินค้า</th><th className="n">ขายไป</th><th className="n">คืนแล้ว</th><th className="n">ราคาสุทธิ/หน่วย</th><th className="n">รับคืนครั้งนี้</th></tr></thead>
+              <thead><tr><th>สินค้า</th><th className="n">ขายไป</th><th className="n">คืนแล้ว</th><th className="n">ราคาสุทธิ/หน่วย</th><th className="n">รับคืนครั้งนี้</th><th>สภาพ</th></tr></thead>
               <tbody>
                 {rows.map((x, i) => {
                   const v = qty[x.l.id] ?? '';
@@ -247,19 +251,27 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
                           onChange={(e) => setQty((qs) => ({ ...qs, [x.l.id]: e.target.value }))} />
                         <div className="small muted">สูงสุด {fq(x.max)}</div>
                       </td>
+                      <td className={`stk-cond${condOf(x.l.id) === 'damaged' ? ' dmg' : ''}`}>
+                        <select value={condOf(x.l.id)} onChange={(e) => setCond((c) => ({ ...c, [x.l.id]: e.target.value as Cond }))} aria-label={`สภาพ ${x.l.name}`} data-testid={`rc-${i}`}>
+                          <option value="good">ดี</option><option value="damaged">ชำรุด</option>
+                        </select>
+                      </td>
                     </tr>
                   );
                 })}
-                {!rows.length && <tr><td colSpan={5} className="empty">บิลนี้รับคืนครบแล้ว</td></tr>}
+                {!rows.length && <tr><td colSpan={6} className="empty">บิลนี้รับคืนครบแล้ว</td></tr>}
               </tbody>
             </table>
           </div>
           <div className="fgrid">
             <ReasonField kind="ret" value={reason} onChange={setReason} testId="ret-reason" />
-            <label className="f">สภาพสินค้า<select value={cond} onChange={(e) => setCond(e.target.value as 'good' | 'bad')}><option value="good">ดี · คืนเข้าคลัง</option><option value="bad">ชำรุด · ไม่คืนเข้าสต็อกขาย</option></select></label>
-            {cond === 'good' && <label className="f">คืนเข้าคลัง<select value={whId} onChange={(e) => setWh(e.target.value)}>{(whs.data ?? []).filter((w) => w.active).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
-            <label className="f">คืนเงิน<select value={refund} onChange={(e) => setRefund(e.target.value as 'cash' | 'transfer')} data-testid="ret-refund"><option value="cash">เงินสด</option><option value="transfer">โอนเงิน</option></select></label>
+            {anyGood && <label className="f">สินค้าดีคืนเข้าคลัง<select value={wh} onChange={(e) => setWh(e.target.value)} data-testid="ret-wh"><option value="">คลังเดิมของบิล</option>{sellable.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
+            <label className="f">คืนเงิน<select value={refund} onChange={(e) => setRefund(e.target.value as 'cash' | 'transfer' | 'credit')} data-testid="ret-refund">
+              <option value="cash">เงินสด</option><option value="transfer">โอนเงิน</option>{d(s.totals.total).gt(0) && s.type === 'INV' && <option value="credit">ลดยอดลูกหนี้ (ขายเชื่อ)</option>}
+            </select></label>
+            <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="ไม่บังคับ" data-testid="ret-note" /></label>
           </div>
+          {anyDamaged && <div className="note small" data-testid="ret-damaged-note">สินค้าชำรุดจะเข้า "คลังสินค้าชำรุด" (ไม่นับเป็นสต็อกขาย) · ถ้ายังไม่มีคลังนี้ ระบบสร้างให้อัตโนมัติ</div>}
           {cashNoShift && <div className="note warn small">คืนเงินสดต้องมีกะเปิดอยู่ ไปเปิดกะที่หน้าขายหน้าร้านก่อน หรือเลือกคืนด้วยการโอน</div>}
           <div className="tot">
             <span style={{ fontWeight: 600 }}>รวมคืนเงิน (ประมาณ)</span><span className="big">฿{fmt(total)}</span>

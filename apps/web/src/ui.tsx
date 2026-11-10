@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createPortal } from 'react-dom';
 import { d, fmtTHB, type Num } from '@erp/core';
 import { isErrorText, isPendingFailure } from './api';
-import { useApprovers, useCatalog, useWarehouses } from './data';
+import { useApprovers, useCatalog, useWarehouses, useAllWarehouses } from './data';
 
 // ---------- formatting ----------
 export const fmt = (x: Num | null | undefined) => fmtTHB(x ?? 0);
@@ -185,7 +185,7 @@ export interface Shortage { productId: string; warehouseId: string; need: string
 
 export function ShortageModal({ shortages, what, onClose }: { shortages: Shortage[]; what?: string; onClose: () => void }) {
   const cat = useCatalog();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const pName = (id: string) => cat.byId.get(id)?.name ?? id;
   const pUnit = (id: string) => cat.byId.get(id)?.units[0]?.name ?? '';
   const wName = (id: string) => whs.data?.find((w) => w.id === id)?.name ?? id;

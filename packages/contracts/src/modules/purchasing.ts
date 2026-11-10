@@ -211,16 +211,23 @@ export const StockCountSummary = z.object({
   id: z.string(), no: z.string(), warehouseId: z.string(), category: z.string().nullable(), status: z.enum(['counting', 'submitted', 'cancelled']),
   openedBy: z.string(), openedAt: z.string(), submittedAt: z.string().nullable(), adjustRequestNo: z.string().nullable(),
   lines: z.number().int(), counted: z.number().int(),
+  /** Recount round (1 = first count); lines waiting for approval; free note. */
+  round: z.number().int().default(1), review: z.number().int().default(0), note: z.string().nullable().optional(), adjustRequestId: z.string().nullable().optional(),
 });
 export const StockCountLine = z.object({
   productId: z.string(), sku: z.string(), name: z.string(), unitName: z.string(), barcode: z.string().nullable(),
   /** Hidden (null) while counting unless the caller has inv.seeSys and asked for it (BR-09). */
   systemQty: Dec.nullable(), movedQty: Dec.nullable(), countedQty: Dec.nullable(), variance: Dec.nullable(),
   countedBy: z.string().nullable(),
+  /** counting (editable) / review (variance waiting for approval) / approved / rejected / done (no variance or not counted). */
+  state: z.enum(['counting', 'review', 'approved', 'rejected', 'done']).default('counting'),
+  round: z.number().int().default(1), prevCountedQty: Dec.nullable().optional(),
 });
 export const StockCount = StockCountSummary.extend({ systemHidden: z.boolean(), items: z.array(StockCountLine) });
 export type StockCount = z.infer<typeof StockCount>;
 export const StockCountQuery = pageQuery.extend({ showSystem: QBool.optional() });
+/** Recount selected lines (สั่งนับใหม่) while counting or under review, without rejecting the round. */
+export const StockCountRecountReq = z.object({ productIds: z.array(z.string()).min(1), note: z.string().max(500).optional() });
 
 // ---------- ledger and reorder (M06-01) ----------
 export const LedgerQuery = pageQuery.extend({ productId: z.string().optional(), warehouseId: z.string().optional(), from: Ymd.optional(), to: Ymd.optional() });
@@ -275,6 +282,7 @@ export const purchasingRoutes = {
   stockCountEntry: 'POST /api/stock-counts/:id/entries',
   stockCountSubmit: 'POST /api/stock-counts/:id/submit',
   stockCountCancel: 'POST /api/stock-counts/:id/cancel',
+  stockCountRecount: 'POST /api/stock-counts/:id/recount',
 
   stockLedger: 'GET /api/stock/ledger',
   stockReorder: 'GET /api/stock/reorder',

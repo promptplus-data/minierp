@@ -5,17 +5,19 @@ import { AdjustRequest, StockDoc, type Product } from '@erp/contracts';
 import { d, sum } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { checkFields, qtyMsg, requiredMsg } from '../errors';
-import { useCatalog, useMeta, useWarehouseStock, useWarehouses } from '../data';
+import { useCatalog, useMeta, useWarehouseStock, useWarehouses, useAllWarehouses } from '../data';
 import { NoteField } from '../ui/NoteField';
-import { ProductPicker } from '../ui/ProductPicker';
 import { VendorPicker } from '../ui/VendorPicker';
 import { fmt, fq, Modal, ReasonField, reasonInit, reasonText, ShortageModal, useToast, type ReasonState, type Shortage } from '../ui';
+import { ProductPicker } from '../ui/ProductPicker';
 
 export type StockKind = 'tr' | 'iss' | 'adj';
 interface Line { pid: string; u: number; q: string }
 
 const isNum = (s: string, allowNeg = false) => (allowNeg ? /^-?\d+(\.\d+)?$/ : /^\d+(\.\d+)?$/).test(s.trim());
 const baseQty = (p: Product | undefined, l: Line) => (p && isNum(l.q, true) ? d(l.q).times(d(p.units[l.u]?.factor ?? '1')) : d(0));
+
+const isStockProduct = (p: Product) => p.kind === 'stock';
 
 function useStockProducts() {
   const cat = useCatalog();
@@ -31,11 +33,13 @@ function useInvalidateStock() {
 export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: () => void }) {
   const toast = useToast();
   const invalidate = useInvalidateStock();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const prods = useStockProducts();
+  // Transfers, issues and adjustments may use the damaged-goods warehouse (move out, write off); it is never the default.
   const active = (whs.data ?? []).filter((w) => w.active);
-  const back = active.find((w) => !w.isPos) ?? active[0];
-  const front = active.find((w) => w.isPos) ?? active[1] ?? active[0];
+  const normal = active.filter((w) => w.kind !== 'damaged');
+  const back = normal.find((w) => !w.isPos) ?? normal[0] ?? active[0];
+  const front = normal.find((w) => w.isPos) ?? normal[1] ?? normal[0] ?? active[0];
   const [wh, setWh] = useState('');
   const [wh2, setWh2] = useState('');
   const from = wh || back?.id || '';
@@ -74,14 +78,14 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
       ...Object.fromEntries(rows.map((l, i) => [`lines.${i}.qty`, badQty(l) && (kind === 'adj' ? 'ใส่จำนวน + หรือ − (ห้าม 0)' : 'จำนวนต้องมากกว่า 0')])),
       toWarehouseId: kind === 'tr' && from === to && 'เลือกคลังปลายทางที่ต่างจากต้นทาง',
     })) return;
-    const fullReason = note.trim() ? `${r} · ${note.trim()}` : r;
+    const fullReason = note.trim() && kind !== 'adj' ? `${r} · ${note.trim()}` : r;
     setBusy(true);
     setErr('');
     try {
       let no: string;
       if (kind === 'adj') {
         const res = await api('POST', '/api/stock/adjust-requests', {
-          body: { warehouseId: from, reason: fullReason, lines: rows.map((l) => ({ productId: l.pid, qtyDelta: baseQty(prods.byId.get(l.pid), l).toString() })) },
+          body: { warehouseId: from, reason: fullReason, ...(note.trim() ? { note: note.trim() } : {}), lines: rows.map((l) => ({ productId: l.pid, qtyDelta: baseQty(prods.byId.get(l.pid), l).toString() })) },
           schema: AdjustRequest,
         });
         no = res.no;
@@ -111,10 +115,10 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
       <p className="small muted" style={{ margin: 0 }}>ใส่ได้หลายสินค้าในใบเดียว · สแกนบาร์โค้ดเพื่อเพิ่มแถวได้ · {kind === 'adj' ? 'ใส่ + เพื่อเพิ่ม หรือ − เพื่อลด ทุกแถวต้องรอเจ้าของร้านหรือผู้จัดการอนุมัติก่อนสต็อกเปลี่ยน' : kind === 'tr' ? 'ล็อตย้ายไปพร้อมวันที่และต้นทุนเดิม' : 'ตัดล็อตเก่าก่อน (FIFO)'}</p>
       <div className="fgrid">
         <label className="f">{kind === 'tr' ? 'จากคลัง' : 'คลัง'}
-          <select name={kind === 'tr' ? 'fromWarehouseId' : 'warehouseId'} value={from} onChange={(e) => setWh(e.target.value)} data-testid="sf-wh">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select>
+          <select name={kind === 'tr' ? 'fromWarehouseId' : 'warehouseId'} value={from} onChange={(e) => setWh(e.target.value)} data-testid="sf-wh">{active.map((w) => <option key={w.id} value={w.id}>{w.name}{w.kind === 'damaged' ? ' (ของเสีย)' : ''}</option>)}</select>
         </label>
         {kind === 'tr' && (
-          <label className="f">ไปคลัง<select name="toWarehouseId" value={to} onChange={(e) => setWh2(e.target.value)} data-testid="sf-wh2">{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+          <label className="f">ไปคลัง<select name="toWarehouseId" value={to} onChange={(e) => setWh2(e.target.value)} data-testid="sf-wh2">{active.map((w) => <option key={w.id} value={w.id}>{w.name}{w.kind === 'damaged' ? ' (ของเสีย)' : ''}</option>)}</select></label>
         )}
         <ReasonField kind={kind} value={reason} onChange={setReason} label={kind === 'tr' ? 'เหตุผลการโอน' : 'เหตุผล'} />
         <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === 'iss' ? 'เช่น ใช้ซ่อมหลังคาร้าน' : 'ไม่บังคับ'} /></label>
@@ -135,9 +139,8 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
                 <tr key={i}>
                   <td>{i + 1}</td>
                   <td>
-                    <select value={l.pid} aria-label={`สินค้าแถว ${i + 1}`} onChange={(e) => update(i, { pid: e.target.value, u: 0 })} data-testid={`sf-p${i}`}>
-                      {prods.list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                    </select>
+                    <ProductPicker value={l.pid} warehouseId={from} filter={isStockProduct} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`sf-p${i}`}
+                      onChange={(id) => { if (id) update(i, { pid: id, u: 0 }); }} style={{ minWidth: 240 }} />
                   </td>
                   <td>
                     {kind === 'adj' ? p?.units[0]?.name : (
@@ -172,7 +175,6 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
 interface RLine { pid: string; u: number; q: string; cost: string }
 
 /** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount per BR-19 (purchasing settings). */
-const isStock = (p: Product) => p.kind === 'stock';
 
 export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
@@ -181,7 +183,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const whs = useWarehouses();
   const prods = useStockProducts();
   const vat = meta.data?.shop.vatRegistered ?? true;
-  const active = (whs.data ?? []).filter((w) => w.active);
+  const active = (whs.data ?? []).filter((w) => w.active && w.kind !== 'damaged'); // goods received are sellable
   const [vendor, setVendor] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [inv, setInv] = useState('');
@@ -245,7 +247,7 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
               return (
                 <tr key={i}>
                   <td>
-                    <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStock} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
+                    <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStockProduct} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
                       onChange={(id, np) => update(i, { pid: id ?? '', u: 0, cost: np?.cost ?? l.cost })} />
                     {!p && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
                   </td>

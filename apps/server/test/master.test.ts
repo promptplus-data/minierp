@@ -48,8 +48,8 @@ describe('master data', () => {
   it('lists warehouses and vendors', async () => {
     const w = await prae.get('/api/warehouses');
     expect(w.body.items).toEqual([
-      { id: env.seed.warehouses.WH1, name: 'หน้าร้าน', isPos: true, active: true },
-      { id: env.seed.warehouses.WH2, name: 'โกดังหลังร้าน', isPos: false, active: true },
+      { id: env.seed.warehouses.WH1, code: 'WH1', name: 'หน้าร้าน', isPos: true, active: true, kind: 'normal', system: false },
+      { id: env.seed.warehouses.WH2, code: 'WH2', name: 'โกดังหลังร้าน', isPos: false, active: true, kind: 'normal', system: false },
     ]);
     expect((await owner.get('/api/vendors')).body.items).toHaveLength(3);
   });

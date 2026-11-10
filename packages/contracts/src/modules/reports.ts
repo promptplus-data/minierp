@@ -58,11 +58,13 @@ export const ReportStockRow = z.object({
   productId: z.string(), sku: z.string(), name: z.string(), category: z.string(), unit: z.string(),
   qty: Dec, value: Dec.nullable(), avgCost: Dec.nullable(), reorderPoint: Dec,
   lastOut: z.string().nullable(), idleDays: z.number().int().nullable(), low: z.boolean(), slow: z.boolean(),
+  /** In damaged-goods warehouses (not in qty / value unless the report is filtered to that warehouse). */
+  damagedQty: Dec.optional(), damagedValue: Dec.nullable().optional(),
 });
 export type ReportStockRow = z.infer<typeof ReportStockRow>;
 export const ReportStock = z.object({
   asOf: IsoDate, slowDays: z.number().int(), rows: z.array(ReportStockRow), nextCursor: z.string().nullable(), costVisible: z.boolean(),
-  totals: z.object({ products: z.number().int(), qty: Dec, value: Dec.nullable(), low: z.number().int(), slow: z.number().int() }),
+  totals: z.object({ products: z.number().int(), qty: Dec, value: Dec.nullable(), low: z.number().int(), slow: z.number().int(), damagedQty: Dec.optional(), damagedValue: Dec.nullable().optional() }),
 });
 export type ReportStock = z.infer<typeof ReportStock>;
 

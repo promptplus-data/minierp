@@ -60,7 +60,7 @@ export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): vo
     reply.status(201);
     return v;
   }));
-  app.get('/api/warehouses', authed(async (tx, _ctx, req) => listWarehouses(tx, pageQuery.parse(req.query))));
+  app.get('/api/warehouses', authed(async (tx, _ctx, req) => listWarehouses(tx, pageQuery.extend({ kind: z.enum(['normal', 'damaged']).optional() }).parse(req.query))));
 
   app.get('/api/audit-log', authed(async (tx, ctx, req) => auditLog(tx, ctx, pageQuery.parse(req.query))));
   app.get('/api/audit-log/verify', authed(async (tx, ctx) => verifyAudit(tx, ctx)));

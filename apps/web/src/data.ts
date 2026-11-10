@@ -39,7 +39,12 @@ async function all<T>(path: string, item: z.ZodType<T, z.ZodTypeDef, unknown>, q
 }
 
 const STALE = 60_000;
-export const useWarehouses = () => useQuery({ queryKey: ['warehouses'], queryFn: () => all('/api/warehouses', Warehouse), staleTime: STALE });
+type Wh = z.infer<typeof Warehouse>;
+const sellableOnly = (ws: Wh[]) => ws.filter((w) => w.kind !== 'damaged');
+/** Sellable warehouses: damaged-goods warehouses (คลังสินค้าชำรุด) never appear in sales, receiving or production pickers. */
+export const useWarehouses = () => useQuery({ queryKey: ['warehouses'], queryFn: () => all('/api/warehouses', Warehouse), staleTime: STALE, select: sellableOnly });
+/** Every warehouse incl. damaged-goods ones (stock screens: balances, transfers, write-offs, counts, ledger, name lookups). */
+export const useAllWarehouses = () => useQuery({ queryKey: ['warehouses'], queryFn: () => all('/api/warehouses', Warehouse), staleTime: STALE });
 export const useCustomers = () => useQuery({ queryKey: ['customers'], queryFn: () => all('/api/customers', Customer), staleTime: STALE });
 export const useVendors = () => useQuery({ queryKey: ['vendors'], queryFn: () => all('/api/vendors', Vendor), staleTime: STALE });
 export const useApprovers = () => useQuery({

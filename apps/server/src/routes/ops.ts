@@ -2,12 +2,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
-  AdjustListQuery, AdjustRequestReq, CashMoveReq, CloseShiftReq, EligibleQuery, IssueReq, ManualReceiptReq, OpenShiftReq, PosSaleReq, ReturnReq,
-  TransferReq, VoidReq, pageQuery,
+  AdjustDecideReq, AdjustListQuery, AdjustRequestReq, CashMoveReq, CloseShiftReq, EligibleQuery, IssueReq, ManualReceiptReq, OpenShiftReq, PosSaleReq, ReturnReq,
+  StockQuery, TransferReq, VoidReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny, type Deps } from '../lib/context';
 import type { Authed } from '../plugins/auth';
-import { approveAdjust, balances, issue, listAdjust, lots, maskStockDoc, receipt, rejectAdjust, requestAdjust, transfer } from '../services/inventory';
+import { approveAdjust, balances, decideAdjust, issue, listAdjust, lots, maskStockDoc, receipt, rejectAdjust, requestAdjust, transfer } from '../services/inventory';
 import { createReturn, eligible } from '../services/returns';
 import { getDoc, listDocs, posSale, voidDoc } from '../services/sales';
 import { cashMove, closeShift, currentShift, openShift } from '../services/shifts';
@@ -20,7 +20,7 @@ export function opsRoutes(app: FastifyInstance, deps: Deps, authed: Authed): voi
   // ---------- stock ----------
   app.get('/api/stock', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['inv.view', 'pos.sell', 'sales.doc'], { readOnly: true });
-    return balances(tx, stockQuery.parse(req.query));
+    return balances(tx, StockQuery.parse(req.query));
   }));
   app.get('/api/stock/lots', authed(async (tx, ctx, req) => lots(tx, ctx, stockQuery.parse(req.query))));
   app.post('/api/stock/receipts', authed(async (tx, ctx, req, reply) => {
@@ -45,7 +45,11 @@ export function opsRoutes(app: FastifyInstance, deps: Deps, authed: Authed): voi
     return { ...r, doc: maskStockDoc(ctx, r.doc) };
   }));
   app.post('/api/stock/adjust-requests/:id/reject', authed(async (tx, ctx, req) =>
-    rejectAdjust(tx, ctx, idParam(req), z.object({ note: z.string().optional() }).parse(req.body ?? {}).note)));
+    rejectAdjust(tx, deps, ctx, idParam(req), z.object({ note: z.string().optional() }).parse(req.body ?? {}).note)));
+  app.post('/api/stock/adjust-requests/:id/decide', authed(async (tx, ctx, req) => {
+    const r = await decideAdjust(tx, deps, ctx, idParam(req), AdjustDecideReq.parse(req.body ?? {}));
+    return { ...r, doc: r.doc ? maskStockDoc(ctx, r.doc) : null };
+  }));
 
   // ---------- shifts ----------
   app.get('/api/shifts/current', authed(async (tx, ctx) => currentShift(tx, ctx)));

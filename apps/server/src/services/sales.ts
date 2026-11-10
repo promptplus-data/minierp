@@ -29,6 +29,7 @@ interface LineRow {
   discount: string; net: string; net_after_bill: string; vat: 'v7' | 'exempt'; returned_qty: string; cogs: string | null; src_line_id: string | null;
   retail_promo_id: string | null; retail_promo_name: string | null; retail_list_price: string | null; retail_price_source: 'customer' | 'group' | 'promo' | 'bundle' | null;
   retail_bundle_no: number | null; retail_bundle_sets: string | null; retail_bundle_qty: string | null; retail_bundle_price: string | null;
+  return_condition: 'good' | 'damaged' | null; // credit-note lines (stock workstream, 0630)
 }
 
 const DOC_SELECT = `select d.id, d.no, d.type, d.date, d.customer_id, d.customer_name, d.customer_phone, d.vat_mode, d.warehouse_id, d.shift_id,
@@ -48,7 +49,7 @@ export async function getLines(tx: Tx, docId: string): Promise<LineRow[]> {
     `select id, product_id, name, unit_name, unit_factor::text, qty::text, base_qty::text, unit_price::text, discount::text, net::text,
             net_after_bill::text, vat, returned_qty::text, cogs::text, src_line_id,
             retail_promo_id, retail_promo_name, retail_list_price::text, retail_price_source, retail_bundle_no, retail_bundle_sets::text, retail_bundle_qty::text,
-            retail_bundle_price::text
+            retail_bundle_price::text, return_condition
        from doc_lines where doc_id = $1 order by line_no`,
     [docId],
   );
@@ -66,6 +67,7 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
     lines: lines.map((l) => ({
       id: l.id, productId: l.product_id, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), unitPrice: qty4(l.unit_price), discount: money(l.discount),
       net: money(l.net), returnedQty: qty4(l.returned_qty), cogs: seeCost && l.cogs != null ? money(l.cogs) : null,
+      ...(l.return_condition ? { returnCondition: l.return_condition } : {}),
       ...(l.retail_price_source ? {
         listPrice: l.retail_list_price != null ? qty4(l.retail_list_price) : null, priceSource: l.retail_price_source,
         promo: l.retail_promo_id ? { id: l.retail_promo_id, name: l.retail_promo_name ?? '' } : null,

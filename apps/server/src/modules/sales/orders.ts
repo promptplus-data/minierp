@@ -103,7 +103,7 @@ export async function getOrder(tx: Tx, ctx: Ctx, no: string): Promise<SalesOrder
 
 /** Default delivery warehouse: the first active non-POS warehouse (the back store), else the POS one. */
 export async function defaultWarehouse(tx: Tx): Promise<string | null> {
-  const r = await tx.query<{ id: string }>(`select id from warehouses where active order by is_pos, code limit 1`);
+  const r = await tx.query<{ id: string }>(`select id from warehouses where active and kind = 'normal' order by is_pos, code limit 1`);
   return r.rows[0]?.id ?? null;
 }
 

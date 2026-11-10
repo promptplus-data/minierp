@@ -116,12 +116,14 @@ describe('POST /api/returns', () => {
     expect(left.items).toEqual([]); // fully returned bills drop out of the picker
   });
 
-  it('bad condition puts nothing back into stock', async () => {
+  it('bad (damaged) condition puts nothing back into sellable stock: it goes to the damaged-goods warehouse', async () => {
     const doc = (await suda.get(`/api/sales/docs/${bills.somsri}`)).body;
     const before = await stockQty(env.pool, env.seed.products.p6!, env.seed.warehouses.WH1!);
     const r = await suda.post('/api/returns', { sourceDocNo: bills.somsri, lines: [{ lineId: doc.lines[0].id, qty: '1' }], condition: 'bad', refund: 'transfer', reason: 'ชำรุด' });
     expect(r.status).toBe(201);
     expect(await stockQty(env.pool, env.seed.products.p6!, env.seed.warehouses.WH1!)).toBe(before);
+    const dw = (await env.pool.query<{ id: string }>(`select id from warehouses where kind = 'damaged'`)).rows[0]!.id;
+    expect(await stockQty(env.pool, env.seed.products.p6!, dw)).toBe(1);
   });
 
   it('cash refund needs an open shift', async () => {

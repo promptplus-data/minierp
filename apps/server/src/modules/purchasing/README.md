@@ -52,7 +52,8 @@ Every list is cursor-paged (20 default) with `q` search. Uploads travel as base6
 | REQ-M05-03/04: short receipt needs a reason, unmapped lines block confirm, create product from the line | `delivery.ts confirmDraft`, `createProductForLine` | delivery.test "REQ-M05-04…", "REQ-M05-03…" |
 | BR-10 / REQ-M05-09: drafts older than 2 days raise the alert until confirmed | `stockx.ts grAlerts` (computed on read, no timer) | delivery.test "BR-10 raises the alert after 2 days"; e2e banner |
 | REQ-M04-01/03/04/05/07/08, REQ-M04-02 | `importhub.ts`, core `importfmt.ts` | `test/purchasing/importhub.test.ts` (11 tests); core `importfmt.test.ts` |
-| REQ-M06-05/06 / BR-09: count hides system qty, several counters, sales during the count netted, variance → adjustment request approved by the owner/manager | `stockx.ts` + core adjust approval | `test/purchasing/stock.test.ts` "stock count" (4 tests) |
+| REQ-M06-05/06 / BR-09: count hides system qty, several counters, sales during the count netted, variance → adjustment request approved by the owner/manager, partial approval and recount | `stockx.ts` + `services/inventory.ts decideAdjust` | `test/purchasing/stock.test.ts` "stock count", `test/stock-returns.test.ts` "stock count" (5 tests) |
+| Damaged returns / stock-flow audit: damaged-goods warehouse (`warehouses.kind`), per-line return condition, every stock-moving flow keeps lots = ledger | `services/returns.ts`, `services/master.ts damagedWarehouse`, `lib/stock.ts` | `test/stock-returns.test.ts`, `test/stock-flows.test.ts` (13 tests) |
 | REQ-M06-01 ledger / reorder | `stockx.ts ledger`, `reorder` | stock.test "stock ledger" (2 tests) |
 | Seed idempotent, ledger = lots | `seedPurchasing.ts` | `test/purchasing/seed.test.ts` |
 
@@ -78,9 +79,9 @@ commit. Screenshots: `e2e/screenshots/purchasing-<edition>-*.png`.
 | REQ-M05-08 | done | Bill discount on manual receipt and draft confirm; BR-19 setting `sep` (default) / `alloc` |
 | REQ-M05-09 | partial | Banner on the receiving and ledger screens; the home page has no dashboard yet (home redirects to the first menu). `GrAlertBanner` / `GET /api/purchasing/gr-alerts` are ready for the home dashboard owner |
 | REQ-M05-01/02/05 | not in scope | Depend on the Prompt Plus API (cloud integration, out of scope) |
-| REQ-M06-01 | partial | Ledger with running balance and documents, reorder list. Reserved / available quantities are owned by core stock / sales |
+| REQ-M06-01 | done | Ledger with running balance and documents, reorder list. GET /api/stock rows carry `reserved` (active sales-order lines not delivered yet; SO without warehouse → default sellable warehouse; held POS bills do not reserve) and `available` = on hand − reserved (may be negative, display only: sales are blocked by on hand alone, BR-07). Shown on the stock screen and the ledger (`test/stock-returns.test.ts`) |
 | REQ-M06-05 | done | Whole warehouse or by category, scan or type a code, system qty hidden, several counters. Camera scanning uses the device's scanner input |
-| REQ-M06-06 | partial | Variance becomes one adjustment request (approved via the core adjust approval); movements during the count are netted. Partial approval / "recount" are handled by rejecting the request and opening a new round |
+| REQ-M06-06 | done | Variance becomes one adjustment request; the approver decides line by line (`POST /api/stock/adjust-requests/:id/decide` approve / reject / recount) or sends lines back with `POST /api/stock-counts/:id/recount` (สั่งนับใหม่) without rejecting the round. Count lines carry state / round / previous count; recounts compare with snapshot + every move since the round opened (`test/stock-returns.test.ts`, e2e `stock-returns.spec.ts`) |
 | REQ-M18-01 | done | AP bill per GR with vendor invoice, due date by term, base/VAT/total, separate discount |
 | REQ-M18-02 | done | Payment voucher over several bills, partial, transfer/cheque/cash, WHT 0/1/3% |
 | REQ-M18-03 | done | Vendor return against the GR at the lot cost, ≤ remaining, reason, vendor CN no., reduces AP |

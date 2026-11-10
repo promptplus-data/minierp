@@ -40,8 +40,11 @@ export async function costsReport(tx: Tx, ctx: Ctx, month: string): Promise<Repo
   const issue = adj.rows.find((x) => x.k === 'issue');
   const adjust = adj.rows.find((x) => x.k === 'adj');
   const bad = await tx.query<{ n: number; v: string | null }>(
+    // Damaged returns now go into the damaged-goods warehouse (their loss shows when written off as an adjustment);
+    // only older credit notes whose damaged goods were never restocked are a cost here.
     `select count(distinct d.id)::int n, sum(l.cogs)::text v from docs d join doc_lines l on l.doc_id = d.id
-      where d.type = 'CN' and d.status = 'active' and d.condition = 'bad' and d.date between $1::date and $2::date`,
+      where d.type = 'CN' and d.status = 'active' and coalesce(l.return_condition, case when d.condition = 'bad' then 'damaged' end) = 'damaged'
+        and not exists (select 1 from stock_moves m where m.doc_line_id = l.id) and d.date between $1::date and $2::date`,
     [from, to],
   );
   const lines: CostLine[] = [

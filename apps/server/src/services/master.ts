@@ -193,27 +193,74 @@ export async function createVendor(tx: Tx, ctx: Ctx, v: { name: string; code?: s
   return { id: x.id, code: x.code, name: x.name, taxId: x.tax_id, branch: x.branch, phone: x.phone };
 }
 
-export async function listWarehouses(tx: Tx, q: PageQuery) {
+interface WhRow { id: string; code: string; name: string; is_pos: boolean; active: boolean; kind: 'normal' | 'damaged'; is_system: boolean }
+const WH_COLS = `id, code, name, is_pos, active, kind, is_system`;
+const toWarehouse = (w: WhRow): Warehouse => ({ id: w.id, code: w.code, name: w.name, isPos: w.is_pos, active: w.active, kind: w.kind, system: w.is_system });
+
+export async function listWarehouses(tx: Tx, q: PageQuery & { kind?: 'normal' | 'damaged' }) {
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
-  let where = '';
+  const where: string[] = [];
+  if (q.kind) {
+    params.push(q.kind);
+    where.push(`kind = $${params.length}`);
+  }
   if (cur) {
     params.push(cur[0], cur[1]);
-    where = `where (code, id) > ($1, $2::uuid)`;
+    where.push(`(code, id) > ($${params.length - 1}, $${params.length}::uuid)`);
   }
   params.push(q.limit + 1);
-  const r = await tx.query<{ id: string; code: string; name: string; is_pos: boolean; active: boolean }>(
-    `select id, code, name, is_pos, active from warehouses ${where} order by code, id limit $${params.length}`,
+  const r = await tx.query<WhRow>(
+    `select ${WH_COLS} from warehouses ${where.length ? 'where ' + where.join(' and ') : ''} order by code, id limit $${params.length}`,
     params,
   );
-  return pageOf(r.rows, q.limit, (w) => [w.code, w.id], (w): Warehouse => ({ id: w.id, name: w.name, isPos: w.is_pos, active: w.active }));
+  return pageOf(r.rows, q.limit, (w) => [w.code, w.id], toWarehouse);
 }
 
-export async function requireWarehouse(tx: Tx, id: string | undefined, opts: { pos?: boolean } = {}): Promise<{ id: string; code: string; name: string; is_pos: boolean }> {
+/**
+ * An active warehouse. Damaged-goods warehouses (kind 'damaged') are refused unless `damaged: true`: only stock
+ * moves that make sense for defective goods (transfer, issue / write-off, adjustment, count) opt in, so every
+ * sale, delivery, invoice, receipt and production run can never draw from or put sellable goods into it.
+ */
+export async function requireWarehouse(tx: Tx, id: string | undefined, opts: { pos?: boolean; damaged?: boolean } = {}): Promise<WhRow> {
   if (!isUuid(id)) throw E.validation(`Unknown warehouse ${id ?? ''}`);
-  const r = await tx.query<{ id: string; code: string; name: string; is_pos: boolean; active: boolean }>(`select id, code, name, is_pos, active from warehouses where id = $1`, [id]);
+  const r = await tx.query<WhRow>(`select ${WH_COLS} from warehouses where id = $1`, [id]);
   const w = r.rows[0];
   if (!w || !w.active) throw E.validation(`Unknown warehouse ${id}`);
   if (opts.pos && !w.is_pos) throw E.validation(`Warehouse ${w.name} is not a POS warehouse`);
+  if (w.kind === 'damaged' && !opts.damaged) throw E.validation(`${w.name} เป็นคลังสินค้าชำรุด ใช้ขายหรือรับสินค้าดีเข้าไม่ได้`, { reason: 'DAMAGED_WAREHOUSE' });
   return w;
+}
+
+/** The default sellable warehouse: back store first (non-POS), then the POS one; never a damaged-goods warehouse. */
+export async function defaultSellableWarehouse(tx: Tx): Promise<string | null> {
+  const r = await tx.query<{ id: string }>(`select id from warehouses where active and kind = 'normal' order by is_pos, code limit 1`);
+  return r.rows[0]?.id ?? null;
+}
+
+export const DAMAGED_WAREHOUSE_NAME = 'คลังสินค้าชำรุด';
+
+/**
+ * The shop's damaged-goods warehouse; created on first use (system-created, audited by the caller's document).
+ * Prefers an active damaged warehouse the shop made itself, then the system one (re-activated if it was closed).
+ * Concurrent first damaged returns race on warehouses_tenant_system_damaged; the loser re-reads the winner's row.
+ */
+export async function damagedWarehouse(tx: Tx, ctx: Ctx): Promise<{ wh: WhRow; created: boolean }> {
+  const find = async () => (await tx.query<WhRow>(
+    `select ${WH_COLS} from warehouses where kind = 'damaged' and (active or is_system) order by active desc, is_system, code limit 1`)).rows[0];
+  const have = await find();
+  if (have) {
+    if (!have.active) await tx.query(`update warehouses set active = true where id = $1`, [have.id]);
+    return { wh: { ...have, active: true }, created: false };
+  }
+  const codes = new Set((await tx.query<{ code: string }>(`select code from warehouses where code like 'DMG%'`)).rows.map((x) => x.code));
+  let code = 'DMG';
+  for (let i = 2; codes.has(code); i++) code = `DMG${i}`;
+  const ins = await tx.query<WhRow>(
+    `insert into warehouses (tenant_id, code, name, is_pos, kind, is_system) values ($1,$2,$3,false,'damaged',true)
+     on conflict do nothing returning ${WH_COLS}`,
+    [ctx.tenantId, code, DAMAGED_WAREHOUSE_NAME],
+  );
+  if (ins.rows[0]) return { wh: ins.rows[0], created: true };
+  return { wh: (await find())!, created: false };
 }

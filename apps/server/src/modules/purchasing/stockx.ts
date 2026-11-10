@@ -11,7 +11,7 @@ import { can, requireAny, requirePerm, type Ctx, type Deps } from '../../lib/con
 import { nextDocNo } from '../../lib/docno';
 import { E, isUuid } from '../../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../../lib/paging';
-import { requestAdjust } from '../../services/inventory';
+import { markRecount, requestAdjust, resetCountLines } from '../../services/inventory';
 import { requireWarehouse } from '../../services/master';
 
 /** BR-10: drafts waiting longer than this many days raise the banner. */
@@ -20,16 +20,18 @@ export const GR_ALERT_DAYS = 2;
 // ---------- stock count ----------
 interface CountRow {
   id: string; no: string; warehouse_id: string; category: string | null; status: StockCount['status']; opened_by: string; opened_at: Date;
-  submitted_at: Date | null; adjust_request_no: string | null; lines: number; counted: number;
+  submitted_at: Date | null; adjust_request_id: string | null; adjust_request_no: string | null; lines: number; counted: number; round: number; review: number; note: string | null;
 }
 const COUNT_SELECT = `
-  select c.id, c.no, c.warehouse_id, c.category, c.status, u.name opened_by, c.opened_at, c.submitted_at, c.adjust_request_no,
+  select c.id, c.no, c.warehouse_id, c.category, c.status, u.name opened_by, c.opened_at, c.submitted_at, c.adjust_request_id, c.adjust_request_no, c.round, c.note,
          (select count(*)::int from stock_count_lines l where l.count_id = c.id) lines,
-         (select count(*)::int from stock_count_lines l where l.count_id = c.id and l.counted_qty is not null) counted
+         (select count(*)::int from stock_count_lines l where l.count_id = c.id and l.counted_qty is not null) counted,
+         (select count(*)::int from stock_count_lines l where l.count_id = c.id and l.state = 'review') review
     from stock_counts c join users u on u.id = c.opened_by`;
 const toCount = (r: CountRow) => ({
   id: r.id, no: r.no, warehouseId: r.warehouse_id, category: r.category, status: r.status, openedBy: r.opened_by, openedAt: r.opened_at.toISOString(),
-  submittedAt: r.submitted_at?.toISOString() ?? null, adjustRequestNo: r.adjust_request_no, lines: r.lines, counted: r.counted,
+  submittedAt: r.submitted_at?.toISOString() ?? null, adjustRequestId: r.adjust_request_id, adjustRequestNo: r.adjust_request_no, lines: r.lines, counted: r.counted,
+  round: r.round, review: r.review, note: r.note,
 });
 
 export async function listCounts(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string }) {
@@ -39,7 +41,7 @@ export async function listCounts(tx: Tx, ctx: Ctx, q: { q?: string; limit: numbe
   const conds: string[] = [];
   if (q.q?.trim()) {
     params.push(`%${likeEscape(q.q.trim())}%`);
-    conds.push(`(c.no ilike $1 or coalesce(c.adjust_request_no,'') ilike $1)`);
+    conds.push(`(c.no ilike $1 or coalesce(c.adjust_request_no,'') ilike $1 or coalesce(c.note,'') ilike $1)`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);
@@ -53,7 +55,7 @@ export async function listCounts(tx: Tx, ctx: Ctx, q: { q?: string; limit: numbe
 
 export async function openCount(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId: string; category?: string; note?: string }) {
   requirePerm(ctx, 'inv.count');
-  const wh = await requireWarehouse(tx, req.warehouseId);
+  const wh = await requireWarehouse(tx, req.warehouseId, { damaged: true });
   const open = await tx.query<{ no: string }>(`select no from stock_counts where warehouse_id = $1 and status = 'counting'`, [wh.id]);
   if (open.rows[0]) throw E.conflict(`${wh.name} มีรอบนับ ${open.rows[0].no} ที่ยังไม่ปิด`);
   const no = await nextDocNo(tx, ctx.tenantId, 'CNT', deps.today());
@@ -79,8 +81,8 @@ export async function openCount(tx: Tx, deps: Deps, ctx: Ctx, req: { warehouseId
 
 async function lockCount(tx: Tx, id: string) {
   if (!isUuid(id)) throw E.notFound('ไม่พบรอบนับ');
-  const r = await tx.query<{ id: string; no: string; status: string; warehouse_id: string; opened_at: Date }>(
-    `select id, no, status, warehouse_id, opened_at from stock_counts where id = $1 for update`, [id]);
+  const r = await tx.query<{ id: string; no: string; status: string; warehouse_id: string; opened_at: Date; round: number }>(
+    `select id, no, status, warehouse_id, opened_at, round from stock_counts where id = $1 for update`, [id]);
   if (!r.rows[0]) throw E.notFound('ไม่พบรอบนับ');
   return r.rows[0];
 }
@@ -100,8 +102,9 @@ export async function getCount(tx: Tx, ctx: Ctx, id: string, q: { showSystem?: b
   if (!c) throw E.notFound('ไม่พบรอบนับ');
   // BR-09: while counting the system quantity is hidden; only inv.seeSys may reveal it on request.
   const hidden = c.status === 'counting' && !(q.showSystem && can(ctx, 'inv.seeSys') === 1);
-  const lines = await tx.query<{ product_id: string; sku: string; name: string; units: { name: string }[]; barcode: string | null; system_qty: string; moved_qty: string | null; counted_qty: string | null; counted_by: string | null }>(
-    `select l.product_id, p.sku, p.name, p.units, p.barcode, l.system_qty::text, l.moved_qty::text, l.counted_qty::text, u.name counted_by
+  const lines = await tx.query<{ product_id: string; sku: string; name: string; units: { name: string }[]; barcode: string | null; system_qty: string; moved_qty: string | null; counted_qty: string | null; counted_by: string | null; state: StockCount['items'][number]['state']; round: number; prev_counted_qty: string | null }>(
+    `select l.product_id, p.sku, p.name, p.units, p.barcode, l.system_qty::text, l.moved_qty::text, l.counted_qty::text, u.name counted_by,
+            l.state, l.round, l.prev_counted_qty::text
        from stock_count_lines l join products p on p.id = l.product_id left join users u on u.id = l.counted_by
       where l.count_id = $1 order by p.category, p.sku`, [c.id]);
   const moves = c.status === 'counting' && !hidden ? await movesSince(tx, c.warehouse_id, c.opened_at) : null;
@@ -115,7 +118,7 @@ export async function getCount(tx: Tx, ctx: Ctx, id: string, q: { showSystem?: b
         systemQty: hidden ? null : qty4(l.system_qty), movedQty: hidden ? null : qty4(moved),
         countedQty: l.counted_qty == null ? null : qty4(l.counted_qty),
         variance: hidden || l.counted_qty == null ? null : qty4(d(l.counted_qty).minus(expected)),
-        countedBy: l.counted_by,
+        countedBy: l.counted_by, state: l.state, round: l.round, prevCountedQty: l.prev_counted_qty == null ? null : qty4(l.prev_counted_qty),
       };
     }),
   };
@@ -126,16 +129,19 @@ export async function countEntry(tx: Tx, ctx: Ctx, id: string, req: { productId:
   const c = await lockCount(tx, id);
   if (c.status !== 'counting') throw E.conflict(`${c.no} ปิดรอบแล้ว`);
   if (!isUuid(req.productId)) throw E.validation('Unknown product');
+  const st = await tx.query<{ state: string }>(`select state from stock_count_lines where count_id = $1 and product_id = $2`, [c.id, req.productId]);
+  if (!st.rows[0]) throw E.validation('สินค้านี้ไม่อยู่ในรอบนับ');
+  if (st.rows[0].state !== 'counting') throw E.conflict('รายการนี้ส่งผลนับแล้ว (ไม่ได้สั่งนับใหม่)');
   const r = await tx.query<{ counted_qty: string | null }>(
     `update stock_count_lines set counted_qty = case when $3 = 'add' then coalesce(counted_qty, 0) + $4 else $4 end, counted_by = $5, counted_at = now()
       where count_id = $1 and product_id = $2 returning counted_qty::text`, [c.id, req.productId, req.mode, req.qty, ctx.userId]);
-  if (!r.rows[0]) throw E.validation('สินค้านี้ไม่อยู่ในรอบนับ');
-  return { productId: req.productId, countedQty: qty4(r.rows[0].counted_qty ?? 0) };
+  return { productId: req.productId, countedQty: qty4(r.rows[0]!.counted_qty ?? 0) };
 }
 
 /**
- * Closes the round: variance = counted − (snapshot + moves during the count) for every counted line; non-zero
- * variances become ONE adjustment request (core adjust_requests) that needs owner/manager approval (BR-09).
+ * Submits the lines still being counted: variance = counted − (snapshot + moves since the round opened) per counted line;
+ * non-zero variances become ONE adjustment request that needs owner/manager approval (BR-09), approvable line by line.
+ * Lines already approved / rejected in an earlier round are left alone (a recount round submits only the recounted lines).
  */
 export async function submitCount(tx: Tx, deps: Deps, ctx: Ctx, id: string) {
   requirePerm(ctx, 'inv.count');
@@ -143,21 +149,58 @@ export async function submitCount(tx: Tx, deps: Deps, ctx: Ctx, id: string) {
   if (c.status !== 'counting') throw E.conflict(`${c.no} ปิดรอบแล้ว`);
   const moves = await movesSince(tx, c.warehouse_id, c.opened_at);
   const lines = await tx.query<{ product_id: string; system_qty: string; counted_qty: string | null }>(
-    `select product_id, system_qty::text, counted_qty::text from stock_count_lines where count_id = $1`, [c.id]);
+    `select product_id, system_qty::text, counted_qty::text from stock_count_lines where count_id = $1 and state = 'counting'`, [c.id]);
   if (!lines.rows.some((l) => l.counted_qty != null)) throw E.validation('ยังไม่ได้นับสินค้าเลย');
   const deltas: { productId: string; qtyDelta: string }[] = [];
   for (const l of lines.rows) {
     const moved = moves.get(l.product_id) ?? '0';
-    await tx.query(`update stock_count_lines set moved_qty = $1 where count_id = $2 and product_id = $3`, [moved, c.id, l.product_id]);
-    if (l.counted_qty == null) continue;
-    const v = d(l.counted_qty).minus(d(l.system_qty).plus(d(moved)));
-    if (!v.isZero()) deltas.push({ productId: l.product_id, qtyDelta: qty4(v) });
+    const v = l.counted_qty == null ? null : d(l.counted_qty).minus(d(l.system_qty).plus(d(moved)));
+    if (v && !v.isZero()) deltas.push({ productId: l.product_id, qtyDelta: qty4(v) });
+    await tx.query(`update stock_count_lines set moved_qty = $1, state = $4 where count_id = $2 and product_id = $3`,
+      [moved, c.id, l.product_id, v && !v.isZero() ? 'review' : 'done']);
   }
   let adj: { id: string; no: string } | null = null;
-  if (deltas.length) adj = await requestAdjust(tx, deps, ctx, { warehouseId: c.warehouse_id, lines: deltas, reason: `ผลนับสต็อก ${c.no}` });
-  await tx.query(`update stock_counts set status = 'submitted', submitted_by = $2, submitted_at = now(), adjust_request_id = $3, adjust_request_no = $4 where id = $1`,
+  if (deltas.length) {
+    adj = await requestAdjust(tx, deps, ctx, { warehouseId: c.warehouse_id, lines: deltas, reason: `ผลนับสต็อก ${c.no}${c.round > 1 ? ` (นับใหม่ครั้งที่ ${c.round - 1})` : ''}` });
+    await tx.query(`update stock_count_lines set adjust_request_id = $2 where count_id = $1 and state = 'review'`, [c.id, adj.id]);
+  }
+  await tx.query(`update stock_counts set status = 'submitted', submitted_by = $2, submitted_at = now(), adjust_request_id = coalesce($3, adjust_request_id), adjust_request_no = coalesce($4, adjust_request_no) where id = $1`,
     [c.id, ctx.userId, adj?.id ?? null, adj?.no ?? null]);
-  await writeAudit(tx, ctx, [{ action: 'submit', object: 'stock-count', ref: c.no, detail: deltas.length ? `ผลต่าง ${deltas.length} รายการ → ${adj!.no} รออนุมัติ` : 'ตรงทุกรายการ' }]);
+  await writeAudit(tx, ctx, [{ action: 'submit', object: 'stock-count', ref: c.no, detail: `${c.round > 1 ? `รอบนับใหม่ ${c.round - 1} · ` : ''}${deltas.length ? `ผลต่าง ${deltas.length} รายการ → ${adj!.no} รออนุมัติ` : 'ตรงทุกรายการ'}` }]);
+  return getCount(tx, ctx, c.id, {});
+}
+
+/**
+ * สั่งนับใหม่: sends selected lines back to counting without rejecting the round. While counting, the counter (or the
+ * approver) clears a line to count it again; once submitted, only an approver may send back lines under review (they
+ * leave the pending adjustment request, the other lines stay approvable) or lines that matched. Approved lines are final.
+ */
+export async function recountLines(tx: Tx, ctx: Ctx, id: string, req: { productIds: string[]; note?: string }) {
+  const c = await lockCount(tx, id);
+  if (c.status === 'cancelled') throw E.conflict(`${c.no} ถูกยกเลิกแล้ว`);
+  if (c.status === 'counting') requireAny(ctx, ['inv.count', 'inv.adjApprove']);
+  else requirePerm(ctx, 'inv.adjApprove');
+  if (req.productIds.some((p) => !isUuid(p))) throw E.validation('Unknown product');
+  const ids = [...new Set(req.productIds)];
+  const rows = await tx.query<{ product_id: string; sku: string; state: string; counted_qty: string | null; adjust_request_id: string | null }>(
+    `select l.product_id, p.sku, l.state, l.counted_qty::text, l.adjust_request_id from stock_count_lines l join products p on p.id = l.product_id
+      where l.count_id = $1 and l.product_id = any($2::uuid[])`, [c.id, ids]);
+  if (rows.rows.length !== ids.length) throw E.validation('สินค้านี้ไม่อยู่ในรอบนับ');
+  const allowed = c.status === 'counting' ? ['counting'] : ['review', 'done', 'rejected'];
+  const bad = rows.rows.find((r) => !allowed.includes(r.state) || (r.state === 'counting' && r.counted_qty == null));
+  if (bad) throw E.conflict(`${bad.sku}: ${bad.state === 'approved' ? 'อนุมัติปรับยอดแล้ว นับใหม่ไม่ได้' : bad.state === 'counting' ? 'ยังไม่ได้นับ' : 'สั่งนับใหม่ไม่ได้ในสถานะนี้'}`);
+  // Lines under review leave their pending adjustment request first (lock it, then mark them).
+  const reqIds = [...new Set(rows.rows.filter((r) => r.state === 'review' && r.adjust_request_id).map((r) => r.adjust_request_id!))];
+  for (const rid of reqIds) {
+    await tx.query(`select id from adjust_requests where id = $1 for update`, [rid]);
+    const a = await tx.query<{ id: string; status: string; lines: { productId: string; qtyDelta: string; state?: 'approved' | 'rejected' | 'recount' }[] }>(
+      `select id, status, lines from adjust_requests where id = $1`, [rid]);
+    if (a.rows[0]!.status !== 'pending') throw E.conflict('คำขอปรับยอดถูกตัดสินแล้ว');
+    await markRecount(tx, ctx, a.rows[0]!, rows.rows.filter((r) => r.adjust_request_id === rid).map((r) => r.product_id));
+  }
+  await resetCountLines(tx, c.id, ids);
+  const note = req.note?.trim();
+  await writeAudit(tx, ctx, [{ action: 'recount', object: 'stock-count', ref: c.no, detail: `สั่งนับใหม่ ${rows.rows.map((r) => r.sku).join(', ')}${note ? ' · ' + note : ''}` }]);
   return getCount(tx, ctx, c.id, {});
 }
 
@@ -165,6 +208,8 @@ export async function cancelCount(tx: Tx, ctx: Ctx, id: string) {
   requirePerm(ctx, 'inv.count');
   const c = await lockCount(tx, id);
   if (c.status !== 'counting') throw E.conflict(`${c.no} ปิดรอบแล้ว`);
+  const decided = await tx.query(`select 1 from stock_count_lines where count_id = $1 and state in ('review','approved') limit 1`, [c.id]);
+  if (decided.rowCount) throw E.conflict(`${c.no} มีผลนับที่ส่งอนุมัติแล้ว ยกเลิกทั้งรอบไม่ได้`);
   await tx.query(`update stock_counts set status = 'cancelled' where id = $1`, [c.id]);
   await writeAudit(tx, ctx, [{ action: 'cancel', object: 'stock-count', ref: c.no, detail: 'ยกเลิกรอบนับ' }]);
   return getCount(tx, ctx, c.id, {});
@@ -221,7 +266,9 @@ export async function ledger(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; c
 }
 
 // ---------- reorder ----------
-const BELOW = `from products p left join (select product_id, sum(remaining) q from stock_lots group by product_id) s on s.product_id = p.id
+// Damaged-goods warehouses are not sellable stock: they never cover a reorder point.
+const BELOW = `from products p left join (select l.product_id, sum(l.remaining) q from stock_lots l join warehouses w on w.id = l.warehouse_id
+                                          where w.kind <> 'damaged' group by l.product_id) s on s.product_id = p.id
   where p.kind = 'stock' and p.active and p.reorder_point > 0 and coalesce(s.q, 0) < p.reorder_point`;
 
 export async function reorder(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string }) {

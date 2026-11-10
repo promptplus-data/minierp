@@ -222,13 +222,13 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await expect(page.getByText(/รับเข้าสต็อก GR\d{4}-\d{4} แล้ว/)).toBeVisible();
 
   await page.getByTestId('btn-tr').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('2');
   await page.getByTestId('sf-save').click();
   await expect(page.getByText(/บันทึก TR\d{4}-\d{4} แล้ว/)).toBeVisible();
 
   await page.getByTestId('btn-iss').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('500');
   await page.getByTestId('sf-save').click();
   await expect(page.getByTestId('shortage-table')).toContainText('สีรองพื้นปูนใหม่ 9 ลิตร');
@@ -238,7 +238,7 @@ test('stock: manual receipt with bill discount, transfer, issue shortage, adjust
   await page.getByRole('button', { name: 'ยกเลิก' }).click();
 
   await page.getByTestId('btn-adj').click();
-  await page.getByTestId('sf-p0').selectOption({ label: 'สีรองพื้นปูนใหม่ 9 ลิตร' });
+  await pick(page, 'sf-p0', 'สีรองพื้นปูนใหม่ 9 ลิตร');
   await page.getByTestId('sf-q0').fill('-1');
   await page.getByTestId('sf-save').click();
   await expect(page.getByText(/ส่งขออนุมัติปรับยอด/)).toBeVisible();
