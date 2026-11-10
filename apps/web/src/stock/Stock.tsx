@@ -1,50 +1,50 @@
 /** M06 stock: balances per warehouse, FIFO lots, multi-line forms, adjustment requests with approve / reject. */
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AdjustRequest, StockBalance, StockDoc, StockLot, page } from '@erp/contracts';
 import { d } from '@erp/core';
 import { z } from 'zod';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
 import { CloudIncomingCard, CloudReorderButton, IS_CLOUD } from '../cloud';
-import { useCatalog, useWarehouses } from '../data';
-import { fmt, fq, Modal, Pager, Pill, ShortageModal, SkeletonRows, th, useCursorPager, useDebounced, useToast, type Shortage } from '../ui';
+import { useCatalog, useAllWarehouses } from '../data';
+import { fmt, fq, Modal, Pill, ShortageModal, SkeletonRows, th, useDebounced, useToast, type Shortage } from '../ui';
+import { LoadMore, useLoadMore } from '../ui/lists';
+import './stock.css';
 import { ReceiptModal, StockFormModal, type StockKind } from './forms';
 import { ErrorBanner } from '../errors';
 import { DocLink, DocText, RouteLink } from '../doclink';
 
 const PAGE = 20; // products per page (NFR-12); the API pages product × warehouse rows
 
+type Bal = z.infer<typeof StockBalance>;
+
 export default function Stock() {
   const { can } = useAuth();
   const cat = useCatalog();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const active = (whs.data ?? []).filter((w) => w.active);
+  const sellable = active.filter((w) => w.kind !== 'damaged');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const pager = useCursorPager(dq);
   const [form, setForm] = useState<StockKind | 'gr' | null>(null);
   const [lotsOf, setLotsOf] = useState<string | null>(null);
   const seeCost = can('data.cost') === 1;
   const rowsPerPage = Math.min(100, PAGE * Math.max(1, active.length));
 
-  const bal = useQuery({
-    queryKey: ['stock', 'balances', dq, pager.cursor, rowsPerPage],
-    enabled: !!whs.data,
-    queryFn: () => api('GET', '/api/stock', { query: { q: dq, limit: rowsPerPage, cursor: pager.cursor }, schema: page(StockBalance) }),
-    placeholderData: keepPreviousData,
-  });
+  // REQ: long lists load 20 products at a time (the API pages product × warehouse rows, damaged warehouses included).
+  const bal = useLoadMore<Bal>(['stock', 'balances', dq], '/api/stock', StockBalance, { q: dq, damaged: 'include' }, rowsPerPage, !!whs.data);
   const rows = useMemo(() => {
-    const m = new Map<string, Map<string, string>>();
-    for (const b of bal.data?.items ?? []) {
+    const m = new Map<string, Map<string, Bal>>();
+    for (const b of bal.rows) {
       if (!m.has(b.productId)) m.set(b.productId, new Map());
-      m.get(b.productId)!.set(b.warehouseId, b.qty);
+      m.get(b.productId)!.set(b.warehouseId, b);
     }
     return [...m.entries()];
-  }, [bal.data]);
-  const loading = bal.isLoading || !whs.data || (bal.isFetching && bal.isPlaceholderData);
-  const cols = 4 + active.length + (seeCost ? 2 : 0);
+  }, [bal.rows]);
+  const loading = bal.isLoading || !whs.data;
+  const cols = 6 + active.length + (seeCost ? 2 : 0);
 
   return (
     <>
@@ -72,12 +72,14 @@ export default function Stock() {
         </div>
         {bal.isError && <ErrorBanner error={bal.error} onRetry={() => void bal.refetch()} retrying={bal.isFetching} />}
         <div className="tw">
-          <table data-testid="stock-table">
+          <table data-testid="stock-table" className="stk-table">
             <thead>
               <tr>
                 <th>สินค้า</th><th>หน่วยหลัก</th>
-                {active.map((w) => <th key={w.id} className="n">{w.name}</th>)}
-                <th className="n">รวม</th>
+                {active.map((w) => <th key={w.id} className={`n${w.kind === 'damaged' ? ' stk-dmg' : ''}`}>{w.name}{w.kind === 'damaged' && <div className="small">ไม่นับเป็นสต็อกขาย</div>}</th>)}
+                <th className="n">รวม (ขายได้)</th>
+                <th className="n" title="สั่งขายแล้ว (ใบสั่งขายที่ยังส่งไม่ครบ)">จอง (SO)</th>
+                <th className="n" title="คงเหลือ − จอง">พร้อมขาย</th>
                 {seeCost && <><th className="n">ทุนถัวเฉลี่ย</th><th className="n">มูลค่า</th></>}
                 <th />
               </tr>
@@ -85,18 +87,32 @@ export default function Stock() {
             <tbody>
               {loading ? <SkeletonRows cols={cols} rows={8} /> : rows.map(([pid, byWh]) => {
                 const p = cat.byId.get(pid);
-                const total = active.reduce((a, w) => a.plus(d(byWh.get(w.id) ?? '0')), d(0));
+                const of = (k: 'qty' | 'reserved' | 'available') => sellable.reduce((a, w) => a.plus(d(byWh.get(w.id)?.[k] ?? '0')), d(0));
+                const total = of('qty');
+                const reserved = of('reserved');
+                const avail = of('available');
                 const low = p && total.lt(d(p.reorderPoint));
                 return (
-                  <tr key={pid}>
+                  <tr key={pid} data-product={pid}>
                     <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(pid)}`}>{p?.name ?? pid}</RouteLink> {p?.isScg && <Pill k="acc">SCG</Pill>}</td>
                     <td>{p?.units[0]?.name}{p && p.units.length > 1 && <div className="small muted">{p.units.slice(1).map((u) => `1 ${u.name} = ${fq(u.factor)} ${p.units[0]!.name}`).join(' · ')}</div>}</td>
-                    {active.map((w) => <td key={w.id} className="n">{fq(byWh.get(w.id) ?? '0')}</td>)}
+                    {active.map((w) => {
+                      const b = byWh.get(w.id);
+                      return (
+                        <td key={w.id} className={`n${w.kind === 'damaged' ? ' stk-dmg' : ''}`}>
+                          {fq(b?.qty ?? '0')}
+                          {b && w.kind !== 'damaged' && d(b.reserved ?? 0).gt(0) && <div className="small muted">จอง {fq(b.reserved!)}</div>}
+                        </td>
+                      );
+                    })}
                     <td className="n"><b>{fq(total)}</b></td>
+                    <td className="n" data-testid="stk-reserved">{reserved.isZero() ? <span className="muted">-</span> : fq(reserved)}</td>
+                    <td className="n" data-testid="stk-available"><b style={avail.lt(0) ? { color: 'var(--bad)' } : undefined}>{fq(avail)}</b></td>
                     {seeCost && <><td className="n">{p?.cost != null ? fmt(p.cost) : '-'}</td><td className="n">{p?.cost != null ? fmt(total.times(d(p.cost))) : '-'}</td></>}
                     <td>
                       <div className="row" style={{ flexWrap: 'nowrap' }}>
                         {low && <Pill k="warn">ต่ำกว่าจุดสั่งซื้อ</Pill>}
+                        {avail.lt(0) && <Pill k="bad">จองเกินคงเหลือ</Pill>}
                         {seeCost && <button className="btn sm" onClick={() => setLotsOf(pid)}>ล็อต</button>}
                       </div>
                     </td>
@@ -107,8 +123,11 @@ export default function Stock() {
             </tbody>
           </table>
         </div>
-        <Pager page={pager.page} hasNext={!!bal.data?.nextCursor} count={rows.length} loading={bal.isFetching} onPrev={pager.prev} onNext={() => pager.next(bal.data?.nextCursor ?? null)} />
-        {!seeCost && <p className="small muted" style={{ margin: '8px 0 0' }}>ล็อตและต้นทุนแสดงเฉพาะบทบาทที่มีสิทธิ์ "เห็นต้นทุนและกำไร"</p>}
+        <LoadMore hasMore={!!bal.hasNextPage} loading={bal.isFetchingNextPage} onMore={() => void bal.fetchNextPage()} count={rows.length} testId="stock-more" />
+        <p className="small muted" style={{ margin: '8px 0 0' }}>
+          จอง = สั่งขายแล้วแต่ยังไม่ส่ง (ใบสั่งขาย) · พร้อมขาย = คงเหลือ − จอง ใช้ดูไม่ให้รับปากของซ้ำ (การขายตัดได้ตามคงเหลือจริง) · คลังสินค้าชำรุดไม่นับเป็นสต็อกขาย
+          {!seeCost && ' · ล็อตและต้นทุนแสดงเฉพาะบทบาทที่มีสิทธิ์ "เห็นต้นทุนและกำไร"'}
+        </p>
       </div>
       {(can('inv.adj') || can('inv.adjApprove') || can('inv.count')) ? <AdjustCard /> : null}
       {form === 'gr' && <ReceiptModal onClose={() => setForm(null)} />}
@@ -120,7 +139,7 @@ export default function Stock() {
 
 function LotsModal({ productId, onClose }: { productId: string; onClose: () => void }) {
   const cat = useCatalog();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const p = cat.byId.get(productId);
   const lots = useQuery({
     queryKey: ['lots', productId],
@@ -180,13 +199,17 @@ function LotsModal({ productId, onClose }: { productId: string; onClose: () => v
 
 type Status = 'pending' | 'approved' | 'rejected';
 const ST_TH: Record<Status, string> = { pending: 'รออนุมัติ', approved: 'อนุมัติแล้ว', rejected: 'ไม่อนุมัติ' };
+type Adj = z.infer<typeof AdjustRequest>;
+type LineState = NonNullable<Adj['lines'][number]['state']>;
+const LINE_TH: Record<LineState, [string, 'ok' | 'mut' | 'warn']> = { approved: ['อนุมัติ', 'ok'], rejected: ['ไม่อนุมัติ', 'mut'], recount: ['สั่งนับใหม่', 'warn'] };
+const Decided = z.object({ request: AdjustRequest, doc: StockDoc.nullable() });
 
 function AdjustCard() {
   const { can } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
   const cat = useCatalog();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const [status, setStatus] = useState<Status>('pending');
   // ?req=RQ… (home approvals card, audit log, stock count): open the tab that holds that request and highlight it
   const [sp] = useSearchParams();
@@ -196,26 +219,19 @@ function AdjustCard() {
     queryFn: async () => (await api('GET', '/api/stock/adjust-requests', { query: { q: req ?? '', limit: 5 }, schema: page(AdjustRequest) })).items.find((a) => a.no === req)?.status ?? null,
   });
   useEffect(() => { if (found.data) setStatus(found.data); }, [found.data]);
-  const pager = useCursorPager(status);
   const [short, setShort] = useState<Shortage[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const list = useQuery({
-    queryKey: ['adjust', status, pager.cursor],
-    queryFn: () => api('GET', '/api/stock/adjust-requests', { query: { status, limit: 20, cursor: pager.cursor }, schema: page(AdjustRequest) }),
-  });
+  const [deciding, setDeciding] = useState<Adj | null>(null);
+  const list = useLoadMore<Adj>(['adjust', 'list', status], '/api/stock/adjust-requests', AdjustRequest, { status }, 20);
   const canApprove = can('inv.adjApprove') === 1;
 
-  const act = async (id: string, kind: 'approve' | 'reject') => {
+  const run = async (id: string, body: { approve: string[]; reject: string[]; recount: string[]; note?: string }) => {
     setBusy(id);
     try {
-      if (kind === 'approve') {
-        const { doc } = await api('POST', `/api/stock/adjust-requests/${id}/approve`, { body: {}, schema: z.object({ request: AdjustRequest, doc: StockDoc }) });
-        toast(`อนุมัติแล้ว · ปรับสต็อก ${doc.no}`);
-      } else {
-        await api('POST', `/api/stock/adjust-requests/${id}/reject`, { body: {}, schema: AdjustRequest });
-        toast('ไม่อนุมัติคำขอปรับยอดแล้ว');
-      }
-      await Promise.all([qc.invalidateQueries({ queryKey: ['adjust'] }), qc.invalidateQueries({ queryKey: ['stock'] })]);
+      const r = await api('POST', `/api/stock/adjust-requests/${id}/decide`, { body, schema: Decided });
+      toast(r.doc ? `อนุมัติแล้ว · ปรับสต็อก ${r.doc.no}` : body.recount.length ? 'ส่งกลับให้นับใหม่แล้ว' : 'ไม่อนุมัติคำขอปรับยอดแล้ว');
+      setDeciding(null);
+      await Promise.all([qc.invalidateQueries({ queryKey: ['adjust'] }), qc.invalidateQueries({ queryKey: ['stock'] }), qc.invalidateQueries({ queryKey: ['pu'] })]);
     } catch (e) {
       if (e instanceof ApiFail && e.code === 'INSUFFICIENT_STOCK' && e.claim()) setShort(e.details as Shortage[]);
       else toast(errText(e));
@@ -223,11 +239,12 @@ function AdjustCard() {
       setBusy(null);
     }
   };
+  const open = (a: Adj) => a.lines.filter((l) => !l.state).map((l) => l.productId);
 
-  const items = list.data?.items ?? [];
+  const items = list.rows;
   return (
     <div className="card">
-      <h2>คำขอปรับยอดสต็อก {status === 'pending' && items.length > 0 && <Pill k="warn">{items.length} รายการ</Pill>}</h2>
+      <h2>คำขอปรับยอดสต็อก {status === 'pending' && items.length > 0 && <Pill k="warn">{items.length}{list.hasNextPage ? '+' : ''} รายการ</Pill>}</h2>
       <div className="steps" style={{ marginBottom: 12 }}>
         {(['pending', 'approved', 'rejected'] as Status[]).map((s) => (
           <span key={s} role="button" tabIndex={0} className={status === s ? 'on' : ''} onClick={() => setStatus(s)} onKeyDown={(e) => { if (e.key === 'Enter') setStatus(s); }}>{ST_TH[s]}</span>
@@ -235,36 +252,86 @@ function AdjustCard() {
       </div>
       <div className="tw">
         <table data-testid="adjust-table">
-          <thead><tr><th>เลขที่</th><th>วันที่</th><th>คลัง</th><th>สินค้า / ผลต่าง</th><th>เหตุผล</th><th>สถานะ</th><th /></tr></thead>
+          <thead><tr><th>เลขที่</th><th>วันที่</th><th>คลัง</th><th>สินค้า / ผลต่าง</th><th>เหตุผล / หมายเหตุ</th><th>สถานะ</th><th /></tr></thead>
           <tbody>
             {list.isLoading ? <SkeletonRows cols={7} rows={2} /> : items.map((a) => (
               <tr key={a.id} id={`adj-${a.no}`} style={a.no === req ? { background: 'var(--acc-soft, #fff7d6)' } : undefined}>
-                <td className="mono">{a.no}</td>
+                <td className="mono">{a.no}{a.countNo && <div className="small"><DocLink no={a.countNo} type="CNT" /></div>}</td>
                 <td className="small">{th(a.createdAt)}</td>
                 <td>{whs.data?.find((w) => w.id === a.warehouseId)?.name}</td>
                 <td className="small">{a.lines.map((l) => {
                   const neg = d(l.qtyDelta).lt(0);
-                  return <div key={l.productId}>{cat.byId.get(l.productId)?.name ?? l.productId} <b style={{ color: neg ? 'var(--bad)' : 'var(--ok)' }}>{neg ? '' : '+'}{fq(l.qtyDelta)}</b></div>;
+                  return (
+                    <div key={l.productId}>
+                      {cat.byId.get(l.productId)?.name ?? l.productId} <b style={{ color: neg ? 'var(--bad)' : 'var(--ok)' }}>{neg ? '' : '+'}{fq(l.qtyDelta)}</b>
+                      {l.state && <> <Pill k={LINE_TH[l.state][1]}>{LINE_TH[l.state][0]}</Pill></>}
+                    </div>
+                  );
                 })}</td>
-                <td className="small"><DocText text={a.reason} /></td>
-                <td>{a.status === 'pending' ? <Pill k="warn">รออนุมัติ</Pill> : a.status === 'approved' ? <><Pill k="ok">อนุมัติแล้ว</Pill>{a.resultDocNo && <div className="mono small"><DocLink no={a.resultDocNo} type="ADJ" /></div>}</> : <Pill k="mut">ไม่อนุมัติ</Pill>}</td>
+                <td className="small"><DocText text={a.reason} />{a.note && <div className="muted">{a.note}</div>}</td>
+                <td>{a.status === 'pending' ? <Pill k="warn">รออนุมัติ</Pill> : a.status === 'approved' ? <><Pill k="ok">อนุมัติแล้ว</Pill>{a.resultDocNo && <div className="mono small"><DocLink no={a.resultDocNo} type="ADJ" /></div>}</> : <Pill k="mut">ไม่อนุมัติ</Pill>}<div className="small muted">{a.requestedBy}{a.decidedBy ? ` → ${a.decidedBy}` : ''}</div></td>
                 <td>
                   {a.status === 'pending' && (canApprove ? (
                     <div className="row" style={{ flexWrap: 'nowrap' }}>
-                      <button className="btn sm pri" disabled={busy === a.id} onClick={() => void act(a.id, 'approve')}>อนุมัติ</button>
-                      <button className="btn sm bad" disabled={busy === a.id} onClick={() => void act(a.id, 'reject')}>ไม่อนุมัติ</button>
+                      <button className="btn sm pri" disabled={busy === a.id} onClick={() => void run(a.id, { approve: open(a), reject: [], recount: [] })}>อนุมัติ</button>
+                      {open(a).length > 1 || a.countNo ? <button className="btn sm" disabled={busy === a.id} onClick={() => setDeciding(a)} data-testid={`adj-pick-${a.no}`}>เลือกรายการ…</button> : null}
+                      <button className="btn sm bad" disabled={busy === a.id} onClick={() => void run(a.id, { approve: [], reject: open(a), recount: [] })}>ไม่อนุมัติ</button>
                     </div>
                   ) : <Pill k="warn">รอผู้จัดการ/เจ้าของอนุมัติ</Pill>)}
                 </td>
               </tr>
             ))}
-            {list.data && !items.length && <tr><td colSpan={7} className="empty">ไม่มีคำขอ{ST_TH[status]}</td></tr>}
+            {!list.isLoading && !items.length && <tr><td colSpan={7} className="empty">ไม่มีคำขอ{ST_TH[status]}</td></tr>}
           </tbody>
         </table>
       </div>
-      <Pager page={pager.page} hasNext={!!list.data?.nextCursor} onPrev={pager.prev} onNext={() => pager.next(list.data?.nextCursor ?? null)} />
-      <p className="small muted" style={{ margin: '8px 0 0' }}>ปุ่มอนุมัติแสดงเฉพาะบทบาทที่มีสิทธิ์ "อนุมัติปรับยอด"</p>
+      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={items.length} testId="adjust-more" />
+      <p className="small muted" style={{ margin: '8px 0 0' }}>ปุ่มอนุมัติแสดงเฉพาะบทบาทที่มีสิทธิ์ "อนุมัติปรับยอด" · ผู้ขออนุมัติเองไม่ได้ · "เลือกรายการ…" อนุมัติบางรายการได้ ที่เหลือไม่อนุมัติ หรือส่งกลับให้นับใหม่ (คำขอจากรอบนับ)</p>
+      {deciding && <DecideModal a={deciding} busy={busy === deciding.id} onClose={() => setDeciding(null)} onSubmit={(b) => void run(deciding.id, b)} />}
       {short && <ShortageModal shortages={short} what="อนุมัติปรับยอดไม่ได้" onClose={() => setShort(null)} />}
     </div>
+  );
+}
+
+/** Line-by-line decision (partial approval, REQ-M06-06). */
+export function DecideModal({ a, busy, onClose, onSubmit }: {
+  a: Adj; busy: boolean; onClose: () => void; onSubmit: (b: { approve: string[]; reject: string[]; recount: string[]; note?: string }) => void;
+}) {
+  const cat = useCatalog();
+  const lines = a.lines.filter((l) => !l.state);
+  const [pick, setPick] = useState<Record<string, LineState>>(() => Object.fromEntries(lines.map((l) => [l.productId, 'approved' as LineState])));
+  const [note, setNote] = useState('');
+  const opts: LineState[] = a.countNo ? ['approved', 'rejected', 'recount'] : ['approved', 'rejected'];
+  const of = (st: LineState) => lines.filter((l) => pick[l.productId] === st).map((l) => l.productId);
+  return (
+    <Modal onClose={onClose} wide label="ตัดสินคำขอปรับยอดรายรายการ">
+      <h3>ตัดสินรายรายการ · {a.no}</h3>
+      <p className="small muted" style={{ margin: 0 }}>{a.reason}{a.countNo ? ' · รายการที่ "สั่งนับใหม่" จะกลับไปให้นับในรอบเดิม (ยอดขาย/รับระหว่างนับยังหักให้)' : ''}</p>
+      <div className="tw">
+        <table data-testid="decide-table">
+          <thead><tr><th>สินค้า</th><th className="n">ผลต่าง</th>{opts.map((o) => <th key={o}>{LINE_TH[o][0]}</th>)}</tr></thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.productId}>
+                <td>{cat.byId.get(l.productId)?.name ?? l.productId}</td>
+                <td className="n"><b style={{ color: d(l.qtyDelta).lt(0) ? 'var(--bad)' : 'var(--ok)' }}>{d(l.qtyDelta).gt(0) ? '+' : ''}{fq(l.qtyDelta)}</b></td>
+                {opts.map((o) => (
+                  <td key={o}><input type="radio" name={`dec-${l.productId}`} checked={pick[l.productId] === o} onChange={() => setPick((p) => ({ ...p, [l.productId]: o }))}
+                    aria-label={`${LINE_TH[o][0]} ${cat.byId.get(l.productId)?.name ?? ''}`} data-testid={`dec-${o}-${cat.byId.get(l.productId)?.sku ?? l.productId}`} /></td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="ไม่บังคับ เช่น เหตุผลที่ให้นับใหม่" data-testid="dec-note" /></label>
+      <div className="act">
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn pri" disabled={busy} data-testid="dec-save"
+          onClick={() => onSubmit({ approve: of('approved'), reject: of('rejected'), recount: of('recount'), ...(note.trim() ? { note: note.trim() } : {}) })}>
+          บันทึก (อนุมัติ {of('approved').length} · ไม่อนุมัติ {of('rejected').length}{a.countNo ? ` · นับใหม่ ${of('recount').length}` : ''})
+        </button>
+      </div>
+    </Modal>
   );
 }

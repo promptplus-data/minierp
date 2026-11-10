@@ -10,7 +10,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsFetching, useQueryClient, type Query } from '@tanstack/react-query';
 import { ApiFail, baseMessage, setFailListener, type FailReport } from './api';
-import { useCatalog, useWarehouses } from './data';
+import { useCatalog, useWarehouses, useAllWarehouses } from './data';
 import { fq } from './ui';
 import './errors.css';
 
@@ -289,7 +289,7 @@ export function showError(d: Partial<ErrDesc> & { message: string }): void {
 
 function ShortageTable({ list }: { list: Shortage[] }) {
   const cat = useCatalog();
-  const whs = useWarehouses();
+  const whs = useAllWarehouses();
   const pName = (id: string) => cat.byId.get(id)?.name ?? id;
   const pUnit = (id: string) => cat.byId.get(id)?.units[0]?.name ?? '';
   const wName = (id: string) => whs.data?.find((w) => w.id === id)?.name ?? id;

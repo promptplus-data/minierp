@@ -1,0 +1,8 @@
+/* Stock workstream styles (stock page, returns condition, count states). */
+.stk-table th.stk-dmg, .stk-table td.stk-dmg { background: var(--bad-soft, #fdeeee); color: var(--muted, #6b6b6b); }
+.stk-table th.stk-dmg .small { font-weight: 400; }
+.stk-cond select { min-width: 110px; }
+.stk-cond.dmg select { border-color: var(--bad, #c0392b); color: var(--bad, #c0392b); }
+.stk-state { white-space: nowrap; }
+.stk-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 10px; }
+.stk-summary b { font-size: 1.05em; }

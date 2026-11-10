@@ -26,8 +26,10 @@ export default function StockReport() {
   const data = r.data;
   const loading = r.isLoading || (r.isFetching && r.isPlaceholderData);
   const cost = data?.costVisible ?? false;
-  const cols = 8 + (cost ? 2 : 0);
   const t = data?.totals;
+  // Damaged-goods warehouses (คลังสินค้าชำรุด) are reported apart from sellable stock when any exist.
+  const dmg = !!t?.damagedQty && Number(t.damagedQty) !== 0;
+  const cols = 8 + (cost ? 2 : 0) + (dmg ? 1 : 0);
   return (
     <>
       <div className="rp-filters">
@@ -44,18 +46,20 @@ export default function StockReport() {
         <div className="rp-kpis" data-testid="stock-kpis">
           <div className="card"><div className="l">สินค้า (รายการ)</div><div className="v">{t.products}</div></div>
           {cost && t.value != null && <div className="card"><div className="l">มูลค่าสต็อก FIFO ณ {th(data!.asOf)}</div><div className="v">฿{fmt(t.value)}</div></div>}
+          {dmg && <div className="card"><div className="l">สินค้าชำรุด (ไม่นับในคงเหลือ){cost && t.damagedValue != null ? ` · ฿${fmt(t.damagedValue)}` : ''}</div><div className="v" data-testid="stock-damaged">{fq(t.damagedQty!)}</div></div>}
           <div className="card"><div className="l">ต่ำกว่าจุดสั่งซื้อ</div><div className="v">{t.low}</div></div>
           <div className="card"><div className="l">ไม่เคลื่อนไหวเกิน {data!.slowDays} วัน</div><div className="v">{t.slow}</div></div>
         </div>
       )}
       <div className="tw">
         <table data-testid="stock-table">
-          <thead><tr><th>สินค้า</th><th>หมวด</th><th className="n">คงเหลือ</th>{cost && <><th className="n">ทุนเฉลี่ย</th><th className="n">มูลค่า FIFO</th></>}<th className="n">จุดสั่งซื้อ</th><th>ขายล่าสุด</th><th className="n">ไม่เคลื่อนไหว (วัน)</th><th>สถานะ</th></tr></thead>
+          <thead><tr><th>สินค้า</th><th>หมวด</th><th className="n">คงเหลือ</th>{dmg && <th className="n">ชำรุด</th>}{cost && <><th className="n">ทุนเฉลี่ย</th><th className="n">มูลค่า FIFO</th></>}<th className="n">จุดสั่งซื้อ</th><th>ขายล่าสุด</th><th className="n">ไม่เคลื่อนไหว (วัน)</th><th>สถานะ</th></tr></thead>
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={8} /> : (data?.rows ?? []).map((x) => (
               <tr key={x.productId}>
                 <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(x.productId)}`}>{x.name}</RouteLink><div className="small muted mono">{x.sku}</div></td><td className="small">{x.category}</td>
                 <td className="n">{fq(x.qty)} <span className="small muted">{x.unit}</span></td>
+                {dmg && <td className="n">{x.damagedQty && Number(x.damagedQty) ? fq(x.damagedQty) : ''}</td>}
                 {cost && <><td className="n">{x.avgCost != null ? fmt(x.avgCost) : ''}</td><td className="n">{x.value != null ? fmt(x.value) : ''}</td></>}
                 <td className="n">{Number(x.reorderPoint) ? fq(x.reorderPoint) : ''}</td>
                 <td className="small">{x.lastOut ? th(x.lastOut) : '-'}</td><td className="n">{x.idleDays ?? ''}</td>
