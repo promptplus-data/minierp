@@ -135,14 +135,14 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
   const dmg = picked.some((x) => x.cond === 'damaged' && isStock(x)) ? await damagedWarehouse(tx, ctx) : null;
   const whOf = (x: (typeof picked)[number]) => (x.cond === 'damaged' ? dmg?.wh : goodWh) ?? null;
   const docCondition = picked.every((x) => x.cond === 'good') ? 'good' : picked.every((x) => x.cond === 'damaged') ? 'bad' : 'mixed';
-  const note = req.note?.trim() || null;
+  const note = req.note?.trim() ?? '';
 
   const date = deps.today();
   const no = await nextDocNo(tx, ctx.tenantId, 'CN', date);
   const payments = req.refund === 'credit' ? [] : [{ method: req.refund, amount: totals.total }];
   const docId = (await tx.query<{ id: string }>(
     `insert into docs (tenant_id, no, type, date, customer_id, customer_name, customer_phone, vat_mode, warehouse_id, shift_id,
-       gross, line_disc, bill_disc, base7, exempt, vat, total, payments, created_by, ref_doc_id, ref_no, refund, condition, reason, search_text, cn_note)
+       gross, line_disc, bill_disc, base7, exempt, vat, total, payments, created_by, ref_doc_id, ref_no, refund, condition, reason, search_text, note)
      values ($1,$2,'CN',$3,$4,$5,$6,$7,$8,$9,$10,'0','0',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
     [ctx.tenantId, no, date, src.customer_id, src.customer_name, src.customer_phone, src.vat_mode, (goodWh ?? dmg?.wh)?.id ?? null, shiftId,
       totals.gross, totals.base7, totals.exempt, totals.vat, totals.total, JSON.stringify(payments), ctx.userId, src.id, src.no,

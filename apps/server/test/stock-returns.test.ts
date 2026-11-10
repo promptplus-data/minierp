@@ -79,8 +79,8 @@ describe('returns: damaged goods go to the damaged-goods warehouse', () => {
     expect(await stockQty(env.pool, P('p6'), W('WH2'))).toBe(p6 + 2);
     expect(await stockQty(env.pool, P('p2'), W('WH2'))).toBe(p2);
     expect(await stockQty(env.pool, P('p2'), dw[0].id)).toBe(3);
-    const doc = await env.pool.query(`select condition, cn_note from docs where no = $1`, [cn.no]);
-    expect(doc.rows[0]).toEqual({ condition: 'mixed', cn_note: 'ลูกค้าแจ้งทางโทรศัพท์' });
+    const doc = await env.pool.query(`select condition, note from docs where no = $1`, [cn.no]);
+    expect(doc.rows[0]).toEqual({ condition: 'mixed', note: 'ลูกค้าแจ้งทางโทรศัพท์' });
     const audit = await env.pool.query<{ object: string; detail: string }>(`select object, detail from audit_log where object in ('warehouse','CN') order by id`);
     expect(audit.rows[0]).toMatchObject({ object: 'warehouse', detail: expect.stringContaining(cn.no) });
     expect(audit.rows[1]!.detail).toContain('ชำรุด → คลังสินค้าชำรุด');

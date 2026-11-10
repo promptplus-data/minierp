@@ -161,7 +161,7 @@ export function SearchSelect<T>(p: SearchSelectProps<T>) {
       />
       <span className="ss-caret" aria-hidden>▾</span>
       {open && (
-        <ul className="ss-list" role="listbox" id={listId} ref={listRef} onScroll={onScroll} data-testid={p.testId ? `${p.testId}-list` : undefined}>
+        <ul className="ss-list" role="listbox" id={listId} ref={listRef} onScroll={onScroll} onClick={(e) => e.preventDefault() /* inside a <label>, a row click would otherwise re-activate the input and reopen the list */} data-testid={p.testId ? `${p.testId}-list` : undefined}>
           {opts.map((o, i) => {
             if (o.k === 'empty') return <li key="__empty" role="option" aria-selected={p.value == null} data-i={i} className={`${hi === i ? 'hi' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)} onMouseEnter={() => setHi(i)}>{p.emptyLabel}</li>;
             if (o.k === 'create') return <li key="__create" role="option" aria-selected={false} data-i={i} className={`ss-create${hi === i ? ' hi' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)} onMouseEnter={() => setHi(i)} data-testid={p.testId ? `${p.testId}-create` : undefined}>+ {p.createLabel ?? 'สร้างใหม่'}{text.trim() ? ` "${text.trim()}"` : ''}</li>;

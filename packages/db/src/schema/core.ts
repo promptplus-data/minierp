@@ -198,7 +198,6 @@ export const docs = pgTable('docs', {
   condition: text('condition'),
   reason: text('reason'),
   /** Credit note: free note from the return screen (0630; TODO merge with docs.note). */
-  cnNote: text('cn_note'),
   /** Lower-cased haystack for the returns bill picker (pg_trgm GIN index). */
   searchText: text('search_text').notNull().default(''),
   /** Free note on the document (POS bill note, 0610). */

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { useQueryClient } from '@tanstack/react-query';
 import { LoginRes, SessionUser } from '@erp/contracts';
 import { perm, type PermKey, type PermValue } from '@erp/core';
-import { api, getToken, setToken, setUnauthorizedHandler } from './api';
+import { ApiFail, api, getToken, setToken, setUnauthorizedHandler } from './api';
 
 interface AuthState {
   user: SessionUser | null;
@@ -35,7 +35,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setUnauthorizedHandler(logout);
     if (!getToken()) return;
-    api('GET', '/api/auth/me', { schema: SessionUser })
+    // Only a 401 ends the saved session; a network blip or busy server on reload gets two retries instead of a forced logout.
+    const me = (left: number): Promise<SessionUser> =>
+      api('GET', '/api/auth/me', { schema: SessionUser, silent: true }).catch((e: unknown) => {
+        if (left > 0 && !(e instanceof ApiFail && e.status === 401)) return new Promise<SessionUser>((ok) => setTimeout(() => ok(me(left - 1)), 700));
+        throw e;
+      });
+    me(2)
       .then(setUser)
       .catch(() => setToken(null))
       .finally(() => setRestoring(false));

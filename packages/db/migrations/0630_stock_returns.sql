@@ -17,7 +17,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS warehouses_tenant_system_damaged ON warehouses
 ALTER TABLE doc_lines ADD COLUMN IF NOT EXISTS return_condition text;
 ALTER TABLE doc_lines ADD CONSTRAINT doc_lines_return_condition CHECK (return_condition IS NULL OR return_condition IN ('good','damaged'));
 -- Free note typed on the return screen. TODO(merge): unify with docs.note once the POS workstream adds it.
-ALTER TABLE docs ADD COLUMN IF NOT EXISTS cn_note text;
 
 -- ---------- adjustment requests ----------
 ALTER TABLE adjust_requests ADD COLUMN IF NOT EXISTS note text NOT NULL DEFAULT '';

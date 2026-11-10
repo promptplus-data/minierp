@@ -52,6 +52,8 @@ server plugin, web module, tests): `docs/MODULES.md` and `packages/db/MIGRATIONS
 
 Built (Phase 1 + 2): M01 users/roles/approvals, M02 terms & consent, M03 master data, M04 Import Hub, M05 manual receipts + GR alerts, M06 stock (FIFO, counts, ledger, no negative stock), M07 POS + shifts, M08 quotation→SO→DO→invoice, M09 projects, M10 receivables, M11 reports + home dashboard, M12 PEAK/FlowAccount/Express export, M14 SCG Admin, M15 promotions, M16 production, M17 HR/payroll/leave, M18 payables, M19 editions (setup, delivery-file import, cloud backup to S3, sales-summary share, export/import, license keys).
 
+Round 3 (Nov 2026): Thai word-segmented partial search in every picker (SearchSelect, 20-row lazy pages) with quick-create of customers, vendors and ship-to addresses; BR-05 price order on QT/SO/INV; below-cost check on the server with cost/margin only for `data.cost`; POS manager override (PIN at entry, one approval per bill, reason chips) and totals with line + bill discounts; POS customer search and credit sale into AR; stock on SO lines; reserved / available stock; partial count approval and recount; automatic damaged-goods warehouse for returns; notes on every document; LoadMore on long lists.
+
 Each module's routes, rules→tests map and REQ coverage table: `apps/server/src/modules/<group>/README.md` (sales, purchasing, retail, admin, reports).
 
 Not built, waiting on the other teams (specs in `docs/integrations/`): Prompt Plus order/delivery API and SSO (REQ-M05-01/02/05, M08-11, M01-01), SCG Family coupons and points (M13, M08-07). Also deferred: Google Drive / OneDrive backup upload (needs OAuth client ids), POS offline mode (phase 2 by design).
