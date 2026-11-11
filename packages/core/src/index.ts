@@ -26,3 +26,4 @@ export * from './posdisc';
 export * from './belowcostapprover';
 export * from './arreturn';
 export * from './purchaseorder';
+export * from './freegoods';
