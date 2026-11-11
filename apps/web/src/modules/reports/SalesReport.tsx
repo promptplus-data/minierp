@@ -60,6 +60,7 @@ export default function SalesReport() {
           <div className="card"><div className="l">รวม VAT</div><div className="v">฿{fmt(t.total)}</div></div>
           {cost && t.cogs != null && <div className="card"><div className="l">ต้นทุนขาย (FIFO)</div><div className="v">฿{fmt(t.cogs)}</div></div>}
           {cost && t.gp != null && <div className="card"><div className="l">กำไรขั้นต้น</div><div className="v">฿{fmt(t.gp)}{t.gpPct != null ? <span className="small muted"> {t.gpPct}%</span> : null}</div></div>}
+          {cost && data?.freeGoodsCost != null && <div className="card" data-testid="sales-free-cost"><div className="l">ของแถม (ต้นทุน)</div><div className="v">฿{fmt(data.freeGoodsCost)}<span className="small muted"> รวมในต้นทุนขาย</span></div></div>}
           <div className="card"><div className="l">เอกสาร</div><div className="v">{t.bills}<span className="small muted"> บิล · คืน {t.returns}</span></div></div>
         </div>
       )}

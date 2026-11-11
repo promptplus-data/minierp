@@ -45,6 +45,8 @@ export type ReportSalesRow = z.infer<typeof ReportSalesRow>;
 export const ReportSales = z.object({
   from: IsoDate, to: IsoDate, by: ReportSalesBy, rows: z.array(ReportSalesRow), totals: ReportSalesRow, nextCursor: z.string().nullable(),
   costVisible: z.boolean(), voided: z.object({ count: z.number().int(), total: Dec }), sources: z.array(ReportSource),
+  /** ของแถม (ต้นทุน): FIFO cost of free lines in the period, already inside totals.cogs; null without data.cost. */
+  freeGoodsCost: Dec.nullable().default(null),
 });
 export type ReportSales = z.infer<typeof ReportSales>;
 

@@ -87,7 +87,7 @@ export const SALE_LINES_CTE = `
      where d.status = 'active' and d.type in ('ABB','INV','RC','CN') and d.date between $1::date and $2::date
   ),
   sl0 as (
-    select sd.*, l.id line_id, l.product_id, l.base_qty, l.vat lv, l.line_no,
+    select sd.*, l.id line_id, l.product_id, l.base_qty, l.vat lv, l.line_no, l.free,
            case when sd.vat_mode = 'inc' and l.vat = 'v7'
                 then coalesce(round(l.net_after_bill * sd.base7 / nullif(sum(l.net_after_bill) filter (where l.vat = 'v7') over (partition by l.doc_id), 0), 2), 0)
                 else l.net_after_bill end ex0,
@@ -113,7 +113,7 @@ export const SALE_LINES_CTE = `
   ),
   sl as (
     select sl2.id doc_id, sl2.no, sl2.type, sl2.date, sl2.sgn, sl2.vat_mode, sl2.customer_id, sl2.customer_name, sl2.created_by, sl2.sale_type,
-           sl2.line_id, sl2.product_id, sl2.base_qty, sl2.ex,
+           sl2.line_id, sl2.product_id, sl2.base_qty, sl2.ex, sl2.free,
            case when lv = 'v7' and vat_mode <> 'none' and rn = 1 then v0 + vat - sum(v0) over (partition by id, lv) else v0 end lvat,
            coalesce(smv.cost, 0) cogs
       from sl2 left join smv on smv.doc_line_id = sl2.line_id

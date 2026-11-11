@@ -64,9 +64,9 @@ export async function salesReport(tx: Tx, ctx: Ctx, q: ReportSalesQuery, all = f
        from sl ${joins} where ${where.join(' and ')} group by 1 order by ${order} ${limitSql}`,
     pageParams,
   );
-  const tot = await tx.query<AggRow>(
+  const tot = await tx.query<AggRow & { free_cogs: string | null }>(
     `with ${SALE_LINES_CTE}
-     select 'total' k, 'รวม' label, '' sub, ${agg} from sl ${joins} where ${where.join(' and ')}`,
+     select 'total' k, 'รวม' label, '' sub, ${agg}, sum(sl.cogs) filter (where sl.free)::text free_cogs from sl ${joins} where ${where.join(' and ')}`,
     params,
   );
   const voided = await tx.query<{ n: number; t: string | null }>(
@@ -80,6 +80,8 @@ export async function salesReport(tx: Tx, ctx: Ctx, q: ReportSalesQuery, all = f
     totals: { ...toRow(tot.rows[0]!, null, seeCost), qty: q.by === 'product' && tot.rows[0]!.qty != null ? qty4(tot.rows[0]!.qty) : null },
     nextCursor: all ? null : nextOffset(offset, q.limit, n),
     costVisible: seeCost,
+    // ของแถม given on bills (net of returns): its FIFO cost is inside cogs; shown apart for cost viewers.
+    freeGoodsCost: seeCost ? money(d(tot.rows[0]!.free_cogs ?? 0)) : null,
     voided: { count: voided.rows[0]!.n, total: money(d(voided.rows[0]!.t ?? 0)) },
     sources: [{ key: 'docs', label: 'เอกสารขาย POS / ใบกำกับ / ใบลดหนี้', available: true, note: 'ใบแจ้งหนี้ขายส่ง (M08) และงานโครงการ (M09) จะเข้ารายงานเมื่อโมดูลพร้อม' }],
   };
@@ -95,5 +97,6 @@ export function salesSheet(r: ReportSales): (string | number)[][] {
     head,
     ...r.rows.map(line),
     line(r.totals),
+    ...(r.freeGoodsCost != null && d(r.freeGoodsCost).gt(0) ? [['ของแถม (ต้นทุน) รวมอยู่ในต้นทุนขาย', r.freeGoodsCost]] : []),
   ];
 }

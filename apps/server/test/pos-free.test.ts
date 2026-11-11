@@ -58,6 +58,14 @@ describe('POS bill with a free line', () => {
     expect(r.status).toBe(409);
   });
 
+  it('the sales report shows ของแถม (ต้นทุน) to cost viewers, inside COGS', async () => {
+    const date = (await prae.get(`/api/sales/docs/${billNo}`)).body.date;
+    const r = await suda.get(`/api/reports/sales?from=${date}&to=${date}&by=day`);
+    expect(r.status).toBe(200);
+    expect(r.body.freeGoodsCost).toBe('137.74');
+    expect(Number(r.body.totals.cogs)).toBeGreaterThan(137.74);
+  });
+
   it('returning the free line refunds 0 and restocks at its original lot cost', async () => {
     const doc = (await prae.get(`/api/sales/docs/${billNo}`)).body;
     const before = await wh1('p6');
