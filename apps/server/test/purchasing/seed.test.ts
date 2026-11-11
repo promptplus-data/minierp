@@ -39,6 +39,9 @@ describe('seedPurchasing', () => {
     expect(ret.body.items[0]).toMatchObject({ vendorCnNo: 'TT-CN-0012', lines: [expect.objectContaining({ qty: '0.25', unitName: 'มัด' })] });
     const gr = await suda.get(`/api/purchasing/receipts?returnable=true`);
     expect(gr.body.items.length).toBe(3);
+    const g1 = gr.body.items.find((x: { no: string }) => x.no === 'GR2610-0001');
+    expect(g1.receivedQty).toEqual([{ unit: 'ถุง', qty: '100' }, { unit: 'พาเลท', qty: '1' }]);
+    expect(g1.lineCount).toBe(2);
     const r = await suda.post('/api/stock/receipts', {
       vendorId: env.seed.vendors.v1, vendorInvoiceNo: 'NEW-1', deliveryNo: 'DN-NEW-1', warehouseId: env.seed.warehouses.WH2,
       lines: [{ productId: env.seed.products.p1, qty: '1', unitCost: '120' }],

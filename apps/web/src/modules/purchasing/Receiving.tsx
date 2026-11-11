@@ -111,7 +111,7 @@ function ReceiptList() {
   const r = useLoadMore(['pu', 'receipts'], '/api/purchasing/receipts', GrSummary, { q: dq }, 20);
   const loading = r.isLoading;
   const seeCost = can('data.cost') === 1;
-  const cols = seeCost ? 7 : 6;
+  const cols = seeCost ? 8 : 7;
   return (
     <div className="card">
       <h2>รับของแล้ว</h2>
@@ -120,7 +120,7 @@ function ReceiptList() {
       </div>
       <div className="tw">
         <table data-testid="receipt-table">
-          <thead><tr><th>เลขที่</th><th>DN / ใบกำกับ</th><th>วันที่</th><th>ผู้ขาย</th><th>สินค้า</th>{seeCost && <th className="n">ยอด</th>}<th>เจ้าหนี้</th></tr></thead>
+          <thead><tr><th>เลขที่</th><th>DN / ใบกำกับ</th><th>วันที่</th><th>ผู้ขาย</th><th>สินค้า</th><th className="n">จำนวนรับเข้า</th>{seeCost && <th className="n">ยอด</th>}<th>เจ้าหนี้</th></tr></thead>
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={4} /> : r.rows.map((g) => (
               <tr key={g.id}>
@@ -129,6 +129,7 @@ function ReceiptList() {
                 <td>{th(g.date)}</td>
                 <td>{g.vendorName ?? '-'}<div className="small muted">{whs.data?.find((w) => w.id === g.warehouseId)?.name}</div></td>
                 <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div>{g.note && <div className="muted">หมายเหตุ: {g.note}</div>}</td>
+                <td className="n" data-testid={`gr-qty-${g.no}`}>{g.receivedQty.map((x) => <div key={x.unit} style={{ whiteSpace: "nowrap" }}>{fq(x.qty)} {x.unit}</div>)}{g.lineCount > 1 && <div className="small muted">{g.lineCount} รายการ</div>}</td>
                 {seeCost && <td className="n">{g.total != null ? fmt(g.total) : '-'}</td>}
                 <td className="mono small"><DocLink no={g.apBillNo} type="AP" /></td>
               </tr>

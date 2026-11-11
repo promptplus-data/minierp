@@ -124,7 +124,11 @@ export async function listCustomers(tx: Tx, q: PageQuery) {
   for (const w of searchTokens(q.q)) {
     params.push(`%${likeEscape(w)}%`);
     const i = params.length;
-    where.push(`(name ilike $${i} or code ilike $${i} or coalesce(phone,'') ilike $${i} or regexp_replace(coalesce(phone,''),'[^0-9]','','g') ilike $${i} or coalesce(tax_id,'') ilike $${i} or address ilike $${i})`);
+    // A phone typed with or without dashes / spaces / +66 matches the stored phone either way: compare digits only.
+    const digits = /^[0-9+\-().]+$/.test(w) ? w.replace(/\D/g, '').replace(/^66(?=\d{8,9}$)/, '0') : '';
+    params.push(digits.length >= 3 ? `%${digits}%` : null);
+    const j = params.length;
+    where.push(`(name ilike $${i} or code ilike $${i} or coalesce(phone,'') ilike $${i} or regexp_replace(coalesce(phone,''),'[^0-9]','','g') ilike coalesce($${j}, $${i}) or coalesce(tax_id,'') ilike $${i} or address ilike $${i})`);
   }
   if (cur) {
     params.push(cur[0], cur[1]);

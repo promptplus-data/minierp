@@ -42,3 +42,8 @@
 [data-touch="on"] .scgf-body{gap:5px;padding:12px 14px 14px}
 [data-touch="on"] .linkbtn{min-height:36px}
 [data-touch="on"] .scgf-head .btn{min-width:72px}
+/* member step: search row and footer are separate rows with room between them (they touched and read as overlapping) */
+.scgf-memberstep{display:flex;flex-direction:column;gap:12px}
+.scgf-codebar{gap:8px;align-items:stretch}
+.scgf-codebar .btn{flex:none;min-width:96px;justify-content:center}
+.scgf-memberstep .act{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}

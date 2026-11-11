@@ -60,3 +60,15 @@ describe('warehouses', () => {
     expect(await ok(owner.patch(`/api/warehouses/${empty.id}`, { active: false }))).toMatchObject({ active: false });
   });
 });
+
+describe('customer search by phone', () => {
+  it('finds a customer by phone typed without dashes, with dashes, with spaces or with +66', async () => {
+    for (const q of ['0897771100', '089-777-1100', '089 777 1100', '+66897771100', '7771100']) {
+      const r = await ok(owner.get(`/api/customers?q=${encodeURIComponent(q)}`));
+      expect(r.items.map((x: { name: string }) => x.name), q).toContain('ร้านวัสดุบ้านนา');
+    }
+    // a customer saved without dashes is found by a query with dashes
+    await ok(owner.post('/api/customers', { name: 'ร้านเบอร์ติดกัน', phone: '0812223333' }), 201);
+    expect((await ok(owner.get(`/api/customers?q=${encodeURIComponent('081-222-3333')}`))).items.map((x: { name: string }) => x.name)).toContain('ร้านเบอร์ติดกัน');
+  });
+});

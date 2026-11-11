@@ -41,17 +41,20 @@ export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode: Bi
 // ---------- confirmed goods receipts ----------
 interface GrRow {
   id: string; no: string; date: string; vendor_id: string | null; vendor_name: string | null; vendor_invoice_no: string | null; delivery_no: string | null;
-  warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; created_by: string; returnable: boolean; created_at: Date; discount: string | null; note: string | null;
+  warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; qty_units: { unit: string; qty: string }[] | null; line_count: number; created_by: string; returnable: boolean; created_at: Date; discount: string | null; note: string | null;
 }
 const GR_SELECT = `
   select s.id, s.no, to_char(s.date,'YYYY-MM-DD') date, s.vendor_id, v.name vendor_name, s.vendor_invoice_no, s.delivery_no, s.warehouse_id, s.total::text,
          b.no ap_no, b.discount::text discount, u.name created_by, s.created_at, s.reason note,
          (select string_agg(p.name || ' × ' || trim_scale(g.qty)::text || ' ' || g.unit_name, ', ' order by g.line_no) from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = s.id) preview,
+         (select json_agg(json_build_object('unit', u.unit_name, 'qty', trim_scale(u.q)::text) order by u.first)
+            from (select g.unit_name, sum(g.qty) q, min(g.line_no) first from gr_lines g where g.gr_doc_id = s.id group by g.unit_name) u) qty_units,
+         (select count(*)::int from gr_lines g where g.gr_doc_id = s.id) line_count,
          exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty) returnable
     from stock_docs s left join vendors v on v.id = s.vendor_id left join ap_bills b on b.gr_doc_id = s.id join users u on u.id = s.created_by`;
 const toGr = (r: GrRow, ctx: Ctx): GrSummary => ({
   id: r.id, no: r.no, date: r.date, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, deliveryNo: r.delivery_no,
-  warehouseId: r.warehouse_id, total: r.total != null && seeCost(ctx) ? money(r.total) : null, apBillNo: r.ap_no, itemsPreview: r.preview ?? '',
+  warehouseId: r.warehouse_id, total: r.total != null && seeCost(ctx) ? money(r.total) : null, apBillNo: r.ap_no, itemsPreview: r.preview ?? '', receivedQty: r.qty_units ?? [], lineCount: r.line_count,
   createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '',
 });
 

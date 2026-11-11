@@ -26,6 +26,12 @@ test.describe('cloud', () => {
 
     await page.getByTestId('scgf-open').click();
     await expect(page.getByRole('dialog', { name: 'เพิ่มส่วนลด' })).toBeVisible();
+    // before a search: the search button and the footer buttons must not overlap
+    const box = async (id: string) => (await page.getByTestId(id).boundingBox())!;
+    const find = await box('scgf-member-find');
+    const use = await box('scgf-member-use');
+    expect(use.y).toBeGreaterThanOrEqual(find.y + find.height);
+    await page.getByRole('dialog', { name: 'เพิ่มส่วนลด' }).screenshot({ path: 'e2e/screenshots/scgf-cloud-member-step.png' });
     await page.getByTestId('scgf-member-input').fill('SF22018834');
     await page.getByTestId('scgf-member-find').click();
     await expect(page.getByTestId('scgf-member-found')).toContainText('Gold');

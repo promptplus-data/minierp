@@ -33,6 +33,8 @@ export const GrSummary = z.object({
   id: z.string(), no: z.string(), date: Ymd, vendorId: z.string().nullable(), vendorName: z.string().nullable(),
   vendorInvoiceNo: z.string().nullable(), deliveryNo: z.string().nullable(), warehouseId: z.string(), total: Dec.nullable(),
   apBillNo: z.string().nullable(), itemsPreview: z.string(), createdBy: z.string(), returnable: z.boolean(),
+  /** Quantity received, summed per unit as typed on the receipt (e.g. 100 ถุง · 1 พาเลท). */
+  receivedQty: z.array(z.object({ unit: z.string(), qty: Dec })).default([]), lineCount: z.number().int().default(0),
   /** หมายเหตุ typed on the receipt (manual receipt or draft confirm). */
   note: z.string().default(''),
 });
