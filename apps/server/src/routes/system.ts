@@ -14,7 +14,7 @@ import { capabilities } from '../capabilities';
 
 export const APP_VERSION = process.env.APP_VERSION ?? '0.1.0';
 
-interface ShopRow { name: string; tax_id: string; branch: string; vat_registered: boolean; b2b_vat_mode: 'inc' | 'exc' }
+interface ShopRow { name: string; tax_id: string; branch: string; vat_registered: boolean; b2b_vat_mode: 'inc' | 'exc'; below_cost_approver: 'owner' | 'owner_or_manager' | 'none' }
 
 export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): void {
   app.get('/healthz', async (_req, reply) => {
@@ -28,11 +28,11 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
 
   /** Which shop /api/meta describes: the caller's (bearer token), ?shop=<code>, or the single on-prem shop. */
   async function shopFor(tenantId: string | null, code: string | undefined): Promise<ShopRow | null> {
-    if (tenantId) return (await withTenant(deps.pool, tenantId, (tx) => tx.query<ShopRow>(`select name, tax_id, branch, vat_registered, b2b_vat_mode from tenants`))).rows[0] ?? null;
+    if (tenantId) return (await withTenant(deps.pool, tenantId, (tx) => tx.query<ShopRow>(`select name, tax_id, branch, vat_registered, b2b_vat_mode, below_cost_approver from tenants`))).rows[0] ?? null;
     if (!code && deps.edition !== 'onprem') return null;
     const r = await withTenant(deps.pool, null, (tx) =>
       tx.query<ShopRow>(
-        `select name, tax_id, branch, vat_registered, b2b_vat_mode from tenants where ($1::text is null or code = $1) order by created_at limit 1`,
+        `select name, tax_id, branch, vat_registered, b2b_vat_mode, below_cost_approver from tenants where ($1::text is null or code = $1) order by created_at limit 1`,
         [code ?? null],
       ), { authLookup: true });
     return r.rows[0] ?? null;
@@ -44,8 +44,8 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
       edition: deps.edition,
       capabilities: capabilities(deps.edition),
       shop: shop
-        ? { name: shop.name, taxId: shop.tax_id, branch: shop.branch, vatRegistered: shop.vat_registered, b2bVatMode: shop.b2b_vat_mode }
-        : { name: 'SCG Shop ERP', taxId: '', branch: '', vatRegistered: true, b2bVatMode: 'exc' },
+        ? { name: shop.name, taxId: shop.tax_id, branch: shop.branch, vatRegistered: shop.vat_registered, b2bVatMode: shop.b2b_vat_mode, belowCostApprover: shop.below_cost_approver }
+        : { name: 'SCG Shop ERP', taxId: '', branch: '', vatRegistered: true, b2bVatMode: 'exc', belowCostApprover: 'owner' },
       version: APP_VERSION,
       needsSetup: !shop && deps.edition === 'onprem' ? await needsSetup(deps.pool) : false,
     };

@@ -33,12 +33,16 @@ export type SalesPageQuery = z.infer<typeof SalesPageQuery>;
 
 // ---------- settings (REQ-M08-08 bank accounts, validity) ----------
 export const SalesBankAccount = z.object({ bank: z.string().min(1), branch: z.string().default(''), account: z.string().min(1), name: z.string().min(1) });
+export const SalesBelowCostApprover = z.enum(['owner', 'owner_or_manager', 'none']);
 export const SalesSettings = z.object({
   quoteValidDays: z.number().int(), defaultCreditLimit: Dec, banks: z.array(SalesBankAccount),
+  /** BR-16: who approves a below-cost sale (owner only may change it). */
+  belowCostApprover: SalesBelowCostApprover.default('owner'),
   shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), address: z.string(), phone: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
 });
 export type SalesSettings = z.infer<typeof SalesSettings>;
-export const SalesSettingsUpdate = z.object({ quoteValidDays: z.number().int().min(1).max(365).optional(), defaultCreditLimit: DecNN.optional(), banks: z.array(SalesBankAccount).max(6).optional() });
+export const SalesSettingsUpdate = z.object({ quoteValidDays: z.number().int().min(1).max(365).optional(), defaultCreditLimit: DecNN.optional(), banks: z.array(SalesBankAccount).max(6).optional(),
+  belowCostApprover: SalesBelowCostApprover.optional() });
 
 // ---------- price (BR-05) and credit (BR-08) helpers ----------
 export const SalesPriceQuery = z.object({
@@ -207,6 +211,8 @@ export type SalesDelivery = z.infer<typeof SalesDelivery>;
 export const SalesDeliverySummary = z.object({
   id: z.string(), no: z.string(), date: z.string(), customer: z.object({ id: z.string().nullable(), name: z.string() }), soNo: z.string().nullable(),
   invoiceNo: z.string().nullable(), billedBy: z.string().nullable(), projectName: z.string().nullable(), total: Dec, status: z.enum(['active', 'void']), itemsPreview: z.string(),
+  /** From a cash sales order (ขายเงินสด): its invoice is paid on the spot. */
+  cashSale: z.boolean().default(false),
 });
 export type SalesDeliverySummary = z.infer<typeof SalesDeliverySummary>;
 /** GET /api/sales/delivery-sources: sales orders and goods-left invoices that still have something to deliver. */
@@ -222,6 +228,8 @@ const InvoiceCommon = {
   date: ISODate.optional(), attn: z.string().max(200).default(''), note: z.string().max(1000).default(''),
   /** Present and summing to the total = cash sale (paid now). Absent / empty = credit sale (receivable). */
   payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).max(6).optional(),
+  /** Paid now in full by this method (cash / transfer / QR พร้อมเพย์ / card); required for a cash sales order. */
+  payMethod: PaymentMethod.optional(),
   creditApproval: Approval.optional(),
 };
 export const SalesInvoiceReq = z.discriminatedUnion('source', [

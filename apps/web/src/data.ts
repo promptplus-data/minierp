@@ -14,11 +14,22 @@ import { useAuth } from './auth';
 const MetaLite = z.object({
   edition: z.enum(['cloud', 'onprem']),
   capabilities: z.record(z.boolean()),
-  shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
+  shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']),
+    belowCostApprover: z.enum(['owner', 'owner_or_manager', 'none']).default('owner') }),
   version: z.string(),
   needsSetup: z.boolean().default(false),
 });
 export type MetaLite = z.infer<typeof MetaLite>;
+
+const BELOW_COST_NEED = { owner: 'ต้องให้เจ้าของร้านอนุมัติ', owner_or_manager: 'ต้องให้เจ้าของร้านหรือผู้จัดการอนุมัติ', none: 'ไม่ต้องขออนุมัติ (ระบบบันทึกประวัติไว้)' } as const;
+/**
+ * BR-16 shop setting (ตั้งค่าเอกสารขาย, owner only): who approves a below-cost sale. Every screen reads it here so the
+ * PIN dialog lists the right approvers; the red "ต่ำกว่าทุน" flag is shown in every mode.
+ */
+export function useBelowCostRule() {
+  const mode = useMeta().data?.shop.belowCostApprover ?? 'owner';
+  return { mode, ownerOnly: mode === 'owner', need: BELOW_COST_NEED[mode], title: `ขายต่ำกว่าต้นทุน · ${BELOW_COST_NEED[mode]}` };
+}
 
 export function useMeta() {
   const { user } = useAuth();

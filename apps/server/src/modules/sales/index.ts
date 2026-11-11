@@ -14,8 +14,10 @@ import {
 import type { Tx } from '@erp/db';
 import { writeAudit } from '../../lib/audit';
 import { requireAny, requirePerm, type Ctx, type Deps } from '../../lib/context';
+import { E } from '../../lib/errors';
+import { BELOW_COST_APPROVER_TH } from '@erp/core';
 import type { ErpModule } from '../types';
-import { creditInfo, loadCustomer, loadShop, resolveVatMode } from './common';
+import { belowCostApprover, creditInfo, loadCustomer, loadShop, resolveVatMode } from './common';
 import { addCustomerAddress, customerAddresses, lineCheck, salesPeople } from './extras';
 import { createDelivery, deliverySources, getDelivery, listDeliveries, voidDelivery } from './deliveries';
 import { createInvoice, getInvoice, invoiceFromAbb, listCreditNotes, listInvoices } from './invoices';
@@ -41,6 +43,7 @@ async function settings(tx: Tx, ctx: Ctx): Promise<SalesSettings> {
   const shop = await loadShop(tx, ctx);
   return {
     quoteValidDays: s?.quote_valid_days ?? 15, defaultCreditLimit: s?.default_credit_limit ?? '50000.00', banks: s?.bank_accounts ?? [],
+    belowCostApprover: await belowCostApprover(tx, ctx),
     shop: { name: shop.name, taxId: shop.tax_id, branch: shop.branch, address: shop.address, phone: shop.phone, vatRegistered: shop.vat_registered, b2bVatMode: shop.b2b_vat_mode },
   };
 }
@@ -53,6 +56,15 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   app.patch('/api/sales/settings', authed(async (tx, ctx, req) => {
     requirePerm(ctx, 'sys.settings');
     const b = SalesSettingsUpdate.parse(req.body);
+    if (b.belowCostApprover) {
+      // BR-16: only the owner decides who may approve selling below cost.
+      if (ctx.role !== 'owner') throw E.forbidden('Only the owner can change who approves below-cost sales');
+      const before = await belowCostApprover(tx, ctx);
+      if (before !== b.belowCostApprover) {
+        await tx.query(`update tenants set below_cost_approver = $2 where id = $1`, [ctx.tenantId, b.belowCostApprover]);
+        await writeAudit(tx, ctx, [{ action: 'update', object: 'below-cost-approver', detail: `ผู้อนุมัติขายต่ำกว่าทุน: ${BELOW_COST_APPROVER_TH[before]} → ${BELOW_COST_APPROVER_TH[b.belowCostApprover]}` }]);
+      }
+    }
     await tx.query(
       `insert into sales_settings (tenant_id, quote_valid_days, default_credit_limit, bank_accounts) values ($1, coalesce($2, 15), coalesce($3, 50000), coalesce($4, '[]'::jsonb))
        on conflict (tenant_id) do update set quote_valid_days = coalesce($2, sales_settings.quote_valid_days), default_credit_limit = coalesce($3, sales_settings.default_credit_limit),

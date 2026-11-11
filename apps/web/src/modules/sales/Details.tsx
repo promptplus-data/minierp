@@ -12,7 +12,7 @@ import { DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } fro
 import { ProjectSetupModal } from './Projects';
 import { DocLink, DocLinks, RouteLink } from '../../doclink';
 import {
-  balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, priceSourceText, ProfitSummary, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
+  balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, priceSourceText, ProfitSummary, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, SO_TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
 } from './shared';
 
 const Loading = () => <div className="card"><div className="sk" /><div className="sk" /><div className="sk" /></div>;
@@ -133,7 +133,7 @@ export function OrderDetail() {
         <div className="kv">
           <span>ลูกค้า</span><span>{x.customer.name}</span>
           <span>วันที่</span><span>{th(x.date)}</span>
-          <span>เงื่อนไขชำระ</span><span>{TERM_TH(x.term)}</span>
+          <span>เงื่อนไขชำระ</span><span data-testid="so-terms"><KindPill kind={x.term.t === 'cash' ? 'cash' : 'credit'} /> {SO_TERM_TH(x.term)}</span>
           {x.quoteNo && <><span>จากใบเสนอราคา</span><span className="mono"><DocLink no={x.quoteNo} type="QT" /></span></>}
           {x.project && <><span>โครงการ</span><span><RouteLink to={`/projects/${x.project.id}`}>{x.project.name}</RouteLink> {x.project.isMain ? <Pill k="acc">สัญญางาน</Pill> : <Pill k="mut">งานเพิ่ม</Pill>}</span></>}
           {x.shipTo && <><span>ส่งที่</span><span>{x.shipTo}</span></>}
@@ -211,7 +211,7 @@ function orderPaper(x: SalesOrder) {
   return {
     title: 'ใบสั่งขาย', no: x.no, date: x.date, voided: x.status === 'void',
     party: { label: 'ลูกค้า', name: x.customer.name, tax: x.customer.taxId, br: x.customer.branch, tel: x.customer.phone },
-    refs: [...(x.quoteNo ? [['อ้างอิง', x.quoteNo]] : []), ['เงื่อนไขชำระ', TERM_TH(x.term)], ...(x.project ? [['โครงการ', x.project.name]] : []), ...(x.shipTo ? [['ส่งที่', x.shipTo]] : []),
+    refs: [...(x.quoteNo ? [['อ้างอิง', x.quoteNo]] : []), ['เงื่อนไขชำระ', SO_TERM_TH(x.term)], ...(x.project ? [['โครงการ', x.project.name]] : []), ...(x.shipTo ? [['ส่งที่', x.shipTo]] : []),
       ...(x.salesperson ? [['พนักงานขาย', x.salesperson.name]] : [])] as [string, ReactNode][],
     cols: 'price' as const, rows: x.lines.map((l) => ({ name: l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discAmt, amt: l.net })),
     totals: taxRows(x.totals, x.vatMode), baht: x.totals.total, note: x.note || undefined, sign: ['ผู้รับคำสั่งซื้อ', 'ผู้อนุมัติ', 'ลูกค้า'],

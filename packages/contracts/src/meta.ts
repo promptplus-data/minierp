@@ -18,7 +18,9 @@ export type Capabilities = z.infer<typeof Capabilities>;
 export const Meta = z.object({
   edition: Edition,
   capabilities: Capabilities,
-  shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
+  shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']),
+    /** BR-16 shop setting: who approves a below-cost sale (POS, sales documents, promotions). */
+    belowCostApprover: z.enum(['owner', 'owner_or_manager', 'none']).default('owner') }),
   version: z.string(),
   /** On-prem first run: no shop yet; the web shows the setup screen (POST /api/setup). */
   needsSetup: z.boolean().default(false),

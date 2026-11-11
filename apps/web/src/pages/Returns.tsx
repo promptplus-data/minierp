@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { keepPreviousData, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DocSummary, SalesDoc, page } from '@erp/contracts';
-import { d, sum } from '@erp/core';
+import { d, returnArSplit, sum } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
 import { useShift, useWarehouses } from '../data';
@@ -162,7 +162,9 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
   const picked = rows.filter((x) => valid(qty[x.l.id]));
   const overMax = picked.some((x) => d(qty[x.l.id]!).gt(x.max));
   const total = sum(picked.map((x) => d(qty[x.l.id]!).times(x.unit))).toDecimalPlaces(2);
-  const cashNoShift = refund === 'cash' && !shift.data;
+  // A bill still owed (credit sale) is credited first up to its balance; only the rest is paid back (server rule).
+  const split = returnArSplit(total, s?.arBalance ?? '0');
+  const cashNoShift = refund === 'cash' && d(split.over).gt(0) && !shift.data;
 
   const pick = (no: string) => { setSrc(no); setQty({}); setCond({}); setErr(''); };
   const anyGood = picked.some((x) => condOf(x.l.id) === 'good');
@@ -267,7 +269,7 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
             <ReasonField kind="ret" value={reason} onChange={setReason} testId="ret-reason" />
             {anyGood && <label className="f">สินค้าดีคืนเข้าคลัง<select value={wh} onChange={(e) => setWh(e.target.value)} data-testid="ret-wh"><option value="">คลังเดิมของบิล</option>{sellable.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>}
             <label className="f">คืนเงิน<select value={refund} onChange={(e) => setRefund(e.target.value as 'cash' | 'transfer' | 'credit')} data-testid="ret-refund">
-              <option value="cash">เงินสด</option><option value="transfer">โอนเงิน</option>{d(s.totals.total).gt(0) && s.type === 'INV' && <option value="credit">ลดยอดลูกหนี้ (ขายเชื่อ)</option>}
+              <option value="cash">เงินสด</option><option value="transfer">โอนเงิน</option>{d(s.arBalance ?? 0).gt(0) && <option value="credit">ลดยอดลูกหนี้ (ขายเชื่อ)</option>}
             </select></label>
             <label className="f">หมายเหตุ<input type="text" value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="ไม่บังคับ" data-testid="ret-note" /></label>
           </div>
@@ -275,6 +277,8 @@ function ReturnModal({ onClose }: { onClose: () => void }) {
           {cashNoShift && <div className="note warn small">คืนเงินสดต้องมีกะเปิดอยู่ ไปเปิดกะที่หน้าขายหน้าร้านก่อน หรือเลือกคืนด้วยการโอน</div>}
           <div className="tot">
             <span style={{ fontWeight: 600 }}>รวมคืนเงิน (ประมาณ)</span><span className="big">฿{fmt(total)}</span>
+            {d(split.toAr).gt(0) && <><span className="small">ลดยอดค้างของบิลนี้</span><span className="small" data-testid="ret-to-ar">{fmt(split.toAr)}</span></>}
+            {d(split.toAr).gt(0) && d(split.over).gt(0) && <><span className="small">{refund === 'credit' ? 'เกินยอดค้าง · เก็บเป็นเครดิตลูกค้า' : 'เกินยอดค้าง · คืนเงินลูกค้า'}</span><span className="small">{fmt(split.over)}</span></>}
             <span className="small muted">ยอดจริงและ VAT คำนวณโดยเซิร์ฟเวอร์ตอนบันทึก</span><span />
           </div>
         </>

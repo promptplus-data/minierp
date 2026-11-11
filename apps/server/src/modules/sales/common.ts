@@ -3,8 +3,8 @@ import { searchTokens } from '@erp/core';
 import type { Tx } from '@erp/db';
 import type { SalesLine, SalesLineIn, SalesParty, SalesTerm, SalesTotals } from '@erp/contracts';
 import {
-  approverRoles, calcDoc, checkBelowCost, d, daysOverdue, discountPct, exceedsCap, fmtTHB, lineDiscount, money, netUnitPricesExVat, qty4, sum, takeLots,
-  type DocLine as CoreLine, type LineDiscount, type VatMode,
+  approverRoles, asBelowCostApprover, belowCostApproverRoles, belowCostDecision, calcDoc, checkBelowCost, d, daysOverdue, discountPct, exceedsCap, fmtTHB, lineDiscount, money, netUnitPricesExVat, qty4, sum, takeLots,
+  type BelowCostApprover, type DocLine as CoreLine, type LineDiscount, type VatMode,
 } from '@erp/core';
 import { verifyApproval, type Approval } from '../../lib/approval';
 import type { AuditInput } from '../../lib/audit';
@@ -240,7 +240,34 @@ export const planUnitCosts = (lines: BuiltLine[], plans: Map<BuiltLine, Planned>
     return p && d(p.qty).gt(0) ? qty4(d(p.cogs).div(d(p.qty))) : null;
   });
 
-/** BR-16: owner sells below cost himself (logged) or another user needs the owner's PIN. Quotations are never checked. */
+/** BR-16 shop setting (sales settings, owner only): who approves a below-cost sale. */
+export async function belowCostApprover(tx: Tx, ctx: Ctx): Promise<BelowCostApprover> {
+  const r = await tx.query<{ v: string }>(`select below_cost_approver v from tenants where id = $1`, [ctx.tenantId]);
+  return asBelowCostApprover(r.rows[0]?.v);
+}
+
+/**
+ * The one BR-16 approval used by every screen (sales documents, POS, promotions), following the shop setting:
+ * 'owner' (default) = the owner confirms himself, anyone else needs the owner's PIN; 'owner_or_manager' = owner or
+ * manager confirm themselves, others need one of their PINs; 'none' = no approval (the caller still flags and logs it).
+ * Throws BELOW_COST (409) with `{ lines, approvers }` when a PIN is missing or rejected. Returns who approved.
+ */
+export async function approveBelowCost(
+  tx: Tx, deps: Deps, ctx: Ctx, approval: Approval | undefined, what: string, lines: unknown, message: string,
+): Promise<{ id: string; name: string; text: string; mode: BelowCostApprover }> {
+  const mode = await belowCostApprover(tx, ctx);
+  const approvers = belowCostApproverRoles(mode);
+  const decision = belowCostDecision(mode, ctx.role);
+  if (decision === 'none') return { id: ctx.userId, name: ctx.name, text: 'ไม่ต้องอนุมัติตามการตั้งค่าร้าน', mode };
+  if (decision === 'self') return { id: ctx.userId, name: ctx.name, text: ctx.role === 'owner' ? 'เจ้าของร้าน (ยืนยันเอง)' : `${ctx.name} (ผู้จัดการ ยืนยันเอง)`, mode };
+  const pinOf = mode === 'owner' ? "the owner's PIN" : "an owner or manager PIN";
+  if (!approval) throw E.belowCost(message, { lines, approvers });
+  const a = await verifyApproval(tx, deps.pool, ctx, approval, approvers, `ขายต่ำกว่าทุน ${what}`);
+  if (!a.ok) throw E.belowCost(`Below-cost sale needs ${pinOf}`, { lines, approvers, approvalError: a.reason });
+  return { id: a.approver.id, name: a.approver.name, text: a.approver.name, mode };
+}
+
+/** BR-16 on sales documents (who approves: the shop setting, see approveBelowCost). Quotations are never checked. */
 export async function belowCostGate(
   tx: Tx, deps: Deps, ctx: Ctx, lines: BuiltLine[], vatMode: VatMode, billDisc: string, unitCosts: (string | null)[], approval: Approval | undefined, what: string,
   /** Lines already approved below cost upstream (quotation lines carried unchanged into the order). */
@@ -257,15 +284,12 @@ export async function belowCostGate(
   const seeCost = can(ctx, 'data.cost') === 1;
   const detail = below.map((i) => ({ productId: lines[i]!.product?.id, name: lines[i]!.name, ...(seeCost ? { sell: money(sell[i]!), cost: money(unitCosts[i]!) } : {}) }));
   const text = below.map((i) => `${lines[i]!.name} (ขาย ${money(sell[i]!)} < ทุน ${money(unitCosts[i]!)})`).join(', ');
-  let by: string;
-  if (ctx.role === 'owner') by = 'เจ้าของร้าน (ยืนยันเอง)';
-  else if (approval) {
-    const a = await verifyApproval(tx, deps.pool, ctx, approval, approverRoles('sales.belowCost'), `ขายต่ำกว่าทุน ${what}`);
-    if (!a.ok) throw E.belowCost('Below-cost sale needs the owner\'s PIN', { lines: detail, approvalError: a.reason });
-    by = a.approver.name;
-  } else throw E.belowCost(`${below.length} line(s) below cost`, { lines: detail });
-  const msg = `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · อนุมัติโดย ${by}`;
-  return { approval: { by, detail: msg, at: new Date().toISOString() }, audit: { action: 'approve', object: 'below-cost', detail: `${what} · ${msg}` } };
+  const a = await approveBelowCost(tx, deps, ctx, approval, what, detail, `${below.length} line(s) below cost`);
+  const msg = a.mode === 'none' ? `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · ${a.text}` : `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · อนุมัติโดย ${a.text}`;
+  return {
+    approval: { by: a.text, detail: msg, at: new Date().toISOString() },
+    audit: { action: a.mode === 'none' ? 'flag' : 'approve', object: 'below-cost', detail: `${what} · ${msg}` },
+  };
 }
 
 // ---------- price below BR-05 / discount over the role cap ----------

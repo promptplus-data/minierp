@@ -68,8 +68,13 @@ export async function insertInvoice(tx: Tx, ctx: Ctx, inv: NewInvoice, no?: stri
   return { id, no: docNo, lineIds };
 }
 
-/** Cash invoice when payments are given (they must add up to the total), else a credit invoice (receivable). */
-function settleMode(payments: { method: string; amount: string }[] | undefined, total: string): { kind: 'credit' | 'cash'; payments: { method: string; amount: string }[]; arBalance: string } {
+/**
+ * Cash invoice when payments are given (they must add up to the total) or payMethod (the whole total by that method),
+ * else a credit invoice (receivable).
+ */
+function settleMode(req: { payments?: { method: string; amount: string }[]; payMethod?: string }, total: string): { kind: 'credit' | 'cash'; payments: { method: string; amount: string }[]; arBalance: string } {
+  if (req.payMethod && req.payments?.length) throw E.validation('Give payments or payMethod, not both');
+  const payments = req.payMethod ? [{ method: req.payMethod, amount: total }] : req.payments;
   const p = (payments ?? []).filter((x) => d(x.amount).gt(0));
   if (!p.length) return { kind: 'credit', payments: [], arBalance: total };
   const paid = sum(p.map((x) => x.amount));
@@ -107,7 +112,11 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
   if (r.rows.some((x) => x.customer_id !== first.customer_id)) throw E.validation('All delivery orders on one invoice must be for the same customer');
   if (r.rows.some((x) => x.vat_mode !== first.vat_mode)) throw E.validation('All delivery orders on one invoice must have the same VAT mode');
   const customer = await loadCustomer(tx, first.customer_id);
-  await requireTaxId(tx, ctx, customer);
+  // ข้อ 4: a cash sales order is paid when invoiced (receipt on the spot, never in AR); a walk-in / no-terms customer
+  // may have no tax ID, so the paid invoice (ใบกำกับภาษี / ใบเสร็จรับเงิน) does not require one.
+  const cashSo = r.rows.map((x) => x.term?.t === 'cash');
+  if (cashSo.some((c) => c !== cashSo[0])) throw E.validation('Delivery orders of cash and credit sales orders go on separate invoices');
+  if (!cashSo[0]) await requireTaxId(tx, ctx, customer);
   const vatMode = first.vat_mode!;
 
   const dl = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; base_qty: string; value: string; cogs: string | null; vat: 'v7' | 'exempt'; dno: string }>(
@@ -117,7 +126,10 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
     [r.rows.map((x) => x.id)],
   );
   const totals = calcDoc(dl.rows.map((l) => ({ qty: 1, unitPrice: l.value, vat: l.vat })), vatMode);
-  const settle = settleMode(req.payments, totals.total);
+  const settle = settleMode(req, totals.total);
+  if (cashSo[0] && settle.kind === 'credit') {
+    throw E.validation('A cash sales order is paid when invoiced: choose how the customer pays', { need: 'payment', total: totals.total, field: 'payMethod' });
+  }
   const date = req.date ?? deps.today();
   const term = settle.kind === 'cash' ? { t: 'cash' as const } : first.term ?? customer.term;
   const inv = await insertInvoice(tx, ctx, {
@@ -140,7 +152,7 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   const vatMode = await resolveVatMode(tx, ctx, req.vatMode);
   const lines = await buildLines(tx, req.lines, { allowFree: false });
   const totals = totalsOf(lines, vatMode, req.billDiscount);
-  const settle = settleMode(req.payments, totals.total);
+  const settle = settleMode(req, totals.total);
   const term: SalesTerm = settle.kind === 'cash' ? { t: 'cash' } : req.term ?? customer.term;
   const wh = await requireWarehouse(tx, req.warehouseId);
   const salesperson = await requireUser(tx, req.salespersonId ?? ctx.userId);
@@ -204,21 +216,30 @@ export async function invoiceFromAbb(tx: Tx, deps: Deps, ctx: Ctx, req: { abbNo:
   const customer = await loadCustomer(tx, req.customerId);
   if (!customer.tax_id) throw E.validation('A full tax invoice needs a customer with a tax ID');
   const date = deps.today();
+  // ข้อ 9a: a POS credit bill keeps its receivable: the new invoice takes over what is still owed, the term and the due
+  // date (receipts already taken stay counted), so the debt shows once in AR, aging and the statement.
+  const credit = (await tx.query<{ term: SalesTerm; due_date: string }>(`select term, due_date::text from sales_invoices where doc_id = $1 and kind = 'credit'`, [abb.id])).rows[0];
+  if (credit) {
+    if (abb.customer_id !== customer.id) throw E.validation(`${abb.no} is a credit sale of another customer; the full tax invoice must be for the same customer`);
+    const bn = await tx.query<{ no: string }>(
+      `select b.no from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = $1 and b.status = 'active'`, [abb.id]);
+    if (bn.rowCount) throw E.conflict(`${abb.no} is on billing note ${bn.rows.map((x) => x.no).join(', ')}; void it first, then bill the new invoice`);
+  }
   const inv = await insertInvoice(tx, ctx, {
     date, customer, vatMode: abb.vat_mode, warehouseId: abb.warehouse_id, shiftId: abb.shift_id, refDocId: abb.id, refNo: abb.no,
     totals: { gross: abb.gross, lineDisc: abb.line_disc, billDisc: abb.bill_disc, base7: abb.base7, exempt: abb.exempt, vat: abb.vat, total: abb.total },
-    payments: abb.payments, arBalance: '0.00',
+    payments: abb.payments, arBalance: credit ? money(abb.ar_balance) : '0.00',
     lines: lines.map((l) => ({
       productId: l.product_id, name: l.name, unitName: l.unit_name, unitFactor: l.unit_factor, qty: l.qty, baseQty: l.base_qty, unitPrice: l.unit_price,
       discount: l.discount, net: l.net, after: l.net_after_bill, vat: l.vat, cogs: l.cogs, srcLineId: l.id,
     })),
     search: [...lines.map((l) => l.name), abb.no],
-    ext: { kind: 'cash', source: 'abb', term: { t: 'cash' }, dueDate: date },
+    ext: credit ? { kind: 'credit', source: 'abb', term: credit.term, dueDate: credit.due_date } : { kind: 'cash', source: 'abb', term: { t: 'cash' }, dueDate: date },
   });
   await tx.query(`update docs set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`,
     [abb.id, ctx.userId, `ออกใบกำกับภาษีเต็มรูป ${inv.no} แทน (ลูกค้าขอใบกำกับเต็มรูป)`]);
   await writeAudit(tx, ctx, [
-    { action: 'create', object: 'INV', ref: inv.no, detail: `ใบกำกับเต็มรูปแทน ${abb.no} · ${customer.name} · ฿${fmtTHB(abb.total)}` },
+    { action: 'create', object: 'INV', ref: inv.no, detail: `ใบกำกับเต็มรูปแทน ${abb.no} · ${customer.name} · ฿${fmtTHB(abb.total)}${credit ? ` · ย้ายยอดค้าง ฿${fmtTHB(abb.ar_balance)} ครบกำหนด ${credit.due_date}` : ''}` },
     { action: 'void', object: 'ABB', ref: abb.no, detail: `ออกใบกำกับภาษีเต็มรูป ${inv.no} แทน · ฿${fmtTHB(abb.total)}` },
   ]);
   return getInvoice(tx, deps, ctx, inv.no);
@@ -251,7 +272,7 @@ export async function getInvoice(tx: Tx, _deps: Deps, ctx: Ctx, no: string): Pro
     () => tx.query<{ no: string; date: string; status: 'active' | 'void' }>(`select distinct b.no, b.date::text, b.status, b.created_at from ar_billing_note_lines l join ar_billing_notes b on b.id = l.bn_id where l.invoice_doc_id = $1 order by b.created_at`, [x.id]),
     () => tx.query<{ no: string; date: string; status: 'active' | 'void'; settled: string; wht: string }>(
       `select r.no, r.date::text, r.status, l.settled::text, l.wht::text from ar_receipt_lines l join ar_receipts r on r.id = l.receipt_id where l.invoice_doc_id = $1 order by r.created_at`, [x.id]),
-    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; refund: string | null }>(`select no, date::text, status, total::text, refund from docs where ref_doc_id = $1 and type = 'CN' order by created_at`, [x.id]),
+    () => tx.query<{ no: string; date: string; status: 'active' | 'void'; total: string; refund: string | null; ar_applied: string }>(`select no, date::text, status, total::text, refund, ar_applied::text from docs where ref_doc_id = $1 and type = 'CN' order by created_at`, [x.id]),
   ]);
   const undelivered: Record<string, string> = {};
   if (x.goods_left) {
@@ -263,7 +284,7 @@ export async function getInvoice(tx: Tx, _deps: Deps, ctx: Ctx, no: string): Pro
   const live = <T extends { status: string }>(rows: T[]) => rows.filter((y) => y.status === 'active');
   return {
     doc, customer: partyOf(x, x.customer_name), kind: x.kind, source: x.source, term: x.term, dueDate: x.due_date, arBalance: doc.status === 'void' ? '0.00' : money(x.ar_balance),
-    settled: money(sum(live(rcs.rows).map((y) => y.settled))), credited: money(sum(live(cns.rows).filter((y) => y.refund === 'credit').map((y) => y.total))),
+    settled: money(sum(live(rcs.rows).map((y) => y.settled))), credited: money(sum(live(cns.rows).map((y) => y.ar_applied))),
     goodsLeft: x.goods_left, soNo: x.so_no, project: x.project_id ? { id: x.project_id, no: x.pj_no!, name: x.pj_name! } : null,
     installment: x.inst_n != null ? { n: x.inst_n, label: x.inst_label ?? '', pct: x.inst_pct! } : null,
     grossAmount: x.gross_amount, depositDeduct: money(x.deposit_deduct), depositType: x.deposit_type, textLines: x.text_lines, attn: x.attn, note: x.note,

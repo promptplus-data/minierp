@@ -5,7 +5,7 @@ import { Promo, PromoCheck, PromoPnl, type Product, type PromoInput } from '@erp
 import { PROMO_STATE_TH, addDays, d, type PromoState } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { useCatalog, useMeta } from '../../data';
+import { useBelowCostRule, useCatalog, useMeta } from '../../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast, type ApprovalInput, type PillKind } from '../../ui';
 import { LoadMore, useLoadMore } from '../../ui/lists';
 import { NoteField } from '../../ui/NoteField';
@@ -20,6 +20,12 @@ const days = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)
 
 export const promoDesc = (p: Promo) =>
   p.kind === 'bundle' ? `ราคาชุด ${fmt(p.setPrice)} (ปกติ ${fmt(p.normalSetPrice)})` : p.mode === 'pct' ? `ลด ${fq(p.value)}%` : p.mode === 'amt' ? `ลด ${fmt(p.value)} บาท/หน่วยหลัก` : `ราคาโปร ${fmt(p.value)}`;
+
+/** BR-16 PIN dialog: the approvers follow the shop setting (owner / owner or manager). */
+function BelowCostApproval(p: { label: React.ReactNode; onClose: () => void; onSubmit: (a: ApprovalInput) => Promise<string | null> }) {
+  const b = useBelowCostRule();
+  return <ApprovalModal ownerOnly={b.ownerOnly} title={`โปรต่ำกว่าต้นทุน · ${b.need}`} {...p} />;
+}
 
 export default function Promos() {
   const [tab, setTab] = useState<'list' | 'pnl'>('list');
@@ -122,7 +128,7 @@ function ActivateButton({ p, onDone }: { p: Promo; onDone: (msg: string) => void
   return (
     <>
       <button className="btn sm pri" onClick={() => void go()}>เปิดใช้</button>
-      {apv && <ApprovalModal ownerOnly title="โปรต่ำกว่าต้นทุน · ต้องให้เจ้าของร้านยืนยัน" label={<p style={{ margin: 0 }}>โปร "{p.name}" ทำให้ขายต่ำกว่าทุน</p>} onClose={() => setApv(false)} onSubmit={go} />}
+      {apv && <BelowCostApproval label={<p style={{ margin: 0 }}>โปร "{p.name}" ทำให้ขายต่ำกว่าทุน</p>} onClose={() => setApv(false)} onSubmit={go} />}
     </>
   );
 }
@@ -307,15 +313,15 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
         </div>
       )}
       {clash.length > 0 && !f.draft && <div className="note bad small">สินค้าซ้ำกับโปรที่ช่วงเวลาทับกัน: {clash.map((c) => `${c.code} ${c.name}`).join(', ')} · สินค้าหนึ่งอยู่ได้ในโปรลดราคาเดียวต่อช่วงเวลา</div>}
-      {ck && ck.belowCost.length > 0 && <div className="note bad small" data-testid="pm-below">ราคาโปรต่ำกว่าต้นทุน: {ck.belowCost.join(', ')} · ต้องให้เจ้าของร้านอนุมัติตอนบันทึก หลังอนุมัติแล้วขายตามโปรได้โดยไม่ต้องขออนุมัติทุกบิล</div>}
+      {ck && ck.belowCost.length > 0 && <div className="note bad small" data-testid="pm-below">ราคาโปรต่ำกว่าต้นทุน: {ck.belowCost.join(', ')} · ต้องอนุมัติตอนบันทึกตามการตั้งค่าร้าน หลังอนุมัติแล้วขายตามโปรได้โดยไม่ต้องขออนุมัติทุกบิล</div>}
       <NoteField value={f.note} onChange={(note) => set({ note })} testId="pm-note" placeholder="เช่น โปรร่วมกับตัวแทน SCG ภาคเหนือ" />
       <label className="row small"><input type="checkbox" checked={f.draft} disabled={!!promo && promo.status !== 'draft'} onChange={(e) => set({ draft: e.target.checked })} /> บันทึกเป็นร่าง (ยังไม่ใช้กับบิล)</label>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act">
         <button className="btn" onClick={onClose}>ยกเลิก</button>
-        <button className="btn pri" disabled={!ready || busy} onClick={() => void save()} data-testid="pm-save">{ck?.belowCost.length && !f.draft && can('sales.belowCost') !== 1 ? 'บันทึก (ขออนุมัติเจ้าของ)' : 'บันทึกโปร'}</button>
+        <button className="btn pri" disabled={!ready || busy} onClick={() => void save()} data-testid="pm-save">{ck?.belowCost.length && !f.draft && can('sales.belowCost') !== 1 ? 'บันทึก (ขออนุมัติ)' : 'บันทึกโปร'}</button>
       </div>
-      {apv && <ApprovalModal ownerOnly title="โปรต่ำกว่าต้นทุน · ต้องให้เจ้าของร้านยืนยัน" label={<p style={{ margin: 0 }}>{ck?.belowCost.join(', ')} ขายต่ำกว่าทุน ยืนยันครั้งเดียวตอนสร้างโปร</p>} onClose={() => setApv(false)} onSubmit={save} />}
+      {apv && <BelowCostApproval label={<p style={{ margin: 0 }}>{ck?.belowCost.join(', ')} ขายต่ำกว่าทุน ยืนยันครั้งเดียวตอนสร้างโปร</p>} onClose={() => setApv(false)} onSubmit={save} />}
     </Modal>
   );
 }

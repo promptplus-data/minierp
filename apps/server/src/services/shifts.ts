@@ -31,7 +31,7 @@ async function summarize(tx: Tx, shiftId: string): Promise<Summary> {
       else by[p.method] = (by[p.method] ?? d(0)).plus(d(p.amount));
     }
   }
-  const refunds = await tx.query<{ t: string | null }>(`select sum(total)::text t from docs where shift_id = $1 and type = 'CN' and status = 'active' and refund = 'cash'`, [shiftId]);
+  const refunds = await tx.query<{ t: string | null }>(`select sum(total - ar_applied)::text t from docs where shift_id = $1 and type = 'CN' and status = 'active' and refund = 'cash'`, [shiftId]);
   const moves = await tx.query<{ type: 'in' | 'out'; amount: string }>(`select type, amount::text from shift_moves where shift_id = $1`, [shiftId]);
   return {
     cashSales: money(by.cash ?? 0),

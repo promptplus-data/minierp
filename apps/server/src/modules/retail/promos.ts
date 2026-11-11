@@ -9,10 +9,10 @@ import type { Promo, PromoInput } from '@erp/contracts';
 import { z } from 'zod';
 import { PromoUpdate } from '@erp/contracts';
 import {
-  addDays, approverRoles, bundleAlloc, bundleNormalPrice, bundleSetsAvailable, d, fmtTHB, money, priceExVat, promoBelowCost, promoState, promoUnitPrice,
+  addDays, bundleAlloc, bundleNormalPrice, bundleSetsAvailable, d, fmtTHB, money, priceExVat, promoBelowCost, promoState, promoUnitPrice,
   qty4, sum, type PromoMode, type PromoState, type VatMode,
 } from '@erp/core';
-import { verifyApproval } from '../../lib/approval';
+import { approveBelowCost } from '../sales/common';
 import { writeAudit, type AuditInput } from '../../lib/audit';
 import { can, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -137,11 +137,9 @@ async function checkSku(tx: Tx, sku: string | null | undefined, selfId: string |
 async function confirmBelowCost(tx: Tx, deps: Deps, ctx: Ctx, ev: Evaluated, name: string, approval?: { approverUserId: string; pin: string }): Promise<{ id: string; name: string }> {
   const seeCost = can(ctx, 'data.cost') === 1;
   const detail = ev.lines.filter((l) => l.belowCost).map((l) => ({ productId: l.productId, name: l.name, ...(seeCost ? { sell: l.promoPrice, cost: l.unitCost } : {}) }));
-  if (ctx.role === 'owner') return { id: ctx.userId, name: ctx.name };
-  if (!approval) throw E.belowCost(`Promotion "${name}" sells below cost; the owner must confirm it`, { lines: detail, belowCost: ev.belowCost });
-  const a = await verifyApproval(tx, deps.pool, ctx, approval, approverRoles('sales.belowCost'), `โปรต่ำกว่าทุน ${name}`);
-  if (!a.ok) throw E.belowCost('Below-cost promotion needs the owner\'s PIN', { lines: detail, belowCost: ev.belowCost, approvalError: a.reason });
-  return a.approver;
+  // BR-16: who confirms follows the shop setting; with 'none' the saving user is recorded and it is still flagged.
+  const a = await approveBelowCost(tx, deps, ctx, approval, `โปร ${name}`, detail, `Promotion "${name}" sells below cost; it must be approved`);
+  return { id: a.id, name: a.name };
 }
 
 // ---------- reads ----------

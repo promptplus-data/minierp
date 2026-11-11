@@ -128,3 +128,35 @@ test('QT → SO → DO (partial) → INV: links both ways and the delivery cuts 
   await expect(page.getByText('ส่งบางส่วน').first()).toBeVisible();
   await expect(page.getByRole('link', { name: inv }).first()).toBeVisible();
 });
+
+test('cash SO (ข้อ 4): terms on the order and print, DO → INV paid by QR on the spot, nothing in AR', async ({ page }) => {
+  await login(page, 'boy');
+  await page.goto('/b2b');
+  await page.getByTestId('new-so').click();
+  await pick(page.getByTestId('doc-customer'), 'รุ่งเรือง');
+  await expect(page.getByTestId('so-terms')).toHaveValue('credit'); // a customer with credit terms defaults to credit
+  await page.getByTestId('so-terms').selectOption('cash');
+  await pick(page.getByTestId('line-product-0'), 'SCG-CEM-T50');
+  await expect(page.getByTestId('line-price-0')).not.toHaveValue('');
+  await page.getByTestId('line-qty-0').fill('2');
+  await page.getByTestId('doc-save').click();
+  const so = await docNo(page, 'so');
+  await expect(page.getByTestId('so-terms')).toContainText('ขายเงินสด');
+  await page.getByRole('button', { name: 'พิมพ์' }).first().click();
+  await expect(page.getByTestId('paper')).toContainText('ขายเงินสด');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('paper')).toHaveCount(0);
+
+  await page.getByTestId('so-deliver').click();
+  await page.getByTestId('dlv-qty-0').fill('2');
+  await page.getByTestId('dlv-save').click();
+  await docNo(page, 'do');
+  await page.getByTestId('do-invoice').click();
+  await page.getByTestId('inv-pay-method').selectOption('promptpay');
+  await page.getByTestId('inv-from-do-save').click();
+  await docNo(page, 'inv');
+  await expect(page.getByTestId('inv-balance')).toHaveText('0.00');
+  await expect(page.getByTestId('paper')).toContainText('ใบเสร็จรับเงิน');
+  await expect(page.getByTestId('paper')).toContainText('พร้อมเพย์');
+  await expect(page.getByRole('link', { name: so }).first()).toBeVisible();
+});
