@@ -263,6 +263,14 @@ export type SalesCreditNoteSummary = z.infer<typeof SalesCreditNoteSummary>;
 
 // ---------- projects (M09) ----------
 export const SalesProjectReq = SalesNewProject.extend({ soNo: z.string() });
+/** Edit a project's header (name, site, contact, note). Money, orders and installments change through their own actions. */
+export const SalesProjectEditReq = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  site: z.string().max(500).optional(),
+  contact: z.string().max(200).optional(),
+  note: z.string().max(2000).optional(),
+}).refine((x) => Object.values(x).some((v) => v !== undefined), { message: 'Nothing to change' });
+export type SalesProjectEditReq = z.infer<typeof SalesProjectEditReq>;
 export const SalesInstallmentsReq = z.object({ rows: z.array(SalesInstallmentIn.extend({ id: z.string().optional(), dueDate: ISODate })).min(1).max(24) });
 export const SalesDepositType = z.enum(['guarantee', 'advance']);
 export const SalesDepositReq = z.object({ type: SalesDepositType, amount: DecNN, method: PaymentMethod, date: ISODate.optional(), note: z.string().max(500).default('') });

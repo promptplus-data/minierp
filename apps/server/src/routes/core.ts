@@ -1,14 +1,14 @@
 /** Auth, master data, audit log, users. */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { CustomerCreate, LoginReq, ProductUpsert, VendorCreate, pageQuery } from '@erp/contracts';
+import { CustomerCreate, LoginReq, ProductUpsert, VendorCreate, WarehouseUpsert, pageQuery } from '@erp/contracts';
 import type { Tx } from '@erp/db';
 import { writeAudit } from '../lib/audit';
 import { requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
 import { signToken, type Authed } from '../plugins/auth';
 import { auditLog, verifyAudit } from '../services/admin';
 import { login, sessionUser, unlockUser } from '../services/auth';
-import { createCustomer, createProduct, createVendor, listCustomers, getCustomer, listProducts, listVendors, listWarehouses, updateProduct } from '../services/master';
+import { createCustomer, createProduct, createVendor, listCustomers, getCustomer, listProducts, listVendors, listWarehouses, updateProduct, createWarehouse, updateWarehouse } from '../services/master';
 
 export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): void {
   app.post('/api/auth/login', async (req) => {
@@ -61,6 +61,8 @@ export function coreRoutes(app: FastifyInstance, deps: Deps, authed: Authed): vo
     return v;
   }));
   app.get('/api/warehouses', authed(async (tx, _ctx, req) => listWarehouses(tx, pageQuery.extend({ kind: z.enum(['normal', 'damaged']).optional() }).parse(req.query))));
+  app.post('/api/warehouses', authed(async (tx, ctx, req, reply) => { reply.status(201); return createWarehouse(tx, ctx, WarehouseUpsert.parse(req.body)); }));
+  app.patch('/api/warehouses/:id', authed(async (tx, ctx, req) => updateWarehouse(tx, ctx, (req.params as { id: string }).id, WarehouseUpsert.partial().parse(req.body))));
 
   app.get('/api/audit-log', authed(async (tx, ctx, req) => auditLog(tx, ctx, pageQuery.parse(req.query))));
   app.get('/api/audit-log/verify', authed(async (tx, ctx) => verifyAudit(tx, ctx)));

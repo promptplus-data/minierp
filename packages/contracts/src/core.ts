@@ -78,6 +78,14 @@ export const Warehouse = z.object({
   code: z.string().optional(), kind: z.enum(['normal', 'damaged']).default('normal'), system: z.boolean().default(false),
 });
 export type Warehouse = z.infer<typeof Warehouse>;
+export const WarehouseUpsert = z.object({
+  code: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(100),
+  isPos: z.boolean().default(false),
+  kind: z.enum(['normal', 'damaged']).default('normal'),
+  active: z.boolean().default(true),
+});
+export type WarehouseUpsert = z.infer<typeof WarehouseUpsert>;
 
 // ---------- stock (M05, M06) ----------
 /**

@@ -1,8 +1,9 @@
 /** Master data (M03): products, customers, vendors, warehouses. */
 import type { Tx } from '@erp/db';
-import type { Customer, PageQuery, Product, Vendor, Warehouse } from '@erp/contracts';
+import type { Customer, PageQuery, Product, Vendor, Warehouse, WarehouseUpsert } from '@erp/contracts';
 import { money, qty4 , searchTokens } from '@erp/core';
-import { can, type Ctx } from '../lib/context';
+import { can, requirePerm, type Ctx } from '../lib/context';
+import { writeAudit } from '../lib/audit';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 
@@ -230,6 +231,71 @@ export async function requireWarehouse(tx: Tx, id: string | undefined, opts: { p
   if (opts.pos && !w.is_pos) throw E.validation(`Warehouse ${w.name} is not a POS warehouse`);
   if (w.kind === 'damaged' && !opts.damaged) throw E.validation(`${w.name} เป็นคลังสินค้าชำรุด ใช้ขายหรือรับสินค้าดีเข้าไม่ได้`, { reason: 'DAMAGED_WAREHOUSE' });
   return w;
+}
+
+const writeAuditFor = (tx: Tx, ctx: Ctx, action: string, object: string, ref: string, detail = '') => writeAudit(tx, ctx, [{ action, object, ref, detail }]);
+
+const whStock = async (tx: Tx, id: string) =>
+  (await tx.query<{ q: string }>(`select coalesce(sum(remaining), 0)::text q from stock_lots where warehouse_id = $1`, [id])).rows[0]!.q;
+
+/** Rules shared by create and edit: a damaged-goods warehouse is never POS; the shop keeps an active sellable and an active POS warehouse. */
+async function checkWarehouse(tx: Tx, next: WarehouseUpsert, id: string | null) {
+  if (next.kind === 'damaged' && next.isPos) throw E.validation('คลังสินค้าชำรุดตั้งเป็นคลังหน้าร้าน (POS) ไม่ได้', { field: 'isPos' });
+  const others = await tx.query<{ normal: number; pos: number }>(
+    `select count(*) filter (where kind = 'normal')::int normal, count(*) filter (where kind = 'normal' and is_pos)::int pos
+       from warehouses where active and ($1::uuid is null or id <> $1)`, [id]);
+  const o = others.rows[0]!;
+  const mine = next.active && next.kind === 'normal';
+  if (o.normal + (mine ? 1 : 0) === 0) throw E.conflict('ร้านต้องมีคลังขายที่เปิดใช้อย่างน้อย 1 คลัง', { field: 'active' });
+  if (o.pos + (mine && next.isPos ? 1 : 0) === 0) throw E.conflict('ร้านต้องมีคลังหน้าร้าน (POS) ที่เปิดใช้อย่างน้อย 1 คลัง', { field: 'isPos' });
+}
+
+const dupCode = (e: unknown, code: string) => {
+  if ((e as { code?: string }).code === '23505') return E.conflict(`รหัสคลัง ${code} มีอยู่แล้ว`, { field: 'code' });
+  return e;
+};
+
+export async function createWarehouse(tx: Tx, ctx: Ctx, w: WarehouseUpsert): Promise<Warehouse> {
+  requirePerm(ctx, 'sys.settings');
+  await checkWarehouse(tx, w, null);
+  try {
+    await tx.query('savepoint wh_ins');
+    const r = await tx.query<WhRow>(`insert into warehouses (tenant_id, code, name, is_pos, kind, active) values ($1,$2,$3,$4,$5,$6) returning ${WH_COLS}`,
+      [ctx.tenantId, w.code, w.name, w.isPos, w.kind, w.active]);
+    await tx.query('release savepoint wh_ins');
+    await writeAuditFor(tx, ctx, 'create', 'warehouse', w.code, `${w.name} · ${w.kind === 'damaged' ? 'คลังสินค้าชำรุด' : w.isPos ? 'คลังหน้าร้าน' : 'คลังสินค้า'}`);
+    return toWarehouse(r.rows[0]!);
+  } catch (e) {
+    await tx.query('rollback to savepoint wh_ins');
+    throw dupCode(e, w.code);
+  }
+}
+
+export async function updateWarehouse(tx: Tx, ctx: Ctx, id: string, patch: Partial<WarehouseUpsert>): Promise<Warehouse> {
+  requirePerm(ctx, 'sys.settings');
+  if (!isUuid(id)) throw E.notFound('Warehouse not found');
+  const cur = (await tx.query<WhRow>(`select ${WH_COLS} from warehouses where id = $1 for update`, [id])).rows[0];
+  if (!cur) throw E.notFound('Warehouse not found');
+  const next: WarehouseUpsert = { code: patch.code ?? cur.code, name: patch.name ?? cur.name, isPos: patch.isPos ?? cur.is_pos, kind: patch.kind ?? cur.kind, active: patch.active ?? cur.active };
+  const left = await whStock(tx, id);
+  if (next.kind !== cur.kind && Number(left) !== 0) throw E.conflict(`เปลี่ยนประเภทคลังไม่ได้ เพราะยังมีสินค้าคงเหลือ ${left} หน่วย ให้โอนออกก่อน`, { field: 'kind' });
+  if (!next.active && cur.active && Number(left) !== 0) throw E.conflict(`ปิดคลังไม่ได้ เพราะยังมีสินค้าคงเหลือ ${left} หน่วย ให้โอนออกก่อน`, { field: 'active' });
+  if (cur.is_system && next.kind !== 'damaged') throw E.conflict('คลังสินค้าชำรุดที่ระบบสร้างเปลี่ยนประเภทไม่ได้', { field: 'kind' });
+  await checkWarehouse(tx, next, id);
+  try {
+    await tx.query('savepoint wh_upd');
+    const r = await tx.query<WhRow>(`update warehouses set code = $2, name = $3, is_pos = $4, kind = $5, active = $6 where id = $1 returning ${WH_COLS}`,
+      [id, next.code, next.name, next.isPos, next.kind, next.active]);
+    await tx.query('release savepoint wh_upd');
+    const TH: Record<keyof WarehouseUpsert, string> = { code: 'รหัส', name: 'ชื่อ', isPos: 'POS', kind: 'ประเภท', active: 'เปิดใช้' };
+    const was: WarehouseUpsert = { code: cur.code, name: cur.name, isPos: cur.is_pos, kind: cur.kind, active: cur.active };
+    const diff = (Object.keys(TH) as (keyof WarehouseUpsert)[]).filter((k) => was[k] !== next[k]).map((k) => `${TH[k]}: ${String(was[k])} → ${String(next[k])}`);
+    if (diff.length) await writeAuditFor(tx, ctx, 'update', 'warehouse', next.code, diff.join(' · '));
+    return toWarehouse(r.rows[0]!);
+  } catch (e) {
+    await tx.query('rollback to savepoint wh_upd');
+    throw dupCode(e, next.code);
+  }
 }
 
 /** The default sellable warehouse: back store first (non-POS), then the POS one; never a damaged-goods warehouse. */

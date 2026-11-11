@@ -11,7 +11,7 @@ import {
   INSTALLMENT_TEMPLATES, d, dueDate, fmtTHB, installmentAmount, money, planInstallments, splitInclusive, sum, validInstallmentPcts, type InstallmentTemplate,
 } from '@erp/core';
 import type { z } from 'zod';
-import type { SalesDepositActionReq, SalesDepositReq, SalesInstallmentIn, SalesInstallmentsReq, SalesNewProject, SalesProjectReq } from '@erp/contracts';
+import type { SalesDepositActionReq, SalesDepositReq, SalesInstallmentIn, SalesInstallmentsReq, SalesNewProject, SalesProjectEditReq, SalesProjectReq } from '@erp/contracts';
 import { writeAudit } from '../../lib/audit';
 import { requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -414,6 +414,19 @@ export async function voidDeposit(tx: Tx, deps: Deps, ctx: Ctx, no: string, body
 }
 
 /** BR-22: invoices and deposits of the project go first; its sales orders stay and become ordinary orders. */
+export async function editProject(tx: Tx, deps: Deps, ctx: Ctx, id: string, req: SalesProjectEditReq): Promise<SalesProject> {
+  requirePerm(ctx, 'sales.project');
+  const p = await projectRow(tx, id, true);
+  if (p.status === 'void') throw E.conflict(`${p.no} is void`);
+  const next = { name: req.name ?? p.name, site: req.site ?? p.site, contact: req.contact ?? p.contact, note: req.note ?? p.note };
+  const TH = { name: 'ชื่อ', site: 'หน้างาน', contact: 'ผู้ติดต่อ', note: 'หมายเหตุ' } as const;
+  const changed = (Object.keys(next) as (keyof typeof next)[]).filter((k) => next[k] !== p[k]);
+  if (!changed.length) return getProject(tx, deps, id);
+  await tx.query(`update sales_projects set name = $2, site = $3, contact = $4, note = $5 where id = $1`, [id, next.name, next.site, next.contact, next.note]);
+  await writeAudit(tx, ctx, [{ action: 'update', object: 'project', ref: p.no, detail: changed.map((k) => `${TH[k]}: "${p[k]}" → "${next[k]}"`).join(' · ') }]);
+  return getProject(tx, deps, id);
+}
+
 export async function voidProject(tx: Tx, deps: Deps, ctx: Ctx, id: string, body: VoidBody): Promise<SalesProject> {
   requirePerm(ctx, 'sales.project');
   const approvedBy = await authorizeVoid(tx, deps, ctx, body, 'โครงการ');

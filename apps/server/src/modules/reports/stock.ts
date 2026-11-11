@@ -106,9 +106,9 @@ export async function stockReport(tx: Tx, deps: Deps, ctx: Ctx, q: ReportStockQu
 export function stockSheet(r: ReportStock): (string | number)[][] {
   return [
     [`รายงานสต็อกคงเหลือ ณ ${r.asOf} (FIFO ตามล็อต) · ไม่เคลื่อนไหวเกิน ${r.slowDays} วัน`],
-    ['รหัสสินค้า', 'ชื่อสินค้า', 'หมวด', 'หน่วย', 'คงเหลือ', ...(r.costVisible ? ['ทุนเฉลี่ย FIFO', 'มูลค่า'] : []), 'จุดสั่งซื้อ', 'ขาย/เบิกล่าสุด', 'ไม่เคลื่อนไหว (วัน)', 'สถานะ'],
-    ...r.rows.map((x) => [x.sku, x.name, x.category, x.unit, x.qty, ...(r.costVisible ? [x.avgCost ?? '', x.value ?? ''] : []), x.reorderPoint, x.lastOut ?? '', x.idleDays ?? '',
+    ['รหัสสินค้า', 'ชื่อสินค้า', 'หมวด', 'หน่วย', 'คงเหลือ', ...(r.costVisible ? ['ทุนเฉลี่ย FIFO', 'มูลค่า'] : []), 'ชำรุด (คลังของเสีย)', ...(r.costVisible ? ['มูลค่าชำรุด'] : []), 'จุดสั่งซื้อ', 'ขาย/เบิกล่าสุด', 'ไม่เคลื่อนไหว (วัน)', 'สถานะ'],
+    ...r.rows.map((x) => [x.sku, x.name, x.category, x.unit, x.qty, ...(r.costVisible ? [x.avgCost ?? '', x.value ?? ''] : []), x.damagedQty ?? '0', ...(r.costVisible ? [x.damagedValue ?? ''] : []), x.reorderPoint, x.lastOut ?? '', x.idleDays ?? '',
       [x.low ? 'ต่ำกว่าจุดสั่งซื้อ' : '', x.slow ? 'ไม่เคลื่อนไหว' : ''].filter(Boolean).join(' · ')]),
-    ['รวม', `${r.totals.products} รายการ`, '', '', r.totals.qty, ...(r.costVisible ? ['', r.totals.value ?? ''] : []), '', '', '', ''],
+    ['รวม', `${r.totals.products} รายการ`, '', '', r.totals.qty, ...(r.costVisible ? ['', r.totals.value ?? ''] : []), r.totals.damagedQty ?? '0', ...(r.costVisible ? [r.totals.damagedValue ?? ''] : []), '', '', '', ''],
   ];
 }

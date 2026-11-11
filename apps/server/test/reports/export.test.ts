@@ -176,6 +176,7 @@ describe('other programs and files (REQ-M12-01..03)', () => {
     expect((await run({ template: 'generic', dataset: 'vatSales', from: '2026-09-01', to: TODAY })).status).toBe(400);
     const s = await run({ template: 'generic', dataset: 'stock', from: FROM, to: TODAY });
     expect(s.body.files[0].rows).toBeGreaterThan(5);
+    expect(parse((await file(s.body.id, 1)).text)[1]).toContain('ชำรุด (คลังของเสีย)');
     const rc = await run({ template: 'generic', dataset: 'receipts', from: FROM, to: TODAY });
     const rows = parse((await file(rc.body.id, 1)).text);
     const want = await docSums(env, FROM, TODAY);

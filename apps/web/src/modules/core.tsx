@@ -6,6 +6,7 @@ import SalesDocs from '../pages/SalesDocs';
 import DocDetail from '../pages/DocDetail';
 import Returns from '../pages/Returns';
 import Audit from '../pages/Audit';
+import Warehouses from '../pages/Warehouses';
 import type { WebModule } from './types';
 
 export const coreModule: WebModule = {
@@ -15,6 +16,7 @@ export const coreModule: WebModule = {
     { path: '/returns', label: 'รับคืนสินค้า', code: 'M08', section: 'sale', icon: 'returns', perm: 'sales.return', order: 30 },
     { path: '/stock', label: 'คลังสินค้า', code: 'M06', section: 'inv', icon: 'stock', perm: 'inv.view', order: 20 },
     { path: '/products', label: 'สินค้าและหน่วยนับ', code: 'M03', section: 'data', icon: 'master', perm: 'data.master', order: 10 },
+    { path: '/warehouses', label: 'คลังและประเภทคลัง', code: 'M06', section: 'data', icon: 'stock', perm: 'sys.settings', order: 20 },
     { path: '/audit', label: 'ประวัติการทำรายการ', code: 'BR-18', section: 'sys', icon: 'log', perm: 'sys.log', order: 90 },
   ],
   routes: [
@@ -25,5 +27,6 @@ export const coreModule: WebModule = {
     { path: '/stock', element: <Stock /> },
     { path: '/products', element: <Products /> },
     { path: '/audit', element: <Audit /> },
+    { path: '/warehouses', element: <Warehouses /> },
   ],
 };

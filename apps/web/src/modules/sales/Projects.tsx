@@ -194,7 +194,7 @@ function NewProjectModal({ onClose }: { onClose: () => void }) {
 }
 
 // ---------- project page ----------
-type PM = null | 'inst' | 'deposit' | 'deliver' | 'variation' | 'void' | { bill: SalesProject['installments'][number] } | { dep: SalesDeposit; act: 'forfeit' | 'refund' | 'void' | 'print' };
+type PM = null | 'edit' | 'inst' | 'deposit' | 'deliver' | 'variation' | 'void' | { bill: SalesProject['installments'][number] } | { dep: SalesDeposit; act: 'forfeit' | 'refund' | 'void' | 'print' };
 
 export function ProjectDetail() {
   const { id = '' } = useParams();
@@ -219,6 +219,7 @@ export function ProjectDetail() {
         <h2>
           <span className="row"><Link to="/projects" className="btn sm">‹ กลับ</Link> <b data-testid="pj-title">{p.name}</b> <span className="mono small muted">{p.no}</span> {!live ? <VoidPill /> : allBilled ? <Pill k="ok">วางบิลครบแล้ว</Pill> : <Pill k="acc">กำลังดำเนินการ</Pill>}</span>
           <span className="actions">
+            {live && canPj && <button className="btn sm" onClick={() => setM('edit')} data-testid="pj-edit">แก้ไขข้อมูล / หมายเหตุ</button>}
             {live && canPj && <button className="btn sm" onClick={() => setM('inst')} data-testid="pj-inst-edit">แก้งวดวางบิล</button>}
             {live && can('sales.doc') === 1 && <button className="btn sm" onClick={() => setM('variation')} data-testid="pj-variation">+ งานเพิ่ม (ใบสั่งขายใหม่)</button>}
             {live && canPj && <button className="btn sm bad" onClick={() => setM('void')} data-testid="void">ยกเลิกโครงการ</button>}
@@ -351,6 +352,7 @@ export function ProjectDetail() {
           </table>
         </div>
       </div>
+      {m === 'edit' && <EditProjectModal p={p} onClose={() => setM(null)} />}
       {m === 'inst' && <InstallmentsModal p={p} onClose={() => setM(null)} />}
       {m === 'deposit' && <DepositModal p={p} onClose={() => setM(null)} />}
       {m === 'deliver' && openSo && <DeliveryModal initial={{ kind: 'SO', no: openSo.no }} onClose={() => setM(null)} />}
@@ -548,6 +550,46 @@ function DepositActionModal({ dep, act, onClose }: { dep: SalesDeposit; act: 'fo
       {act === 'refund' && <label className="f">จ่ายคืนโดย<select value={method} onChange={(e) => setMethod(e.target.value as 'transfer' | 'cash')}><option value="transfer">โอนเงิน</option><option value="cash">เงินสด</option></select></label>}
       <label className="f">เหตุผล<input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="เช่น ลูกค้ายกเลิกสัญญา" /></label>
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" onClick={() => setApv(true)} data-testid="dep-act-ok">ขออนุมัติ</button></div>
+    </Modal>
+  );
+}
+
+function EditProjectModal({ p, onClose }: { p: SalesProject; onClose: () => void }) {
+  const toast = useToast();
+  const invalidate = useSalesInvalidate();
+  const [name, setName] = useState(p.name);
+  const [site, setSite] = useState(p.site);
+  const [contact, setContact] = useState(p.contact);
+  const [note, setNote] = useState(p.note);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const dirty = name !== p.name || site !== p.site || contact !== p.contact || note !== p.note;
+  const go = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      await api('PATCH', `/api/sales/projects/${encodeURIComponent(p.id)}`, { body: { name: name.trim(), site, contact, note }, schema: SalesProject });
+      await invalidate();
+      toast('บันทึกข้อมูลโครงการแล้ว');
+      onClose();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={onClose} label="แก้ไขข้อมูลโครงการ">
+      <h3>แก้ไขข้อมูลโครงการ · <span className="mono">{p.no}</span></h3>
+      <div className="fgrid">
+        <label className="f">ชื่อโครงการ<input type="text" name="name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!name.trim() || undefined} data-testid="pje-name" /></label>
+        <label className="f">ที่ตั้งหน้างาน<input type="text" name="site" value={site} onChange={(e) => setSite(e.target.value)} /></label>
+        <label className="f">ผู้ควบคุมงาน / ผู้ติดต่อ<input type="text" name="contact" value={contact} onChange={(e) => setContact(e.target.value)} /></label>
+      </div>
+      <label className="f">หมายเหตุโครงการ<textarea rows={3} name="note" value={note} onChange={(e) => setNote(e.target.value)} data-testid="pje-note" /></label>
+      <div className="note small">การแก้ไขบันทึกลงประวัติ (audit log) · มูลค่าและงวดแก้ที่ปุ่มของแต่ละเรื่อง</div>
+      {err && <div className="note bad small" role="alert">{err}</div>}
+      <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy || !dirty || !name.trim()} onClick={() => void go()} data-testid="pje-save">บันทึก</button></div>
     </Modal>
   );
 }

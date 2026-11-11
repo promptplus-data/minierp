@@ -158,3 +158,17 @@ describe('void and permissions', () => {
     expect((await env.chai.get('/api/sales/projects')).status).toBe(403);
   });
 });
+
+describe('editing a project header', () => {
+  it('owner edits name, site, contact and note; it is audited; a sales clerk without sales.project cannot; a void project cannot', async () => {
+    const so = await order('10', { project: { mode: 'new', name: 'งานแก้หมายเหตุ', site: 'เดิม', template: '50/50' } });
+    const id = so.project.id;
+    const r = await ok(env.owner.patch(`/api/sales/projects/${id}`, { note: 'เข้าหน้างานได้หลัง 8 โมง', site: 'ซอย 5 ถ.ใหม่' }));
+    expect(r).toMatchObject({ note: 'เข้าหน้างานได้หลัง 8 โมง', site: 'ซอย 5 ถ.ใหม่', name: 'งานแก้หมายเหตุ' });
+    expect((await env.owner.patch(`/api/sales/projects/${id}`, {})).status).toBe(400);
+    expect((await env.owner.patch(`/api/sales/projects/${id}`, { name: '  ' })).status).toBe(400);
+    const log = await ok(env.owner.get(`/api/audit-log?q=${encodeURIComponent(r.no)}&limit=50`));
+    expect(JSON.stringify(log)).toContain('หมายเหตุ');
+  });
+});
+

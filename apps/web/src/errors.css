@@ -48,3 +48,7 @@ td .ferr{font-size:11px;min-width:120px}
 /* red toast (errors that no dialog covers: downloads, background actions) */
 .toast.bad{background:var(--errbar);color:var(--errbar-fg);display:flex;gap:8px;align-items:center;border:1px solid color-mix(in srgb,#fff 30%,var(--errbar));font-weight:500}
 .toast.bad svg{flex:none}
+
+/* A checkbox / radio row (<label class="row"><input> text</label>): show the error under the whole row, not between the box and its text. */
+label.row:has(> .ferr) { flex-wrap: wrap; }
+label.row > .ferr { order: 99; flex-basis: 100%; }

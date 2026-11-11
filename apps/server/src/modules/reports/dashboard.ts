@@ -56,7 +56,7 @@ export async function dashboard(tx: Tx, deps: Deps, ctx: Ctx): Promise<ReportDas
   if (any(ctx, 'inv.view', 'inv.receive')) {
     const r = await tx.query<{ id: string; name: string; units: { name: string }[]; qty: string; reorder_point: string; is_scg: boolean; n: number }>(
       `select p.id, p.name, p.units, coalesce(s.q, 0)::text qty, p.reorder_point::text, p.is_scg, count(*) over ()::int n
-         from products p left join (select product_id, sum(remaining) q from stock_lots group by product_id) s on s.product_id = p.id
+         from products p left join (select l.product_id, sum(l.remaining) q from stock_lots l join warehouses w on w.id = l.warehouse_id where w.kind <> 'damaged' group by l.product_id) s on s.product_id = p.id
         where p.kind = 'stock' and p.active and p.reorder_point > 0 and coalesce(s.q, 0) < p.reorder_point
         order by coalesce(s.q, 0) / p.reorder_point, p.sku limit 8`,
     );

@@ -205,6 +205,12 @@ test('project: new SO as a project (50/50), switch to 30/40/30, deposit, deliver
   await docNo(page, 'so');
   await page.goto(`/projects/${docs.project}`);
   await expect(page.getByTestId('pj-orders')).toContainText('งานเพิ่ม');
+
+  // edit the note of an existing project
+  await page.getByTestId('pj-edit').click();
+  await page.getByTestId('pje-note').fill('เข้าหน้างานได้หลัง 8 โมง');
+  await page.getByTestId('pje-save').click();
+  await expect(page.getByTestId('pj-note-view')).toHaveText('เข้าหน้างานได้หลัง 8 โมง');
   await noPromptPlus(page);
 });
 

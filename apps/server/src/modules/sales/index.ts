@@ -8,7 +8,7 @@ import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ArAgingQuery, ArBillingNoteReq, CustomerAddressReq, SalesLineCheckReq, ArInvoicesQuery, ArReceiptReq, ArStatementQuery, SalesAbbInvoiceReq, SalesDeliveryReq, SalesDepositActionReq, SalesDepositReq,
-  SalesInstallmentsReq, SalesInvoiceReq, SalesOrderReq, SalesPageQuery, SalesPriceListReq, SalesPriceQuery, SalesProjectReq, SalesQuoteReq, SalesQuoteStatusReq,
+  SalesInstallmentsReq, SalesInvoiceReq, SalesOrderReq, SalesPageQuery, SalesPriceListReq, SalesPriceQuery, SalesProjectEditReq, SalesProjectReq, SalesQuoteReq, SalesQuoteStatusReq,
   SalesSettings, SalesSettingsUpdate, VoidReq,
 } from '@erp/contracts';
 import type { Tx } from '@erp/db';
@@ -22,7 +22,7 @@ import { createInvoice, getInvoice, invoiceFromAbb, listCreditNotes, listInvoice
 import { createOrder, getOrder, listOrders, voidOrder } from './orders';
 import { createPriceList, getPriceList, listPriceLists, resolveB2bPrice, updatePriceList } from './pricing';
 import {
-  billInstallment, createProject, forfeitDeposit, getProject, listProjects, receiveDeposit, refundDeposit, setInstallments, voidDeposit, voidProject,
+  billInstallment, createProject, editProject, forfeitDeposit, getProject, listProjects, receiveDeposit, refundDeposit, setInstallments, voidDeposit, voidProject,
 } from './projects';
 import { createQuote, getQuote, listQuotes, setQuoteStatus, updateQuote, voidQuote } from './quotes';
 import { aging, createBillingNote, createReceipt, dueSoon, getBillingNote, getReceipt, listBillingNotes, listReceipts, openInvoices, statement, voidBillingNote, voidReceipt } from './receivables';
@@ -138,6 +138,7 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   }));
   app.post('/api/sales/projects/:id/deposits', authed(async (tx, ctx, req, reply) => { reply.status(201); return receiveDeposit(tx, d, ctx, param(req, 'id'), SalesDepositReq.parse(req.body)); }));
   app.post('/api/sales/projects/:id/void', authed(async (tx, ctx, req) => voidProject(tx, d, ctx, param(req, 'id'), VoidReq.parse(req.body))));
+  app.patch('/api/sales/projects/:id', authed(async (tx, ctx, req) => editProject(tx, d, ctx, param(req, 'id'), SalesProjectEditReq.parse(req.body))));
   app.post('/api/sales/deposits/:no/forfeit', authed(async (tx, ctx, req) => forfeitDeposit(tx, d, ctx, param(req, 'no'), SalesDepositActionReq.parse(req.body ?? {}))));
   app.post('/api/sales/deposits/:no/refund', authed(async (tx, ctx, req) => refundDeposit(tx, d, ctx, param(req, 'no'), SalesDepositActionReq.parse(req.body ?? {}))));
   app.post('/api/sales/deposits/:no/void', authed(async (tx, ctx, req) => voidDeposit(tx, d, ctx, param(req, 'no'), VoidReq.parse(req.body))));
