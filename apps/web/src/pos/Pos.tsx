@@ -4,13 +4,14 @@
  * (manager override token); every manual discount carries a reason; the live preview flags below-cost lines for
  * everyone and shows margin / bill profit to data.cost users.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { DocSummary, SalesDoc, type PosPreviewReq, type PosSaleReq, type Product } from '@erp/contracts';
 import { calcDoc, d, money, needsOverride, scopeCovers, sum, type DiscReason, type PriceChange } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
+import { CloudCouponSlot, CloudCouponTotal, cloudReleaseCoupon, type AppliedCoupon } from '../cloud';
 import { useCatalog, useMeta, useShift, useWarehouseStock, useWarehouses } from '../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, ShortageModal, th, useToast, type ApprovalInput, type Shortage } from '../ui';
 import {
@@ -78,6 +79,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const [reason, setReason] = useState<DiscReason | null>(null);
   const [reasonBad, setReasonBad] = useState(false);
   const [override, setOverride] = useState<Override | null>(null);
+  const [coupon, setCouponRaw] = useState<AppliedCoupon | null>(null); // cloud only: member coupon, not a shop discount
   const pricing = usePosPricing(posWh?.id, cust).data;
   const abb = useAbbAllowed(deviceId);
   const [stage, setStage] = useState<Stage>(null);
@@ -97,6 +99,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const setBillDisc = (v: string) => { touch(); setBillDiscRaw(v); };
   const setBcart = (f: (c: CartBundle[]) => CartBundle[]) => { touch(); setBcartRaw(f); };
   const setCust = (v: string | null) => { touch(); setCustRaw(v); };
+  const setCoupon = (c: AppliedCoupon | null) => { touch(); setCouponRaw(c); };
   /** A discount / price was entered or confirmed: check it against the cap after this render. */
   const commit = () => setCheckTick((n) => n + 1);
   const addBundle = (id: string) => setBcart((c) => (c.some((b) => b.promoId === id) ? c.map((b) => (b.promoId === id ? { ...b, sets: String((Number(b.sets) || 0) + 1) } : b)) : [...c, { promoId: id, sets: '1' }]));
@@ -144,7 +147,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const lines = ready.map(lineOf);
   const vatOf = (pid: string) => cat.byId.get(pid)?.vat ?? 'v7';
   const bundleCores = bcart.map((b) => bundleCoreLines(pricing, b, vatOf));
-  const totals = calcDoc([...lines.map((x) => x.core), ...bundleCores.flat()], mode, isNum(billDisc) ? billDisc : 0);
+  const totals = calcDoc([...lines.map((x) => x.core), ...bundleCores.flat()], mode, isNum(billDisc) ? billDisc : 0, coupon?.amount ?? 0);
   const bundleNet = (i: number) => {
     const start = lines.length + bundleCores.slice(0, i).reduce((a, c) => a + c.length, 0);
     return sum(totals.lines.slice(start, start + bundleCores[i]!.length).map((x) => x.net)).toFixed(2);
@@ -212,11 +215,12 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
       ...(needsApv && override ? { discountToken: override.token } : {}),
       ...(manual && reason ? { discountReason: reason } : {}),
       ...approvals.current,
+      ...(coupon ? { coupon: { memberId: coupon.memberId, code: coupon.code, reservationId: coupon.reservationId, amount: coupon.amount } } : {}),
     };
   };
 
   const resetBill = () => {
-    setCartRaw([]); setBillDiscRaw(''); setBcartRaw([]); setCustRaw(null); setReason(null); setOverride(null);
+    setCartRaw([]); setBillDiscRaw(''); setBcartRaw([]); setCustRaw(null); setReason(null); setOverride(null); setCouponRaw(null);
     touch();
   };
 
@@ -257,6 +261,16 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
       void qc.invalidateQueries({ queryKey: ['pos-pricing'] });
       setStage(null);
       return toast('โปรโมชั่นที่ใช้ในบิลหมดเวลาแล้ว ระบบโหลดราคาใหม่ ตรวจยอดแล้วกดชำระอีกครั้ง');
+    }
+    const cr = f.code === 'CONFLICT' ? String(f.detail('reason') ?? '') : '';
+    if (cr.startsWith('COUPON_')) {
+      f.claim();
+      setStage(null);
+      const amt = f.detail<string>('newAmount');
+      if (cr === 'COUPON_AMOUNT_CHANGED' && amt) { setCoupon(coupon && { ...coupon, amount: amt }); return toast(`ยอดคูปองเปลี่ยนเป็น ฿${fmt(amt)} ตรวจยอดแล้วกดชำระอีกครั้ง`); }
+      cloudReleaseCoupon(coupon, 'redeem_aborted');
+      setCoupon(null);
+      return toast('คูปองใช้กับบิลนี้ไม่ได้แล้ว นำออกจากบิล ชำระต่อได้โดยไม่ใช้คูปอง');
     }
     if (f.code === 'SHIFT_REQUIRED') {
       void qc.invalidateQueries({ queryKey: ['shift'] });
@@ -299,13 +313,14 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   };
   const clear = () => {
     if (empty) return;
-    if (window.confirm('ยกเลิกบิลนี้ทั้งใบ?')) resetBill();
+    if (window.confirm('ยกเลิกบิลนี้ทั้งใบ?')) { cloudReleaseCoupon(coupon, 'cart_cleared'); resetBill(); }
   };
   /** REQ-M07-08: park the bill (no stock cut) and start a new one. Manual prices are not kept on a held bill. */
   const hold = async () => {
     const held: HeldCartIn = { lines: ready.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.qty, dval: l.dval, dmode: l.dmode })), bundles: bcart, billDiscount: billDisc, customerId: cust };
     try {
       const h = await holdCart(shiftId, held, totals.total);
+      cloudReleaseCoupon(coupon, 'held'); // a held bill keeps no coupon
       resetBill();
       void qc.invalidateQueries({ queryKey: ['held'] });
       toast(`พักบิลแล้ว · ${h.label}`);
@@ -425,6 +440,12 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
             onChange={(e) => setBillDisc(e.target.value)} onBlur={commit} onKeyDown={onEnter} data-testid="bill-disc" /></label>
           <QuickDisc testId="bqd" active={isNum(billDisc) && d(billDisc).gt(0)} onPct={billPct} onAmount={() => billDiscRef.current?.focus()} onClear={() => { setBillDisc(''); commit(); }} />
         </div>
+        {CloudCouponSlot && (
+          <Suspense fallback={null}>
+            <CloudCouponSlot customerId={cust} value={coupon} onChange={setCoupon}
+              cart={validQty ? { vatMode: mode, billDiscount: '0', lines: lines.map((x, i) => ({ productId: x.p.id, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.discount ? { discount: x.discount } : {}) })) } : null} />
+          </Suspense>
+        )}
         {manual && <ReasonChips value={reason} onChange={(r) => { setReason(r); setReasonBad(false); }} invalid={reasonBad && !reasonOk(reason)} />}
         {needsApv && (
           <div className="pos-override small" data-testid="override-state">
@@ -437,6 +458,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
           <span className="muted">รวมเป็นเงิน (ก่อนส่วนลด)</span><span data-testid="t-gross">{fmt(totals.gross)}</span>
           <span className="muted">ส่วนลดรายการ</span><span className={d(totals.lineDisc).gt(0) ? 'disc' : ''} data-testid="t-linedisc">−{fmt(totals.lineDisc)}</span>
           <span className="muted">ส่วนลดท้ายบิล</span><span className={d(totals.billDisc).gt(0) ? 'disc' : ''} data-testid="t-billdisc">−{fmt(totals.billDisc)}</span>
+          {coupon && CloudCouponTotal && <Suspense fallback={null}><CloudCouponTotal coupon={coupon} /></Suspense>}
           <span style={{ fontWeight: 600 }}>ยอดสุทธิ</span><span className="big" data-testid="total">฿{fmt(totals.total)}</span>
           {mode === 'none' ? <><span className="small muted">ร้านไม่จด VAT</span><span className="small muted">ไม่มีภาษี</span></> : <><span className="small muted">ภาษีมูลค่าเพิ่ม 7% (รวมในราคา)</span><span className="small muted" data-testid="t-vat">{fmt(totals.vat)}</span></>}
           {pv?.showCost && pv.profit != null && (

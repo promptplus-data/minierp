@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Customer, page } from '@erp/contracts';
 import { ApiFail, api } from '../api';
 import { useAuth } from '../auth';
+import { cloudLinkMember, cloudMemberExists } from '../cloud';
 import { Modal } from '../ui';
 import { SearchSelect, type RemotePage } from './SearchSelect';
 
@@ -72,7 +73,7 @@ export function QuickCustomerModal({ initialName = '', needTaxId, onClose, onSav
   const { can } = useAuth();
   const [f, setF] = useState({
     name: looksPhone(initialName) ? '' : initialName, phone: looksPhone(initialName) ? initialName.trim() : '', taxId: '', branch: 'สำนักงานใหญ่', address: '',
-    group: 'retail' as Customer['group'], termDays: '', creditLimit: '', note: '',
+    group: 'retail' as Customer['group'], termDays: '', creditLimit: '', note: '', memberId: '',
   });
   const [err, setErr] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -86,10 +87,13 @@ export function QuickCustomerModal({ initialName = '', needTaxId, onClose, onSav
     if (needTaxId && !f.taxId) e.taxId = 'ใบกำกับภาษีเต็มรูปต้องมีเลขผู้เสียภาษี';
     if (f.termDays && !/^\d+$/.test(f.termDays)) e.termDays = 'ใส่จำนวนวันเป็นตัวเลข';
     if (f.creditLimit && !/^\d+(\.\d+)?$/.test(f.creditLimit)) e.creditLimit = 'ใส่วงเงินเป็นตัวเลข';
+    const member = f.memberId.trim().toUpperCase();
     setErr(e);
     if (Object.keys(e).length) return;
     setBusy(true);
     try {
+      // cloud only: the member id must exist in the coupon app before the customer is created with it
+      if (member && cloudMemberExists && !(await cloudMemberExists(member))) { setErr({ memberId: 'ไม่พบรหัสสมาชิกนี้' }); return; }
       const c = await api('POST', '/api/customers', {
         schema: Customer,
         body: {
@@ -99,6 +103,7 @@ export function QuickCustomerModal({ initialName = '', needTaxId, onClose, onSav
           ...(master && f.creditLimit ? { creditLimit: f.creditLimit } : {}),
         },
       });
+      if (member && cloudLinkMember) await cloudLinkMember(c.id, member);
       await Promise.all(['customers', 'pick-customers'].map((k) => qc.invalidateQueries({ queryKey: [k] })));
       qc.setQueryData(['customer', c.id], c);
       onSaved(c);
@@ -136,6 +141,7 @@ export function QuickCustomerModal({ initialName = '', needTaxId, onClose, onSav
         </label>
         {master ? fld('termDays', 'เครดิต (วัน) ว่าง = เงินสด', { inputMode: 'numeric' }) : <div className="small muted" style={{ alignSelf: 'end' }}>เครดิตและวงเงิน ผู้จัดการตั้งได้ที่ทะเบียนลูกค้า</div>}
         {master && fld('creditLimit', 'วงเงินเครดิต (บาท)', { inputMode: 'decimal' })}
+        {import.meta.env.VITE_EDITION === 'cloud' && fld('memberId', 'รหัสสมาชิก SCG Family (ถ้ามี)', { placeholder: 'SF00000000' })}
         <label className="f" style={{ gridColumn: '1/-1' }}>หมายเหตุ
           <input type="text" name="note" value={f.note} onChange={(e) => set('note', e.target.value)} />
         </label>

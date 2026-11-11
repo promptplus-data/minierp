@@ -85,7 +85,8 @@ async function runEdition(edition, port) {
 
   const server = spawn(path.join(ROOT, 'node_modules/.bin/tsx'), ['src/main.ts'], {
     cwd: path.join(ROOT, 'apps/server'),
-    env: { ...env, EDITION: edition, PORT: String(port), HOST: '127.0.0.1', JWT_SECRET: 'e2e-secret', WEB_DIST_DIR: path.join(ROOT, 'apps/web', outDir), MDNS_SERVICE_TYPE: 'off', LOG_LEVEL: 'warn' },
+    // SCGF_DEMO: the cloud server offers the sample SCG Family coupon wallet (e2e/scgfamily.spec.ts).
+    env: { ...env, EDITION: edition, ...(edition === 'cloud' ? { SCGF_DEMO: env.SCGF_DEMO ?? '1' } : {}), PORT: String(port), HOST: '127.0.0.1', JWT_SECRET: 'e2e-secret', WEB_DIST_DIR: path.join(ROOT, 'apps/web', outDir), MDNS_SERVICE_TYPE: 'off', LOG_LEVEL: 'warn' },
     stdio: ['ignore', 'inherit', 'inherit'],
     detached: true,
   });
