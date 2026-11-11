@@ -16,6 +16,7 @@ import { useWarehouses } from '../../data';
 import { ErrorBanner } from '../../errors';
 import { fmt, fq, Pill, th } from '../../ui';
 import { ReasonModal } from './shared';
+import { Paper, PrintModal, type PaperProps } from '../sales/shared';
 import './purchasing.css';
 
 const METHOD_TH = { transfer: 'โอนเงิน', cheque: 'เช็ค', cash: 'เงินสด' } as const;
@@ -41,6 +42,7 @@ export function GrDetailPage() {
   const { can } = useAuth();
   const qc = useQueryClient();
   const [voiding, setVoiding] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const q = useQuery({ queryKey: ['pu', 'gr', no], queryFn: () => api('GET', `/api/purchasing/receipts/${encodeURIComponent(no)}`, { schema: GrDetail }) });
   const g = q.data;
   const live = g?.status !== 'void';
@@ -48,7 +50,10 @@ export function GrDetailPage() {
     <DetailShell back="/purchasing" backLabel="หน้ารับของ" title="ใบรับสินค้า" no={no} q={q} pill={g && !live ? <Pill k="bad">ยกเลิก</Pill> : undefined}>
       {g && (
         <>
-          {live && can('inv.receive') === 1 && <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}><button className="btn sm bad" onClick={() => setVoiding(true)} data-testid="gr-void">ยกเลิกใบรับ</button></div>}
+          <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}>
+            <button className="btn sm" onClick={() => setPrinting(true)} data-testid="gr-print">พิมพ์ใบรับสินค้า</button>
+            {live && can('inv.receive') === 1 && <button className="btn sm bad" onClick={() => setVoiding(true)} data-testid="gr-void">ยกเลิกใบรับ</button>}
+          </div>
           <div className="kv">
             {g.poNos.length > 0 && <><span>ตามใบสั่งซื้อ</span><span className="mono" data-testid="gr-po"><DocLinks nos={g.poNos} type="PO" /></span></>}
             <span>วันที่</span><span>{th(g.date)}</span>
@@ -77,6 +82,7 @@ export function GrDetailPage() {
               </tbody>
             </table>
           </div>
+          {printing && <PrintModal title={g.no} onClose={() => setPrinting(false)}><Paper {...grPaper(g, whs.data?.find((w) => w.id === g.warehouseId)?.name ?? '-')} /></PrintModal>}
           {g.voided && <div className="note bad small" style={{ marginTop: 10 }} data-testid="voided">ยกเลิกโดย {g.voided.by} · เหตุผล: {g.voided.reason}</div>}
           {voiding && <ReasonModal title={`ยกเลิกใบรับสินค้า ${g.no}`} url={`/api/purchasing/receipts/${encodeURIComponent(g.no)}/void`} okLabel="ยืนยันยกเลิกใบรับ" testId="gr-void"
             effects={['ตัดสต็อกที่รับเข้าออกจากล็อตของใบนี้ (ต้องยังไม่ถูกขาย / โอน)', 'ยกเลิกบิลเจ้าหนี้ (ต้องยังไม่จ่ายเงินหรือส่งคืน)', ...(g.poNos.length ? [`คืนยอดค้างรับให้ใบสั่งซื้อ ${g.poNos.join(', ')}`] : [])]}
@@ -86,6 +92,33 @@ export function GrDetailPage() {
       )}
     </DetailShell>
   );
+}
+
+/** A4 goods-received note: what came in, from whom, into which warehouse; prices only for users who may see cost; free goods marked. */
+function grPaper(g: GrDetail, whName: string): PaperProps {
+  const priced = g.lines.some((l) => l.unitPrice != null);
+  const free = g.lines.filter((l) => l.free).length;
+  const notes = [g.note, g.overReceiveNote && `รับเกินใบสั่งซื้อ: ${g.overReceiveNote}`, free ? `มีของแถม ${free} รายการ (ต้นทุน 0 ไม่รวมในยอดตั้งหนี้)` : ''].filter(Boolean);
+  return {
+    title: 'ใบรับสินค้า', sub: 'Goods Received Note', no: g.no, date: g.date, voided: g.status === 'void',
+    party: { label: 'ผู้ขาย', name: g.vendorName ?? '-' },
+    refs: [
+      ['รับเข้าคลัง', whName],
+      ...(g.deliveryNo ? [['ใบส่งของ (DN)', g.deliveryNo]] : []),
+      ...(g.vendorInvoiceNo ? [['ใบกำกับผู้ขาย', g.vendorInvoiceNo]] : []),
+      ...(g.poNos.length ? [['ตามใบสั่งซื้อ', g.poNos.join(', ')]] : []),
+      ...(g.apBillNo ? [['บิลเจ้าหนี้', g.apBillNo]] : []),
+    ] as [string, ReactNode][],
+    cols: priced ? 'price' : 'qty',
+    rows: g.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.free ? '0' : l.unitPrice, amt: l.free ? '0' : l.amount })),
+    totals: priced && g.total != null ? [
+      ...(g.billDiscount && d(g.billDiscount).gt(0) ? [['ส่วนลดท้ายบิล', `-${fmt(g.billDiscount)}`] as [string, string]] : []),
+      ['ยอดรวม', fmt(g.total), true],
+    ] : undefined,
+    baht: priced ? g.total : null,
+    note: notes.length ? notes.join(' · ') : undefined,
+    sign: ['ผู้ส่งของ', 'ผู้ตรวจรับ', 'ผู้บันทึก'],
+  };
 }
 
 export function ApBillDetailPage() {

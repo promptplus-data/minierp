@@ -224,6 +224,13 @@ test('purchase order from a sales order: tick lines → save → receive part �
   await page.getByTestId('po-receipts').getByRole('link', { name: gr2 }).click();
   await expect(page.getByTestId('gr-lines')).toContainText('ของแถม');
   await expect(page.getByTestId('gr-over-note')).toContainText('ผู้ขายส่งเกินมา');
+  await page.getByTestId('gr-print').click();
+  const paper = page.getByRole('dialog').getByTestId('paper');
+  await expect(paper).toContainText('ใบรับสินค้า');
+  await expect(paper).toContainText('(ของแถม)');
+  await expect(paper).toContainText('รับเกินใบสั่งซื้อ: ผู้ขายส่งเกินมา');
+  await paper.screenshot({ path: 'e2e/screenshots/gr-print.png' });
+  await page.keyboard.press('Escape');
 
   // the next PO from the same order suggests only what is still missing (sand), paint is unticked at 0
   await page.goto(`/b2b/so/${soNo}`);
