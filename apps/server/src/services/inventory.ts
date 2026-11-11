@@ -140,7 +140,7 @@ export async function lots(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string
 
 export async function receipt(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string })[]; billDiscount: string; note?: string },
+  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string; poLineId?: string })[]; billDiscount: string; note?: string; poId?: string },
 ): Promise<StockDoc> {
   requirePerm(ctx, 'inv.receive');
   if (!isUuid(req.vendorId) || !(await tx.query(`select 1 from vendors where id = $1`, [req.vendorId])).rowCount) throw E.validation('Unknown vendor');
@@ -170,14 +170,14 @@ export async function receipt(
     await recordIn(tx, ctx, wh.id, l.p.id, [{ lotId, qty: l.baseQty, unitCost }], { docType: 'GR', docNo: no, docId, note: `รับสินค้า · ${req.vendorInvoiceNo}` });
     out.push({ productId: l.p.id, qty: l.baseQty, unitCost });
     const rl = req.lines[i]!;
-    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId });
+    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId, poLineId: rl.poLineId ?? null });
   }
   const total = money(sum(amounts).minus(d(req.billDiscount)));
   const doc = await insertStockDocWithId(tx, ctx, docId, {
     no, type: 'GR', date: deps.today(), warehouseId: wh.id, vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, deliveryNo: req.deliveryNo, lines: out, total,
     reason: req.note?.trim() || undefined, // GR note (หมายเหตุ) lives in stock_docs.reason
   });
-  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '' }); // REQ-M18-01
+  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '', poId: req.poId ?? null }); // REQ-M18-01; PO receipt checks in the hook
   await deps.hooks.beforeCommit?.('receipt', tx);
   await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
   return doc;

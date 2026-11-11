@@ -15,6 +15,7 @@ import { makePricer } from './pricing';
 import { createProjectForOrder } from './projects';
 import { scgfCartOf, scgfCouponValue, scgfDocCoupon, scgfRedeemOnDoc, scgfReturnOnVoid } from '../../services/scgfamily';
 import { effectiveStatus, quoteLines, quoteRow } from './quotes';
+import { posFromSource } from '../purchasing/po';
 
 interface OrderRow extends PartyCols {
   id: string; no: string; date: string; customer_id: string; quote_no: string | null; project_id: string | null; pj_no: string | null; pj_name: string | null;
@@ -98,7 +99,7 @@ export async function getOrder(tx: Tx, ctx: Ctx, no: string): Promise<SalesOrder
     priceApproval: o.price_approval ? { by: o.price_approval.name, detail: o.price_approval.detail } : null, profit: profit?.total ?? null,
     deliveries: dlv.rows.map((x) => ({ no: x.no, date: x.date, status: x.status, invoiceNo: x.invoice_no })),
     invoices: inv.rows.map((x) => ({ no: x.no, date: x.date, status: x.status })),
-    createdBy: o.created_by_name, voided: voidedJson(o),
+    createdBy: o.created_by_name, voided: voidedJson(o), purchaseOrders: await posFromSource(tx, o.no),
     ...(process.env.EDITION === 'cloud' ? { coupon: await scgfDocCoupon(tx, 'sales_orders', o.id) } : {}),
   };
 }

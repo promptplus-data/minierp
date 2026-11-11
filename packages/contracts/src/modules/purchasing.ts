@@ -4,7 +4,7 @@
  * ("นำเข้าไฟล์ใบส่งของ", both editions). Money and quantities are decimal strings.
  */
 import { z } from 'zod';
-import { Dec, DecNN, pageQuery, type RouteEditions } from '../core';
+import { Dec, DecNN, Discount, pageQuery, type RouteEditions } from '../core';
 
 const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 /** Query-string boolean: only 'true' / '1' are true (z.coerce.boolean would turn 'false' into true). */
@@ -35,6 +35,9 @@ export const GrSummary = z.object({
   apBillNo: z.string().nullable(), itemsPreview: z.string(), createdBy: z.string(), returnable: z.boolean(),
   /** หมายเหตุ typed on the receipt (manual receipt or draft confirm). */
   note: z.string().default(''),
+  /** Purchase orders this receipt was received against (gr_lines.po_id). */
+  poNos: z.array(z.string()).default([]),
+  status: z.enum(['active', 'void']).default('active'),
 });
 export type GrSummary = z.infer<typeof GrSummary>;
 export const GrLineView = z.object({
@@ -45,9 +48,74 @@ export const GrLineView = z.object({
 export const GrDetail = GrSummary.extend({
   lines: z.array(GrLineView), billDiscount: Dec.nullable(),
   returns: z.array(z.object({ no: z.string(), date: Ymd, total: Dec })).default([]),
+  voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable().default(null),
 });
 export type GrDetail = z.infer<typeof GrDetail>;
 export const GrListQuery = pageQuery.extend({ returnable: QBool.optional() });
+/** Void a goods receipt: only while its lots are untouched and its AP bill has no payment / vendor return. */
+export const GrVoidReq = z.object({ reason: z.string().trim().min(1).max(500) });
+
+// ---------- purchase orders (ใบสั่งซื้อ, PO) ----------
+export const PoStatus = z.enum(['open', 'partial', 'received', 'closed', 'void']);
+export type PoStatus = z.infer<typeof PoStatus>;
+export const PoVatMode = z.enum(['inc', 'exc', 'none']);
+export const PoLineIn = z.object({
+  productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitCost: DecNN, discount: Discount.optional(),
+  /** Quotation / sales order line it came from (sourceNo must be set). */
+  sourceLineId: z.string().optional(),
+});
+export const PoReq = z.object({
+  vendorId: z.string(), warehouseId: z.string(), date: Ymd.optional(), expectedDate: Ymd.nullable().optional(),
+  vendorRef: z.string().trim().max(100).default(''), note: z.string().max(1000).default(''), vatMode: PoVatMode.optional(),
+  /** QT… / SO… the order was made from ("จาก SO2611-0003"). */
+  sourceNo: z.string().optional(),
+  lines: z.array(PoLineIn).min(1).max(200),
+});
+export type PoReq = z.infer<typeof PoReq>;
+export const PoQuery = pageQuery.extend({ status: z.enum(['open', 'partial', 'received', 'closed', 'void', 'pending']).optional(), vendorId: z.string().optional() });
+export const PoReasonReq = z.object({ reason: z.string().trim().min(1).max(500) });
+/** Quantities in the line unit; received = active goods receipts against the line. Prices null when the viewer may not see them. */
+export const PoLine = z.object({
+  id: z.string(), lineNo: z.number().int(), productId: z.string(), sku: z.string(), name: z.string(), unitIdx: z.number().int(), unitName: z.string(),
+  unitFactor: Dec, qty: Dec, receivedQty: Dec, remainingQty: Dec, unitCost: Dec.nullable(), discount: Discount.nullable(), discAmt: Dec.nullable(), net: Dec.nullable(),
+  vat: z.enum(['v7', 'exempt']),
+  /** Cost per line unit for the goods receipt: net after the line discount, ex VAT. */
+  grUnitCost: Dec.nullable(),
+  sourceLineId: z.string().nullable(), sourceQty: Dec.nullable(),
+});
+export const PoTotals = z.object({ gross: Dec, lineDisc: Dec, billDisc: Dec, base7: Dec, exempt: Dec, vat: Dec, total: Dec });
+export const PurchaseOrder = z.object({
+  id: z.string(), no: z.string(), date: Ymd, status: PoStatus,
+  vendor: z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), phone: z.string().nullable() }),
+  warehouseId: z.string(), warehouseName: z.string(), expectedDate: Ymd.nullable(), vendorRef: z.string(), note: z.string(), vatMode: PoVatMode,
+  totals: PoTotals.nullable(), source: z.object({ type: z.enum(['QT', 'SO']), no: z.string() }).nullable(), lines: z.array(PoLine),
+  receipts: z.array(z.object({ no: z.string(), date: Ymd, status: z.enum(['active', 'void']) })),
+  createdBy: z.string(), closed: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(),
+  voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(),
+});
+export type PurchaseOrder = z.infer<typeof PurchaseOrder>;
+export const PoSummary = z.object({
+  id: z.string(), no: z.string(), date: Ymd, status: PoStatus, vendorName: z.string(), warehouseId: z.string(), expectedDate: Ymd.nullable(),
+  vendorRef: z.string(), sourceNo: z.string().nullable(), total: Dec.nullable(), itemsPreview: z.string(), note: z.string(), createdBy: z.string(),
+});
+export type PoSummary = z.infer<typeof PoSummary>;
+export const PoPrefillQuery = z.object({ warehouseId: z.string().optional() });
+/** Stock lines of a quotation / sales order with the shortfall to order (qty), in the source line's unit. */
+export const PoPrefill = z.object({
+  source: z.object({ type: z.enum(['QT', 'SO']), no: z.string(), customerName: z.string() }),
+  warehouseId: z.string(), vatMode: PoVatMode,
+  lines: z.array(z.object({
+    sourceLineId: z.string(), productId: z.string(), sku: z.string(), name: z.string(), unitIdx: z.number().int(), unitName: z.string(),
+    /** Still to deliver (SO) or quoted (QT). */
+    orderedQty: Dec,
+    /** On hand minus what other sales orders reserve in that warehouse. */
+    availableQty: Dec,
+    qty: Dec, unitCost: Dec.nullable(),
+  })),
+  /** Service and free-text lines left out. */
+  skipped: z.number().int(),
+});
+export type PoPrefill = z.infer<typeof PoPrefill>;
 
 // ---------- AP (M18) ----------
 export const ApBill = z.object({
@@ -245,6 +313,13 @@ export const purchasingRoutes = {
   grAlerts: 'GET /api/purchasing/gr-alerts',
   grReceipts: 'GET /api/purchasing/receipts',
   grReceipt: 'GET /api/purchasing/receipts/:no',
+  grVoid: 'POST /api/purchasing/receipts/:no/void',
+  purchaseOrders: 'GET /api/purchase-orders',
+  purchaseOrderCreate: 'POST /api/purchase-orders',
+  purchaseOrder: 'GET /api/purchase-orders/:no',
+  purchaseOrderVoid: 'POST /api/purchase-orders/:no/void',
+  purchaseOrderClose: 'POST /api/purchase-orders/:no/close',
+  purchaseOrderPrefill: 'GET /api/purchase-orders/prefill/:sourceNo',
 
   apBills: 'GET /api/ap/bills',
   apBill: 'GET /api/ap/bills/:no',

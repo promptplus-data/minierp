@@ -6,14 +6,16 @@
 import { z } from 'zod';
 import {
   ApBillUpdate, ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
-  GrListQuery, ImportCommitReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettings, StockCountEntryReq,
+  GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettings, StockCountEntryReq,
   StockCountOpenReq, StockCountQuery, StockCountRecountReq, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny } from '../../lib/context';
 import type { ErpModule } from '../types';
 import * as ap from './ap';
 import * as dl from './delivery';
+import * as gv from './grvoid';
 import * as hub from './importhub';
+import * as po from './po';
 import * as sx from './stockx';
 
 /** Uploads travel as base64 JSON: a 10 MB file is ~13.4 MB of body. */
@@ -30,6 +32,19 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/purchasing/gr-alerts', authed(async (tx) => sx.grAlerts(tx, deps)));
   app.get('/api/purchasing/receipts', authed(async (tx, ctx, req) => ap.listReceipts(tx, ctx, GrListQuery.parse(req.query))));
   app.get('/api/purchasing/receipts/:no', authed(async (tx, ctx, req) => ap.getReceipt(tx, ctx, params(req).no)));
+  app.post('/api/purchasing/receipts/:no/void', authed(async (tx, ctx, req) => gv.voidReceipt(tx, ctx, params(req).no, GrVoidReq.parse(req.body).reason)));
+
+  // ---------- purchase orders (ใบสั่งซื้อ) ----------
+  app.get('/api/purchase-orders', authed(async (tx, ctx, req) => po.listPos(tx, ctx, PoQuery.parse(req.query))));
+  app.post('/api/purchase-orders', authed(async (tx, ctx, req, reply) => {
+    reply.status(201);
+    return po.createPo(tx, deps, ctx, PoReq.parse(req.body));
+  }));
+  app.get('/api/purchase-orders/prefill/:sourceNo', authed(async (tx, ctx, req) =>
+    po.prefill(tx, deps, ctx, (req.params as { sourceNo: string }).sourceNo, PoPrefillQuery.parse(req.query))));
+  app.get('/api/purchase-orders/:no', authed(async (tx, ctx, req) => po.getPo(tx, ctx, params(req).no)));
+  app.post('/api/purchase-orders/:no/void', authed(async (tx, ctx, req) => po.voidPo(tx, ctx, params(req).no, PoReasonReq.parse(req.body).reason)));
+  app.post('/api/purchase-orders/:no/close', authed(async (tx, ctx, req) => po.closePo(tx, ctx, params(req).no, PoReasonReq.parse(req.body).reason)));
 
   // ---------- AP (M18) ----------
   app.get('/api/ap/bills', authed(async (tx, ctx, req) => ap.listBills(tx, deps, ctx, ApBillQuery.parse(req.query))));

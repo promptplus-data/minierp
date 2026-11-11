@@ -16,6 +16,7 @@ import {
 } from './common';
 import { makePricer } from './pricing';
 import type { AuditInput } from '../../lib/audit';
+import { posFromSource } from '../purchasing/po';
 
 interface QuoteRow extends PartyCols {
   id: string; no: string; date: string; valid_until: string; customer_id: string; attn: string; vat_mode: SalesQuote['vatMode']; term: SalesQuote['term'];
@@ -77,7 +78,7 @@ export async function getQuote(tx: Tx, deps: Deps, ctx: Ctx, no: string): Promis
     belowCostApproval: q.below_cost_approval ? { by: q.below_cost_approval.by, detail: q.below_cost_approval.detail } : null,
     priceApproval: q.price_approval ? { by: q.price_approval.name, detail: q.price_approval.detail } : null,
     profit: profit?.total ?? null,
-    createdBy: q.created_by_name, voided: voidedJson(q),
+    createdBy: q.created_by_name, voided: voidedJson(q), purchaseOrders: await posFromSource(tx, q.no),
   };
 }
 
