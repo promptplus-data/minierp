@@ -55,7 +55,7 @@ export default function DocDetail() {
             <tbody>
               {doc.lines.map((l) => (
                 <tr key={l.id}>
-                  <td>{l.name}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fmt(l.unitPrice)}</td>
+                  <td>{l.name}{l.free && <> <Pill k="acc">ของแถม</Pill></>}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fmt(l.unitPrice)}</td>
                   <td className="n">{d(l.discount).gt(0) ? fmt(l.discount) : '-'}</td><td className="n">{fmt(l.net)}</td><td className="n">{d(l.returnedQty).gt(0) ? fq(l.returnedQty) : '-'}</td>
                   {doc.lines.some((x) => x.cogs != null) && <td className="n">{l.cogs != null ? fmt(l.cogs) : '-'}</td>}
                 </tr>

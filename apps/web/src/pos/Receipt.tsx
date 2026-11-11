@@ -41,7 +41,7 @@ export function Slip({ doc }: { doc: SalesDoc }) {
         return (
           <div key={l.id}>
             {firstOfBundle && <R l={`ชุดโปร ${b.name} × ${fq(b.sets)}`} r={fmt(d(b.setPrice).times(d(b.sets)))} />}
-            <div>{b ? `  · ${l.name}` : l.name}</div>
+            <div data-testid={l.free ? 'slip-free' : undefined}>{b ? `  · ${l.name}` : l.name}{l.free ? ' (ของแถม)' : ''}</div>
             {b ? <R l={`    ${fq(l.qty)} ${l.unitName}`} r={fmt(l.net)} /> : <R l={`${fq(l.qty)} ${l.unitName} × ${fmt(l.unitPrice)}`} r={fmt(d(l.qty).times(d(l.unitPrice)))} />}
             {!b && l.promo && l.listPrice && d(l.listPrice).gt(d(l.unitPrice)) && <R l={`  โปร ${l.promo.name}`} r={`(ปกติ ${fmt(l.listPrice)})`} />}
             {d(l.discount).gt(0) && <R l="  ส่วนลด" r={`−${fmt(l.discount)}`} />}

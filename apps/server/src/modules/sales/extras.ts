@@ -64,7 +64,7 @@ export async function lineCheck(tx: Tx, ctx: Ctx, req: z.infer<typeof SalesLineC
   const vatMode = req.vatMode as VatMode;
   const costs = await peekUnitCosts(tx, wh, lines);
   const sell = netUnitPricesExVat(lines.map((l) => ({ ...coreLine(l), baseQty: l.baseQty })), vatMode, req.billDiscount);
-  const below = new Set(checkBelowCost(lines.map((_, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: costs[i] }))));
+  const below = new Set(checkBelowCost(lines.map((l, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: l.giveaway ? null : costs[i] }))));
   const seeCost = can(ctx, 'data.cost') === 1;
   const pr = seeCost ? profitOf(lines, vatMode, req.billDiscount, costs) : null;
   const out: SalesLineCheck['lines'] = req.lines.map(() => ({ belowCost: false, unitCost: null, profit: null }));

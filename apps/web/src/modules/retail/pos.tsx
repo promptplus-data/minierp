@@ -14,7 +14,7 @@ import { ProductImg } from '../../pos/img';
 export type Pricing = PosPricing;
 export interface CartBundle { promoId: string; sets: string }
 export interface HeldCartIn {
-  lines: { productId: string; unitIdx: number; qty: string; dval: string; dmode: 'amt' | 'pct' }[];
+  lines: { productId: string; unitIdx: number; qty: string; dval: string; dmode: 'amt' | 'pct'; free?: boolean }[];
   bundles: CartBundle[]; billDiscount: string; customerId: string | null;
 }
 

@@ -74,7 +74,7 @@ export const SalesPrice = z.object({ unitPrice: Dec, source: SalesPriceSource, r
  */
 export const SalesLineCheckReq = z.object({
   vatMode: SalesVatMode.default('exc'), billDiscount: DecNN.default('0'), warehouseId: z.string().optional(),
-  lines: z.array(z.object({ productId: z.string().optional(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional() })).max(200),
+  lines: z.array(z.object({ productId: z.string().optional(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional(), giveaway: z.boolean().optional() })).max(200),
 });
 export const SalesLineCheck = z.object({
   lines: z.array(z.object({ belowCost: z.boolean(), unitCost: Dec.nullable(), profit: Dec.nullable() })),

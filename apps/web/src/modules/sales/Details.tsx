@@ -103,7 +103,7 @@ function quotePaper(x: SalesQuote) {
       ...(x.salesperson ? [['พนักงานขาย', `${x.salesperson.name}${x.salesperson.phone ? ` · โทร ${x.salesperson.phone}` : ''}`] as [string, ReactNode]] : []),
       ...(x.vatMode !== 'none' ? [['ราคาในเอกสาร', x.vatMode === 'exc' ? 'ไม่รวมภาษีมูลค่าเพิ่ม' : 'รวมภาษีมูลค่าเพิ่มแล้ว'] as [string, ReactNode]] : []),
     ] as [string, ReactNode][],
-    cols: 'price' as const, rows: x.lines.map((l) => ({ name: <>{l.name}{l.free && <span className="pm"> (สั่งพิเศษ)</span>}</>, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discAmt, amt: l.net })),
+    cols: 'price' as const, rows: x.lines.map((l) => ({ name: <>{l.name}{l.free && <span className="pm"> (สั่งพิเศษ)</span>}{l.giveaway && ' (ของแถม)'}</>, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discAmt, amt: l.net })),
     totals: taxRows(x.totals, x.vatMode), baht: x.totals.total, bank: true,
     note: [x.note, x.lines.some((l) => l.free) ? 'บางรายการสั่งพิเศษ ร้านจะยืนยันกำหนดส่งอีกครั้ง' : ''].filter(Boolean).join(' · ') || undefined,
     sign: [`ผู้เสนอราคา${x.salesperson ? ` (${x.salesperson.name})` : ''}`, 'ผู้อนุมัติ', 'ลูกค้าอนุมัติสั่งซื้อ', '@ตราประทับลูกค้า'],
@@ -163,7 +163,7 @@ export function OrderDetail() {
             <tbody>
               {x.lines.map((l) => (
                 <tr key={l.id}>
-                  <td>{l.name}<div className="small muted mono">{l.sku}</div></td><td className="n">{fq(l.qty)} {l.unitName}</td>
+                  <td>{l.name}{l.giveaway && <> <Pill k="acc">ของแถม</Pill></>}<div className="small muted mono">{l.sku}</div></td><td className="n">{fq(l.qty)} {l.unitName}</td>
                   <td className="n">{fmt(l.unitPrice)}<PriceSrc l={l} /></td><td className="n">{fmt(l.net)}</td>
                   {seeCost && <td className="n"><Profit l={l} /></td>}
                   <td className="n">{fq(l.deliveredQty)}</td><td className="n">{d(l.remainingQty).gt(0) ? <b>{fq(l.remainingQty)}</b> : <Pill k="ok">ครบ</Pill>}</td>
@@ -203,7 +203,7 @@ function LinesTable({ lines }: { lines: SalesQuote['lines'] }) {
         <tbody>
           {lines.map((l) => (
             <tr key={l.id}>
-              <td>{l.name}{l.free && <> <Pill k="warn">นอกระบบ</Pill></>}{l.sku && <div className="small muted mono">{l.sku}</div>}</td>
+              <td>{l.name}{l.free && <> <Pill k="warn">นอกระบบ</Pill></>}{l.giveaway && <> <Pill k="acc">ของแถม</Pill></>}{l.sku && <div className="small muted mono">{l.sku}</div>}</td>
               <td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{fmt(l.unitPrice)}<PriceSrc l={l} /></td><td className="n">{fmt(l.net)}</td>
               {seeCost && <td className="n"><Profit l={l} /></td>}
             </tr>
@@ -221,7 +221,7 @@ function orderPaper(x: SalesOrder) {
     party: { label: 'ลูกค้า', name: x.customer.name, tax: x.customer.taxId, br: x.customer.branch, tel: x.customer.phone },
     refs: [...(x.quoteNo ? [['อ้างอิง', x.quoteNo]] : []), ['เงื่อนไขชำระ', SO_TERM_TH(x.term)], ...(x.project ? [['โครงการ', x.project.name]] : []), ...(x.shipTo ? [['ส่งที่', x.shipTo]] : []),
       ...(x.salesperson ? [['พนักงานขาย', x.salesperson.name]] : [])] as [string, ReactNode][],
-    cols: 'price' as const, rows: x.lines.map((l) => ({ name: l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discAmt, amt: l.net })),
+    cols: 'price' as const, rows: x.lines.map((l) => ({ name: l.giveaway ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discAmt, amt: l.net })),
     totals: taxRows(x.totals, x.vatMode), baht: x.totals.total, note: x.note || undefined, sign: ['ผู้รับคำสั่งซื้อ', 'ผู้อนุมัติ', 'ลูกค้า'],
   };
 }
@@ -276,7 +276,7 @@ function deliveryPaper(x: SalesDelivery) {
     title: 'ใบส่งของ', no: x.no, date: x.date, voided: x.status === 'void',
     party: { label: 'ลูกค้า', name: x.customer.name, tel: x.customer.phone },
     refs: [['อ้างอิง', x.soNo ?? x.invoiceNo ?? '-'], ['ส่งที่', x.shipTo || (x.project?.site ?? '-')], ...(x.vehicle ? [['รถ / คนขับ', x.vehicle]] : [])] as [string, ReactNode][],
-    cols: 'qty' as const, rows: x.lines.map((l) => ({ name: l.name, qty: l.qty, unit: l.unitName })),
+    cols: 'qty' as const, rows: x.lines.map((l) => ({ name: l.giveaway ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName })),
     note: [x.note, 'กรุณาตรวจนับสินค้าก่อนลงชื่อรับ'].filter(Boolean).join(' · '), sign: ['ผู้ส่งของ', 'ผู้รับของ'],
   };
 }
@@ -343,7 +343,7 @@ export function invoicePaper(x: SalesInvoice, vatShop: boolean) {
   const nv = x.doc.vatMode === 'none' || !vatShop;
   const title = nv ? (x.kind === 'credit' ? 'ใบแจ้งหนี้' : 'ใบเสร็จรับเงิน') : x.kind === 'credit' ? 'ใบกำกับภาษี / ใบแจ้งหนี้' : 'ใบกำกับภาษี / ใบเสร็จรับเงิน';
   const rows = x.doc.lines.length
-    ? x.doc.lines.map((l) => ({ name: l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discount, amt: l.net }))
+    ? x.doc.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discount, amt: l.net }))
     : x.textLines.map((t) => ({ name: t.name, qty: null, unit: '', price: null, amt: t.amount }));
   const totals = taxRows(x.doc.totals, nv ? 'none' : x.doc.vatMode);
   if (x.depositType === 'guarantee' && d(x.depositDeduct).gt(0)) totals.push(['หักเงินมัดจำ', `−${fmt(x.depositDeduct)}`], ['ยอดที่ต้องชำระ', fmt(d(x.doc.totals.total).minus(d(x.depositDeduct))), true]);

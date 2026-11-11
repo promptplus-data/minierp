@@ -119,7 +119,7 @@ export const PriceResolveQuery = z.object({ customerId: z.string().optional(), p
 export const PriceResolution = z.object({ unitPrice: Dec, source: z.enum(['quotation', 'customer', 'group', 'retail', 'promo']), promoId: z.string().nullable(), listPrice: Dec });
 
 // ---------- REQ-M07-08 held bills ----------
-export const HeldCartLine = z.object({ productId: z.string(), unitIdx: z.number().int().min(0), qty: z.string(), dval: z.string().default(''), dmode: z.enum(['amt', 'pct']).default('amt') });
+export const HeldCartLine = z.object({ productId: z.string(), unitIdx: z.number().int().min(0), qty: z.string(), dval: z.string().default(''), dmode: z.enum(['amt', 'pct']).default('amt'), free: z.boolean().optional() });
 export const HeldCart = z.object({
   lines: z.array(HeldCartLine).default([]),
   bundles: z.array(z.object({ promoId: z.string(), sets: z.string() })).default([]),

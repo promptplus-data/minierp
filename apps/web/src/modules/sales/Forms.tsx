@@ -45,7 +45,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [lines, setLines] = useState<EditLine[]>(() => src
     ? src.lines.map((l) => ({
       productId: l.productId ?? '', unitIdx: l.unitIdx ?? 0, name: l.name, unitName: l.unitName, qty: l.qty, unitPrice: l.unitPrice,
-      discKind: l.discount?.kind ?? 'amt', discValue: l.discount?.value ?? '', vat: l.vat, free: !quote && !l.productId, quoteLineId: quote ? l.id : undefined,
+      discKind: l.discount?.kind ?? 'amt', discValue: l.discount?.value ?? '', vat: l.vat, free: !quote && !l.productId, quoteLineId: quote ? l.id : undefined, giveaway: l.giveaway || undefined,
       // QT → SO: the quoted price is the expected price of the order line; an edited quotation keeps each line's BR-05 price
       priceSource: quote ? priceSourceText('quote', quote.no) : priceSourceText(l.priceSource, l.priceRef) || undefined,
       listPrice: quote ? l.unitPrice : l.listPrice ?? undefined,

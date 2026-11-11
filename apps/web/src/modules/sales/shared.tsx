@@ -152,10 +152,13 @@ export function PrintModal({ onClose, children, title }: { onClose: () => void; 
 export { CustomerSelect } from './pickers';
 
 // ---------- line editor (quotation / sales order / direct invoice) ----------
-export interface EditLine { productId: string; unitIdx: number; name: string; unitName: string; qty: string; unitPrice: string; discKind: 'amt' | 'pct'; discValue: string; vat: 'v7' | 'exempt'; quoteLineId?: string; priceSource?: string; listPrice?: string; free?: boolean }
+export interface EditLine { productId: string; unitIdx: number; name: string; unitName: string; qty: string; unitPrice: string; discKind: 'amt' | 'pct'; discValue: string; vat: 'v7' | 'exempt'; quoteLineId?: string; priceSource?: string; listPrice?: string; free?: boolean;
+  /** ของแถม: price 0, no discount (the server forces it); not a discount nor below cost. */
+  giveaway?: boolean }
 export const blankLine = (productId = ''): EditLine => ({ productId, unitIdx: 0, name: '', unitName: '', qty: '1', unitPrice: '', discKind: 'amt', discValue: '', vat: 'v7' });
 
 export function lineNet(l: EditLine): string {
+  if (l.giveaway) return '0.00';
   const g = d(l.qty || 0).times(d(l.unitPrice || 0));
   const disc = !l.discValue ? d(0) : l.discKind === 'pct' ? g.times(d(l.discValue)).div(100) : d(l.discValue);
   return g.minus(disc.gt(g) ? g : disc).toFixed(2);
@@ -174,8 +177,8 @@ export function previewTotals(lines: EditLine[], mode: 'inc' | 'exc' | 'none', b
 
 export const lineReq = (l: EditLine) => ({
   ...(l.productId && !l.free ? { productId: l.productId, unitIdx: l.unitIdx } : { name: l.name, unitName: l.unitName || 'รายการ', vat: l.vat }),
-  qty: l.qty || '0', unitPrice: l.unitPrice || '0', ...(l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}),
-  ...(l.quoteLineId ? { quoteLineId: l.quoteLineId } : {}),
+  qty: l.qty || '0', unitPrice: l.giveaway ? '0' : l.unitPrice || '0', ...(!l.giveaway && l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}),
+  ...(l.quoteLineId ? { quoteLineId: l.quoteLineId } : {}), ...(l.giveaway ? { giveaway: true } : {}),
 });
 
 /** BR-05 source label shown under a line price (and on detail pages). */
@@ -199,7 +202,10 @@ export function useLineCheck(lines: EditLine[], vatMode: 'inc' | 'exc' | 'none',
   const { can } = useAuth();
   const body = {
     vatMode, billDiscount: billDisc && d(billDisc).gt(0) ? billDisc : '0', warehouseId: warehouseId || undefined,
-    lines: lines.map((l) => ({ productId: l.productId && !l.free ? l.productId : undefined, unitIdx: l.unitIdx, qty: l.qty && d(l.qty).gt(0) ? l.qty : '0', unitPrice: l.unitPrice || '0', ...(l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}) })),
+    lines: lines.map((l) => ({
+      productId: l.productId && !l.free ? l.productId : undefined, unitIdx: l.unitIdx, qty: l.qty && d(l.qty).gt(0) ? l.qty : '0', unitPrice: l.giveaway ? '0' : l.unitPrice || '0',
+      ...(!l.giveaway && l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}), ...(l.giveaway ? { giveaway: true } : {}),
+    })),
   };
   const key = useDebounced(JSON.stringify(body), 350);
   const q = useQuery({
@@ -220,7 +226,7 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, ch
   const set = (i: number, patch: Partial<EditLine>) => setLines((ls) => ls.map((l, k) => (k === i ? { ...l, ...patch } : l)));
   /** BR-05: fetch the price for the customer whenever product / unit / qty changes and the user did not type a price. */
   const fetchPrice = async (i: number, l: EditLine) => {
-    if (!l.productId) return;
+    if (!l.productId || l.giveaway) return;
     try {
       const r = await api('GET', '/api/sales/price', { query: { customerId: customerId || undefined, productId: l.productId, unitIdx: l.unitIdx, qty: l.qty || '1', vatMode, doc }, schema: SalesPrice, silent: true });
       set(i, { unitPrice: r.unitPrice, listPrice: r.unitPrice, priceSource: priceSourceText(r.source, r.ref) });
@@ -290,16 +296,18 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, ch
                   </td>
                   <td className="n" data-l="จำนวน"><input className={`qty${short ? ' bad' : ''}`} type="number" min="0" step="any" data-field={`lines.${i}.qty`} value={l.qty} onChange={(e) => set(i, { qty: e.target.value })} onBlur={() => { if (l.productId && !l.quoteLineId) void fetchPrice(i, l); }} aria-label={`จำนวนแถว ${i + 1}`} data-testid={`line-qty-${i}`} /></td>
                   <td className="n" data-l="ราคา/หน่วย">
+                    {l.giveaway ? <span data-testid={`line-giveaway-${i}`}>0 <Pill k="acc">ของแถม</Pill></span> : <>
                     <input className={`qty${below ? ' bad' : ''}`} type="number" min="0" step="0.01" data-field={`lines.${i}.unitPrice`} value={l.unitPrice} onChange={(e) => set(i, { unitPrice: e.target.value })} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} data-testid={`line-price-${i}`} aria-invalid={below || undefined} />
                     {l.priceSource && <div className="small muted" data-testid={`line-source-${i}`}>{l.priceSource}{lowered ? ` · แก้จาก ${fmt(l.listPrice!)}` : ''}</div>}
                     {lowered && <div className="small warn-text">ต่ำกว่าราคาตามระบบ · ต้องอนุมัติ</div>}
                     {below && <div className="small bad-text" data-testid={`line-below-${i}`}>ต่ำกว่าทุน{seeCost && chk?.unitCost ? ` (ทุน ${fmt(chk.unitCost)})` : ''}</div>}
+                    </>}
                   </td>
                   <td className="n" data-l="ส่วนลด">
-                    <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+                    {!l.giveaway && <span className="row" style={{ gap: 4, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
                       <input className="qty" type="number" min="0" step="any" value={l.discValue} placeholder="0" style={{ width: 62 }} onChange={(e) => set(i, { discValue: e.target.value })} aria-label="ส่วนลดรายการ" />
                       <select value={l.discKind} onChange={(e) => set(i, { discKind: e.target.value as 'amt' | 'pct' })} aria-label="หน่วยส่วนลด"><option value="amt">บาท</option><option value="pct">%</option></select>
-                    </span>
+                    </span>}
                   </td>
                   <td className="n" data-l="รวม">{fmt(lineNet(l))}</td>
                   {seeCost && (
@@ -317,6 +325,7 @@ export function LineEditor({ lines, setLines, customerId, vatMode, allowFree, ch
       </div>
       <div className="row">
         <button className="btn sm" onClick={() => setLines((ls) => [...ls, blankLine()])} data-testid="line-add">+ เพิ่มสินค้า</button>
+        <button className="btn sm" onClick={() => setLines((ls) => [...ls, { ...blankLine(), unitPrice: '0', giveaway: true, priceSource: 'ของแถม · ตัดสต็อก ไม่คิดเงิน' }])} title="ราคา 0 ตัดสต็อกตามปกติ ไม่นับเป็นส่วนลด" data-testid="line-add-giveaway">+ เพิ่มของแถม</button>
         {allowFree && <button className="btn sm" onClick={() => setLines((ls) => [...ls, { ...blankLine(), unitName: 'งาน', unitPrice: '', free: true, priceSource: 'พิมพ์ราคาเอง' }])} data-testid="line-add-free">+ รายการพิมพ์เอง (ไม่มีในระบบ)</button>}
       </div>
     </>

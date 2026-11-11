@@ -26,7 +26,8 @@ import { PayModal, type Payload } from './PayModal';
 import { LineCost, OverrideModal, QuickDisc, ReasonChips, reasonOk, usePosPreview, type Override } from './override';
 
 /** price: manual unit price ('' = the expected price: retail, promo or the customer's list price). */
-interface CartLine { pid: string; u: number; qty: string; dval: string; dmode: 'amt' | 'pct'; price: string }
+/** free: ของแถม at price 0 (not a discount, never below cost; the server forces the price and audits it). */
+interface CartLine { pid: string; u: number; qty: string; dval: string; dmode: 'amt' | 'pct'; price: string; free?: boolean }
 interface Approvals { belowCostApproval?: ApprovalInput; creditApproval?: ApprovalInput }
 type BelowLine = { productId: string; name: string; sell?: string; cost?: string };
 type CreditNeed = { limit?: string; balance?: string; after?: string; over?: boolean; overdue?: number };
@@ -114,7 +115,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
 
   const add = (p: Product) => {
     setCart((c) => {
-      const ex = c.find((l) => l.pid === p.id && l.u === 0);
+      const ex = c.find((l) => l.pid === p.id && l.u === 0 && !l.free);
       if (ex) return c.map((l) => (l === ex ? { ...l, qty: d(isNum(l.qty) ? l.qty : '0').plus(1).toString() } : l));
       return [...c, { pid: p.id, u: 0, qty: '1', dval: '', dmode: 'amt', price: '' }];
     });
@@ -137,12 +138,13 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const lineOf = (l: CartLine) => {
     const p = cat.byId.get(l.pid)!;
     const lp = linePrice(pricing, p, l.u, l.qty.trim());
+    if (l.free) return { p, price: '0', lp, manual: null, changed: false, discount: null, free: true, core: { qty: isNum(l.qty) ? l.qty : '0', unitPrice: '0', discount: null, vat: p.vat } };
     const manual = isNum(l.price) && !d(l.price).eq(d(lp.price)) ? d(l.price).toFixed(2) : null;
     const price = manual ?? lp.price;
     // a typed price equal to the retail price is not a change (the server accepts both)
     const changed = manual != null && !d(manual).eq(d(lp.retail));
     const discount = isNum(l.dval) && d(l.dval).gt(0) ? { kind: l.dmode, value: l.dval.trim() } : null;
-    return { p, price, lp, manual, changed, discount, core: { qty: isNum(l.qty) ? l.qty : '0', unitPrice: price, discount, vat: p.vat } };
+    return { p, price, lp, manual, changed, discount, free: false, core: { qty: isNum(l.qty) ? l.qty : '0', unitPrice: price, discount, vat: p.vat } };
   };
   const ready = cart.filter((l) => cat.byId.has(l.pid));
   const lines = ready.map(lineOf);
@@ -185,7 +187,8 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const revertOverCap = () => {
     const ok = lastOk.current;
     setCartRaw((c) => c.map((l) => {
-      const o = ok.cart.find((x) => x.pid === l.pid && x.u === l.u);
+      if (l.free) return l;
+      const o = ok.cart.find((x) => x.pid === l.pid && x.u === l.u && !x.free);
       return { ...l, dval: o?.dval ?? '', dmode: o?.dmode ?? l.dmode, price: o?.price ?? '' };
     }));
     setBillDiscRaw(ok.billDisc);
@@ -195,7 +198,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   // ---------- live preview: below-cost flags, margin for data.cost ----------
   const previewBody: PosPreviewReq | null = posWh && validQty ? {
     warehouseId: posWh.id, ...(cust ? { customerId: cust } : {}), billDiscount: totals.billDisc,
-    lines: lines.map((x, i) => ({ productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.discount ? { discount: x.discount } : {}), ...(x.lp.promo && !x.manual ? { promoId: x.lp.promo.id } : {}) })),
+    lines: lines.map((x, i) => ({ productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.free ? { free: true } : {}), ...(x.discount ? { discount: x.discount } : {}), ...(x.lp.promo && !x.manual && !x.free ? { promoId: x.lp.promo.id } : {}) })),
     ...(bcart.length ? { bundles: bcart.map((b) => ({ promoId: b.promoId, sets: b.sets })) } : {}),
   } : null;
   const preview = usePosPreview(previewBody);
@@ -207,7 +210,8 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
       idempotencyKey: idem.current, shiftId, warehouseId: posWh!.id, docKind: pl.docKind,
       ...(pl.customerId ?? cust ? { customerId: pl.customerId ?? cust! } : {}),
       lines: lines.map((x, i) => ({
-        productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.discount ? { discount: x.discount } : {}), ...(x.lp.promo && !x.manual ? { promoId: x.lp.promo.id } : {}),
+        productId: x.p.id, unitIdx: ready[i]!.u, qty: ready[i]!.qty.trim(), unitPrice: x.price, ...(x.free ? { free: true } : {}), ...(x.discount ? { discount: x.discount } : {}),
+        ...(x.lp.promo && !x.manual && !x.free ? { promoId: x.lp.promo.id } : {}),
       })),
       ...(bcart.length ? { bundles: bcart.map((b) => ({ promoId: b.promoId, sets: b.sets })) } : {}),
       billDiscount: totals.billDisc,
@@ -318,7 +322,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   };
   /** REQ-M07-08: park the bill (no stock cut) and start a new one. Manual prices are not kept on a held bill. */
   const hold = async () => {
-    const held: HeldCartIn = { lines: ready.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.qty, dval: l.dval, dmode: l.dmode })), bundles: bcart, billDiscount: billDisc, customerId: cust };
+    const held: HeldCartIn = { lines: ready.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.qty, dval: l.dval, dmode: l.dmode, ...(l.free ? { free: true } : {}) })), bundles: bcart, billDiscount: billDisc, customerId: cust };
     try {
       const h = await holdCart(shiftId, held, totals.total);
       cloudReleaseCoupon(coupon, 'held'); // a held bill keeps no coupon
@@ -332,7 +336,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const resume = (c: HeldCartIn) => {
     if (!empty && !window.confirm('บิลที่กำลังขายอยู่จะถูกแทนที่ ต้องการเรียกบิลพักกลับมา?')) return;
     resetBill();
-    setCartRaw(c.lines.filter((l) => cat.byId.has(l.productId)).map((l) => ({ pid: l.productId, u: l.unitIdx, qty: l.qty, dval: l.dval, dmode: l.dmode, price: '' })));
+    setCartRaw(c.lines.filter((l) => cat.byId.has(l.productId)).map((l) => ({ pid: l.productId, u: l.unitIdx, qty: l.qty, dval: l.dval, dmode: l.dmode, price: '', ...(l.free ? { free: true } : {}) })));
     setBcartRaw(c.bundles);
     setBillDiscRaw(c.billDiscount);
     setCustRaw(c.customerId);
@@ -385,7 +389,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
           const x = lines[i]!;
           const p = x.p;
           const net = totals.lines[i]?.net ?? '0';
-          const listGross = d(x.core.qty).times(d(x.lp.retail)).toDecimalPlaces(2);
+          const listGross = x.free ? d(0) : d(x.core.qty).times(d(x.lp.retail)).toDecimalPlaces(2);
           const disc = d(x.core.qty).times(d(x.price)).toDecimalPlaces(2).minus(d(net));
           const struck = listGross.gt(d(net));
           const over = p.kind === 'stock' && (baseNeed.get(p.id) ?? d(0)).gt(have(p.id));
@@ -393,13 +397,13 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
           return (
             <div className="cline" key={i} data-testid={`cline-${i}`}>
               <div style={{ minWidth: 0 }}>
-                <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}><span className="thumb"><PosImg p={p} version={pricing?.images[p.id]} /></span><span className="nm">{p.name}</span></div>
+                <div className="row" style={{ flexWrap: 'nowrap', gap: 8 }}><span className="thumb"><PosImg p={p} version={pricing?.images[p.id]} /></span><span className="nm">{p.name}</span>{x.free && <Pill k="acc">ของแถม</Pill>}</div>
                 <div className="ctl">
                   <select value={l.u} aria-label="หน่วย" onChange={(e) => upd({ u: Number(e.target.value), price: '' })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>
                   <button className="qbtn" aria-label="ลด" onClick={() => upd({ qty: d(isNum(l.qty) ? l.qty : '1').minus(1).lte(0) ? '1' : d(l.qty).minus(1).toString() })}>−</button>
                   <input className={`qty${over || !isNum(l.qty) ? ' bad' : ''}`} type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.qty} aria-label="จำนวน" onChange={(e) => upd({ qty: e.target.value })} onBlur={commit} data-testid={`qty-${i}`} />
                   <button className="qbtn" aria-label="เพิ่ม" onClick={() => { upd({ qty: d(isNum(l.qty) ? l.qty : '0').plus(1).toString() }); commit(); }}>+</button>
-                  <span className="row small" style={{ gap: 4, flexWrap: 'nowrap' }}>@
+                  {!x.free && <><span className="row small" style={{ gap: 4, flexWrap: 'nowrap' }}>@
                     <input className={`qty pos-price${x.changed ? ' changed' : ''}`} type="text" inputMode="decimal" data-field={`lines.${i}.unitPrice`} value={l.price} placeholder={fmt(x.lp.price)}
                       aria-label={`ราคาต่อหน่วย ${p.name}`} title={canPrice ? 'แก้ราคาขาย' : 'แก้ราคาขาย (ต้องให้ผู้จัดการอนุมัติ)'}
                       onChange={(e) => upd({ price: e.target.value })} onBlur={commit} onKeyDown={onEnter} data-testid={`price-${i}`} />
@@ -414,7 +418,11 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
                   <QuickDisc testId={`lqd-${i}`} active={!!x.discount}
                     onPct={(n) => { upd({ dval: String(n), dmode: 'pct' }); commit(); }}
                     onAmount={() => { upd({ dmode: 'amt' }); discRefs.current[i]?.focus(); }}
-                    onClear={() => { upd({ dval: '' }); commit(); }} />
+                    onClear={() => { upd({ dval: '' }); commit(); }} /></>}
+                  {p.kind === 'stock' && (
+                    <button className={`btn sm${x.free ? ' pri' : ''}`} aria-pressed={x.free} onClick={() => { upd({ free: !l.free, price: '', dval: '' }); commit(); }} data-testid={`free-${i}`}
+                      title="ของแถม: ราคา 0 ตัดสต็อกตามปกติ ไม่นับเป็นส่วนลด">{x.free ? 'ยกเลิกของแถม' : 'ของแถม'}</button>
+                  )}
                 </div>
                 <LineCost row={pv?.lines[i]} testId={`lcost-${i}`} />
                 {over && <div className="small" style={{ color: 'var(--bad)' }}>เกินคงเหลือ {fq(have(p.id))} {p.units[0]?.name} (ห้ามขายติดลบ)</div>}
