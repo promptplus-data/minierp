@@ -54,7 +54,7 @@ describe('AP bill from goods receipt (REQ-M18-01, REQ-M05-08, BR-19)', () => {
 
   it("BR-19 'alloc' setting (owner only) spreads the discount into lot cost; AP is the same", async () => {
     expect((await suda.patch('/api/purchasing/settings', { billDiscountMode: 'alloc' })).status).toBe(403);
-    expect((await charoen.patch('/api/purchasing/settings', { billDiscountMode: 'alloc' })).body).toEqual({ billDiscountMode: 'alloc' });
+    expect((await charoen.patch('/api/purchasing/settings', { billDiscountMode: 'alloc' })).body).toEqual({ billDiscountMode: 'alloc', freeGoodsCosting: 'zero' });
     const r = await receive(chai, 'IV-1002', 'v1', [{ p: 'p4', qty: '100', cost: '100' }], '300');
     expect(r.status).toBe(201);
     expect((await lotsOf(env.pool, P('p4'), W('WH2'))).at(-1)).toMatchObject({ unit_cost: '97.0000' });

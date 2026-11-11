@@ -11,8 +11,14 @@ const Ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 const QBool = z.union([z.boolean(), z.enum(['true', 'false', '1', '0'])]).transform((v) => v === true || v === 'true' || v === '1');
 
 // ---------- settings (BR-19) ----------
-export const PurchasingSettings = z.object({ billDiscountMode: z.enum(['sep', 'alloc']) });
+export const FreeGoodsCosting = z.enum(['zero', 'allocate']);
+export const PurchasingSettings = z.object({
+  billDiscountMode: z.enum(['sep', 'alloc']),
+  /** ของแถม on a goods receipt: 'zero' cost 0 (default) or 'allocate' the paid money by market value. Owner only. */
+  freeGoodsCosting: FreeGoodsCosting.default('zero'),
+});
 export type PurchasingSettings = z.infer<typeof PurchasingSettings>;
+export const PurchasingSettingsPatch = z.object({ billDiscountMode: z.enum(['sep', 'alloc']).optional(), freeGoodsCosting: FreeGoodsCosting.optional() });
 
 // ---------- GR overdue alert (BR-10) and dashboard ----------
 export const GrAlert = z.object({
@@ -47,12 +53,18 @@ export type GrSummary = z.infer<typeof GrSummary>;
 export const GrLineView = z.object({
   id: z.string(), lineNo: z.number().int(), productId: z.string(), name: z.string(), warehouseId: z.string(),
   unitIdx: z.number().int(), unitName: z.string(), unitFactor: Dec, qty: Dec, returnedQty: Dec, unitPrice: Dec.nullable(), amount: Dec.nullable(),
-  /** ของแถม: cost 0, not in the AP bill amount. */
+  /** ของแถม: invoice price 0, not in the AP bill amount. */
   free: z.boolean().default(false),
+  /** 'allocate' receipts: cost per line unit after spreading the paid money by market value (null without data.cost or in zero mode). */
+  allocUnitCost: Dec.nullable().default(null),
+  /** 'allocate' receipts, free lines: market price per line unit used for the spread (null without data.cost). */
+  marketUnitPrice: Dec.nullable().default(null),
 });
 /** Documents made from this receipt: vendor returns (`returns`). The AP bill is `apBillNo` on the summary. */
 export const GrDetail = GrSummary.extend({
   lines: z.array(GrLineView), billDiscount: Dec.nullable(),
+  /** How the free lines were costed ('zero' for receipts saved before the choice existed). */
+  freeGoodsCosting: FreeGoodsCosting.default('zero'),
   returns: z.array(z.object({ no: z.string(), date: Ymd, total: Dec })).default([]),
   voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable().default(null),
 });

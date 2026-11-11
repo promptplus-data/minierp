@@ -104,7 +104,11 @@ export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on on
     unitCost: DecNN, poLineId: z.string().optional(),
     /** ของแถม: the server records unit cost 0 whatever is sent; links only to a free PO line; never an over-receipt. */
     free: z.boolean().optional(),
+    /** Free line, 'allocate' costing: market price per line unit (default the product's retail price for that unit). */
+    marketUnitPrice: DecNN.optional(),
   })).min(1), billDiscount: DecNN.default('0'),
+  /** How to cost the free lines; default the shop setting (purchasing settings freeGoodsCosting). */
+  freeGoodsCosting: z.enum(['zero', 'allocate']).optional(),
   /** หมายเหตุ on the goods receipt; copied to the AP bill. */
   note: z.string().max(500).optional(),
   /** Receive against this purchase order (ใบสั่งซื้อ); lines carry poLineId. */

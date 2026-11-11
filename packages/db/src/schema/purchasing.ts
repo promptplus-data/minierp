@@ -9,6 +9,7 @@ import { createdAt, id, money, qty, tenantId } from './columns';
 export const purchasingSettings = pgTable('purchasing_settings', {
   tenantId: uuid('tenant_id').primaryKey(),
   billDiscountMode: text('bill_discount_mode').notNull().default('sep'),
+  freeGoodsCosting: text('free_goods_costing').notNull().default('zero'), // 0680: 'zero' | 'allocate'
   updatedBy: uuid('updated_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -22,6 +23,8 @@ export const grLines = pgTable('gr_lines', {
   lotUnitCost: qty('lot_unit_cost').notNull(), lotId: bigint('lot_id', { mode: 'number' }).notNull(),
   returnedBaseQty: qty('returned_base_qty').notNull().default('0'),
   poId: uuid('po_id'), poLineId: uuid('po_line_id'), // 0660
+  free: boolean('free').notNull().default(false), // 0670
+  allocUnitCost: qty('alloc_unit_cost'), marketUnitPrice: qty('market_unit_price'), // 0680
 });
 
 /** 0660: purchase orders (ใบสั่งซื้อ). Received qty = sum of active gr_lines.base_qty with this po_line_id. */

@@ -1,14 +1,14 @@
 /** Inventory (M05, M06): balances, lots, manual receipt, transfer, issue, adjustment request / approval. */
 import type { Tx } from '@erp/db';
 import type { StockDoc } from '@erp/contracts';
-import { allocate, d, fmtTHB, money, movingAverage, qty4, sum , searchTokens } from '@erp/core';
+import { allocate, allocateFreeGoods, d, fmtTHB, money, movingAverage, qty4, sum , searchTokens, type FreeGoodsCosting } from '@erp/core';
 import { writeAudit } from '../lib/audit';
 import { can, requireAny, requirePerm, type Ctx, type Deps } from '../lib/context';
 import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { addLot, applyOut, currentAvgCost, lockLots, planTakes, recordIn, type LockedLot } from '../lib/stock';
-import { billDiscountMode, freePoLineIds, onGoodsReceipt, type GrHookLine } from '../modules/purchasing/grhook';
+import { billDiscountMode, freeGoodsCosting, freePoLineIds, onGoodsReceipt, type GrHookLine } from '../modules/purchasing/grhook';
 
 /** F9: unit costs in stock documents are shown only with data.cost. */
 export const maskStockDoc = (ctx: Ctx, doc: StockDoc): StockDoc =>
@@ -140,7 +140,8 @@ export async function lots(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string
 
 export async function receipt(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string; poLineId?: string; free?: boolean })[]; billDiscount: string; note?: string; poId?: string; overReceiveNote?: string },
+  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string; poLineId?: string; free?: boolean; marketUnitPrice?: string })[]; billDiscount: string; note?: string; poId?: string; overReceiveNote?: string;
+    freeGoodsCosting?: FreeGoodsCosting },
 ): Promise<StockDoc> {
   requirePerm(ctx, 'inv.receive');
   if (!isUuid(req.vendorId) || !(await tx.query(`select 1 from vendors where id = $1`, [req.vendorId])).rowCount) throw E.validation('Unknown vendor');
@@ -157,13 +158,29 @@ export async function receipt(
   // BR-19: the bill discount reduces lot cost only when the shop chose 'alloc'; by default it is a separate purchase discount.
   const mode = await billDiscountMode(tx);
   const disc = mode === 'alloc' ? allocate(req.billDiscount, amounts) : amounts.map(() => '0');
+  // ของแถม costing: 'zero' keeps free lots at 0; 'allocate' spreads what is paid (after the bill discount when BR-19 is
+  // 'alloc') over every line by market value: paid lines qty × invoice cost, free lines qty × market unit price
+  // (default the product's retail price for that unit). The AP bill stays what is owed.
+  if (req.lines.some((l) => l.marketUnitPrice != null && d(l.marketUnitPrice).lt(0))) throw E.validation('Market price must not be negative');
+  const costing: FreeGoodsCosting = req.freeGoodsCosting ?? (await freeGoodsCosting(tx));
+  const allocating = costing === 'allocate' && free.some(Boolean);
+  const market = lines.map((l, i) => {
+    if (!free[i]) return null;
+    const u = unitOf(l.p, req.lines[i]!.unitIdx);
+    return qty4(req.lines[i]!.marketUnitPrice ?? (u.price != null ? d(u.price) : d(l.p.price).times(d(u.factor))));
+  });
+  const spread = allocating
+    ? allocateFreeGoods(lines.map((l, i) => ({
+      paid: d(amounts[i]!).minus(disc[i]!), market: free[i] ? d(l.qty).times(d(market[i]!)) : amounts[i]!, baseQty: l.baseQty,
+    })))
+    : null;
   const no = await nextDocNo(tx, ctx.tenantId, 'GR', deps.today());
   const docId = await newId(tx);
   const out: StockDoc['lines'] = [];
   const grLines: GrHookLine[] = [];
   for (const [i, l] of lines.entries()) {
     const net = d(amounts[i]!).minus(disc[i]!);
-    const unitCost = qty4(net.div(d(l.baseQty)));
+    const unitCost = spread ? spread[i]!.unitCost : qty4(net.div(d(l.baseQty)));
     // Moving-average product cost (shown as product.cost), from the CURRENT cost and stock before this lot, so
     // several lines of one product in a receipt chain correctly.
     const prev = await tx.query<{ q: string | null; cost: string }>(
@@ -173,16 +190,17 @@ export async function receipt(
     await recordIn(tx, ctx, wh.id, l.p.id, [{ lotId, qty: l.baseQty, unitCost }], { docType: 'GR', docNo: no, docId, note: `รับสินค้า · ${req.vendorInvoiceNo}` });
     out.push({ productId: l.p.id, qty: l.baseQty, unitCost });
     const rl = req.lines[i]!;
-    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: free[i] ? '0' : rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId, poLineId: rl.poLineId ?? null, free: free[i] });
+    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: free[i] ? '0' : rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId, poLineId: rl.poLineId ?? null, free: free[i],
+      allocUnitCost: spread ? qty4(d(spread[i]!.amount).div(d(rl.qty))) : null, marketUnitPrice: allocating ? market[i] : null });
   }
   const total = money(sum(amounts).minus(d(req.billDiscount)));
   const doc = await insertStockDocWithId(tx, ctx, docId, {
     no, type: 'GR', date: deps.today(), warehouseId: wh.id, vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, deliveryNo: req.deliveryNo, lines: out, total,
     reason: req.note?.trim() || undefined, // GR note (หมายเหตุ) lives in stock_docs.reason
   });
-  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '', poId: req.poId ?? null, overReceiveNote: req.overReceiveNote }); // REQ-M18-01; PO receipt checks in the hook
+  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '', freeGoodsCosting: allocating ? 'allocate' : 'zero', poId: req.poId ?? null, overReceiveNote: req.overReceiveNote }); // REQ-M18-01; PO receipt checks in the hook
   await deps.hooks.beforeCommit?.('receipt', tx);
-  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ${free.some(Boolean) ? ` (ของแถม ${free.filter(Boolean).length})` : ''} · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
+  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ${free.some(Boolean) ? ` (ของแถม ${free.filter(Boolean).length}${allocating ? ' · ต้นทุนเฉลี่ยตามมูลค่าตลาด' : ''})` : ''} · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
   return doc;
 }
 

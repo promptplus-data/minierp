@@ -7,7 +7,7 @@ import type { Tx } from '@erp/db';
 import type { ApBill, ApBillDetail, ApPayment, GrDetail, GrSummary, VendorReturn } from '@erp/contracts';
 import {
   addDays, agingSummary, checkAllocations, d, apDaysOverdue, fmtTHB, money, qty4, sum, termLabel, vendorReturnAmounts, whtAmount,
-  type BillDiscountMode, type PaymentTerm, searchTokens,
+  type BillDiscountMode, type FreeGoodsCosting, type PaymentTerm, searchTokens,
 } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requirePerm, type Ctx, type Deps } from '../../lib/context';
@@ -15,27 +15,36 @@ import { nextDocNo } from '../../lib/docno';
 import { E, isUuid } from '../../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../../lib/paging';
 import { applyOut, lockLots, planTakes } from '../../lib/stock';
-import { billDiscountMode } from './grhook';
+import { billDiscountMode, freeGoodsCosting } from './grhook';
 
 const seeCost = (ctx: Ctx) => can(ctx, 'data.cost') === 1;
 const words = (q?: string) => searchTokens(q);
 
 // ---------- settings ----------
 export async function getSettings(tx: Tx) {
-  return { billDiscountMode: await billDiscountMode(tx) };
+  return { billDiscountMode: await billDiscountMode(tx), freeGoodsCosting: await freeGoodsCosting(tx) };
 }
 
-export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode: BillDiscountMode }) {
+const FGC_TH: Record<FreeGoodsCosting, string> = { zero: 'ต้นทุน 0', allocate: 'เฉลี่ยต้นทุนตามมูลค่าตลาด' };
+
+export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode?: BillDiscountMode; freeGoodsCosting?: FreeGoodsCosting }) {
   requirePerm(ctx, 'sys.settings');
-  const before = await billDiscountMode(tx);
+  // How free goods are costed changes every later lot cost: the owner decides.
+  if (s.freeGoodsCosting && ctx.role !== 'owner') throw E.forbidden('เฉพาะเจ้าของร้านเปลี่ยนวิธีคิดต้นทุนของแถมได้');
+  const before = await getSettings(tx);
+  const next = { billDiscountMode: s.billDiscountMode ?? before.billDiscountMode, freeGoodsCosting: s.freeGoodsCosting ?? before.freeGoodsCosting };
   await tx.query(
-    `insert into purchasing_settings (tenant_id, bill_discount_mode, updated_by, updated_at) values ($1,$2,$3,now())
-     on conflict (tenant_id) do update set bill_discount_mode = excluded.bill_discount_mode, updated_by = excluded.updated_by, updated_at = now()`,
-    [ctx.tenantId, s.billDiscountMode, ctx.userId],
+    `insert into purchasing_settings (tenant_id, bill_discount_mode, free_goods_costing, updated_by, updated_at) values ($1,$2,$3,$4,now())
+     on conflict (tenant_id) do update set bill_discount_mode = excluded.bill_discount_mode, free_goods_costing = excluded.free_goods_costing,
+       updated_by = excluded.updated_by, updated_at = now()`,
+    [ctx.tenantId, next.billDiscountMode, next.freeGoodsCosting, ctx.userId],
   );
   const th = (m: BillDiscountMode) => (m === 'sep' ? 'แยกเป็นส่วนลดรับ' : 'กระจายเข้าทุนสินค้า');
-  await writeAudit(tx, ctx, [{ action: 'update', object: 'purchasing-settings', ref: 'ส่วนลดท้ายบิลตอนซื้อ', detail: `${th(before)} → ${th(s.billDiscountMode)}` }]);
-  return { billDiscountMode: s.billDiscountMode };
+  const audit = [];
+  if (next.billDiscountMode !== before.billDiscountMode) audit.push({ action: 'update', object: 'purchasing-settings', ref: 'ส่วนลดท้ายบิลตอนซื้อ', detail: `${th(before.billDiscountMode)} → ${th(next.billDiscountMode)}` });
+  if (next.freeGoodsCosting !== before.freeGoodsCosting) audit.push({ action: 'update', object: 'purchasing-settings', ref: 'วิธีคิดต้นทุนของแถม', detail: `${FGC_TH[before.freeGoodsCosting]} → ${FGC_TH[next.freeGoodsCosting]}` });
+  if (audit.length) await writeAudit(tx, ctx, audit);
+  return next;
 }
 
 // ---------- confirmed goods receipts ----------
@@ -87,8 +96,10 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
   const r = await tx.query<GrRow>(`${GR_SELECT} where s.type = 'GR' and s.no = $1`, [no]);
   const g = r.rows[0];
   if (!g) throw E.notFound(`ไม่พบใบรับสินค้า ${no}`);
-  const lines = await tx.query<{ id: string; line_no: number; product_id: string; name: string; warehouse_id: string; unit_idx: number; unit_name: string; unit_factor: string; qty: string; returned_base_qty: string; unit_price: string; amount: string; free: boolean }>(
-    `select g.id, g.line_no, g.product_id, p.name, g.warehouse_id, g.unit_idx, g.unit_name, g.unit_factor::text, g.qty::text, g.returned_base_qty::text, g.unit_price::text, g.amount::text, g.free
+  const lines = await tx.query<{ id: string; line_no: number; product_id: string; name: string; warehouse_id: string; unit_idx: number; unit_name: string; unit_factor: string; qty: string; returned_base_qty: string; unit_price: string; amount: string; free: boolean;
+    alloc_unit_cost: string | null; market_unit_price: string | null }>(
+    `select g.id, g.line_no, g.product_id, p.name, g.warehouse_id, g.unit_idx, g.unit_name, g.unit_factor::text, g.qty::text, g.returned_base_qty::text, g.unit_price::text, g.amount::text, g.free,
+            g.alloc_unit_cost::text, g.market_unit_price::text
        from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = $1 order by g.line_no`, [g.id]);
   const cost = seeCost(ctx);
   const rets = await tx.query<{ no: string; date: string; total: string }>(
@@ -102,7 +113,9 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
       id: l.id, lineNo: l.line_no, productId: l.product_id, name: l.name, warehouseId: l.warehouse_id, unitIdx: l.unit_idx, unitName: l.unit_name,
       unitFactor: qty4(l.unit_factor), qty: qty4(l.qty), returnedQty: qty4(d(l.returned_base_qty).div(d(l.unit_factor))),
       unitPrice: cost ? qty4(l.unit_price) : null, amount: cost ? money(l.amount) : null, free: l.free,
+      allocUnitCost: cost && l.alloc_unit_cost != null ? qty4(l.alloc_unit_cost) : null, marketUnitPrice: cost && l.market_unit_price != null ? qty4(l.market_unit_price) : null,
     })),
+    freeGoodsCosting: (await tx.query<{ m: FreeGoodsCosting | null }>(`select free_goods_costing m from stock_docs where id = $1`, [g.id])).rows[0]?.m ?? 'zero',
   };
 }
 

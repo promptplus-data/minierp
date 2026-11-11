@@ -4,7 +4,7 @@
  * Kept free of imports from services/inventory so the two files never import each other.
  */
 import type { Tx } from '@erp/db';
-import { d, dueDate, money, poOverQty, poStatus, purchaseBill, qty4, type BillDiscountMode, type PaymentTerm, type PoStatus } from '@erp/core';
+import { d, dueDate, money, poOverQty, poStatus, purchaseBill, qty4, type BillDiscountMode, type FreeGoodsCosting, type PaymentTerm, type PoStatus } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import type { Ctx } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -16,13 +16,23 @@ export async function billDiscountMode(tx: Tx): Promise<BillDiscountMode> {
   return r.rows[0]?.bill_discount_mode ?? 'sep';
 }
 
+/** How a receipt costs its free lines unless it says otherwise: 'zero' (default) or 'allocate' (relative market value). */
+export async function freeGoodsCosting(tx: Tx): Promise<FreeGoodsCosting> {
+  const r = await tx.query<{ free_goods_costing: FreeGoodsCosting }>(`select free_goods_costing from purchasing_settings`);
+  return r.rows[0]?.free_goods_costing ?? 'zero';
+}
+
 export interface GrHookLine {
   productId: string; warehouseId: string; unitIdx: number; unitName: string; unitFactor: string;
   qty: string; baseQty: string; unitPrice: string; amount: string; lotUnitCost: string; lotId: string;
   /** Purchase order line this receipt line fills (requires GrHookInput.poId). */
   poLineId?: string | null;
-  /** ของแถม: unitPrice / amount / lotUnitCost are 0. */
+  /** ของแถม: unitPrice / amount are 0; lotUnitCost is 0 unless the receipt allocates. */
   free?: boolean;
+  /** 'allocate' receipts: cost per receipt unit after the spread (lotUnitCost × unitFactor before rounding). */
+  allocUnitCost?: string | null;
+  /** 'allocate' receipts, free lines: market price per receipt unit used for the spread. */
+  marketUnitPrice?: string | null;
 }
 
 export interface GrHookInput {
@@ -34,6 +44,8 @@ export interface GrHookInput {
   poId?: string | null;
   /** Why more than the PO still waits for is accepted; required when a linked line goes over. */
   overReceiveNote?: string;
+  /** Costing mode the receipt was saved with ('allocate' only when it had a free line). */
+  freeGoodsCosting?: FreeGoodsCosting;
 }
 
 /** Returns the AP bill number. */
@@ -43,12 +55,13 @@ export async function onGoodsReceipt(tx: Tx, ctx: Ctx, gr: GrHookInput): Promise
   for (const [i, l] of gr.lines.entries()) {
     await tx.query(
       `insert into gr_lines (tenant_id, gr_doc_id, gr_no, line_no, product_id, warehouse_id, unit_idx, unit_name, unit_factor, qty, base_qty, unit_price, amount, lot_unit_cost, lot_id,
-         po_id, po_line_id, free)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+         po_id, po_line_id, free, alloc_unit_cost, market_unit_price)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [ctx.tenantId, gr.docId, gr.no, i + 1, l.productId, l.warehouseId, l.unitIdx, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.amount, l.lotUnitCost, l.lotId,
-        l.poLineId ? poId : null, l.poLineId ?? null, l.free === true],
+        l.poLineId ? poId : null, l.poLineId ?? null, l.free === true, l.allocUnitCost ?? null, l.marketUnitPrice ?? null],
     );
   }
+  await tx.query(`update stock_docs set free_goods_costing = $2 where id = $1`, [gr.docId, gr.freeGoodsCosting ?? 'zero']);
   if (poId) await refreshPoStatus(tx, poId);
   if (check?.over.length) {
     const note = gr.overReceiveNote!.trim();

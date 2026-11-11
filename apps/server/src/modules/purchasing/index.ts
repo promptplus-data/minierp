@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import {
   ApBillUpdate, ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
-  GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettings, StockCountEntryReq,
+  GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettingsPatch, StockCountEntryReq,
   StockCountOpenReq, StockCountQuery, StockCountRecountReq, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny } from '../../lib/context';
@@ -26,7 +26,7 @@ const params = (req: { params: unknown }) => req.params as P;
 export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   // ---------- settings, dashboard, GR alert ----------
   app.get('/api/purchasing/settings', authed(async (tx) => ap.getSettings(tx)));
-  app.patch('/api/purchasing/settings', authed(async (tx, ctx, req) => ap.updateSettings(tx, ctx, PurchasingSettings.parse(req.body))));
+  app.patch('/api/purchasing/settings', authed(async (tx, ctx, req) => ap.updateSettings(tx, ctx, PurchasingSettingsPatch.parse(req.body))));
   app.get('/api/purchasing/dashboard', authed(async (tx, ctx) => sx.dashboard(tx, deps, ctx)));
   // BR-10 / REQ-M05-09: computed on every read (home banner, GR menu), so no background timer is needed.
   app.get('/api/purchasing/gr-alerts', authed(async (tx) => sx.grAlerts(tx, deps)));
