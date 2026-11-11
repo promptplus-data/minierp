@@ -136,14 +136,14 @@ describe('receive against a PO', () => {
     po = (await chai.get('/api/purchase-orders/PO2610-0001')).body;
     expect(po.status).toBe('partial');
     expect(po.lines[0]).toMatchObject({ receivedQty: '4', remainingQty: '6' });
-    expect(po.receipts).toEqual([{ no: r.body.no, date: expect.any(String), status: 'active' }]);
+    expect(po.receipts).toEqual([{ no: r.body.no, date: expect.any(String), status: 'active', overReceiveNote: null }]);
     expect((await chai.get(`/api/purchasing/receipts/${r.body.no}`)).body.poNos).toEqual(['PO2610-0001']);
   });
 
-  it('refuses more than ordered, another vendor and lines of another PO', async () => {
+  it('asks for a note before receiving more than ordered; refuses another vendor and lines of another PO', async () => {
     const over = await receive(chai, 'PO-IV-X', po, [{ p: 'p4', qty: '7', poLineId: po.lines[0].id }]);
-    expect(over.status).toBe(400);
-    expect(over.body.details.reason).toBe('PO_OVER_RECEIVE');
+    expect(over.status).toBe(409);
+    expect(over.body.details).toMatchObject({ reason: 'PO_OVER_RECEIVE', poNo: 'PO2610-0001', lines: [{ poLineId: po.lines[0].id, ordered: '10', received: '4', receiving: '7', excess: '1' }] });
     expect((await receive(chai, 'PO-IV-X', po, [{ p: 'p4', qty: '1', poLineId: po.lines[0].id }], 'v2')).status).toBe(400);
     const other = (await chai.get('/api/purchase-orders/PO2610-0002')).body;
     expect((await receive(chai, 'PO-IV-X', po, [{ p: 'p7', qty: '1', poLineId: other.lines[0].id }])).status).toBe(400);

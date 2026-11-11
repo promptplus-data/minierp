@@ -8,7 +8,7 @@ import { nextDocNo } from '../lib/docno';
 import { E, isUuid } from '../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { addLot, applyOut, currentAvgCost, lockLots, planTakes, recordIn, type LockedLot } from '../lib/stock';
-import { billDiscountMode, onGoodsReceipt, type GrHookLine } from '../modules/purchasing/grhook';
+import { billDiscountMode, freePoLineIds, onGoodsReceipt, type GrHookLine } from '../modules/purchasing/grhook';
 
 /** F9: unit costs in stock documents are shown only with data.cost. */
 export const maskStockDoc = (ctx: Ctx, doc: StockDoc): StockDoc =>
@@ -140,7 +140,7 @@ export async function lots(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: string
 
 export async function receipt(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string; poLineId?: string })[]; billDiscount: string; note?: string; poId?: string },
+  req: { vendorId: string; vendorInvoiceNo: string; deliveryNo: string; warehouseId: string; lines: (LineIn & { unitCost: string; poLineId?: string; free?: boolean })[]; billDiscount: string; note?: string; poId?: string; overReceiveNote?: string },
 ): Promise<StockDoc> {
   requirePerm(ctx, 'inv.receive');
   if (!isUuid(req.vendorId) || !(await tx.query(`select 1 from vendors where id = $1`, [req.vendorId])).rowCount) throw E.validation('Unknown vendor');
@@ -149,7 +149,10 @@ export async function receipt(
   if (dup.rows[0]) throw E.conflict(`Vendor invoice ${req.vendorInvoiceNo} was already received as ${dup.rows[0].no}`);
   if (req.lines.some((l) => d(l.unitCost).lt(0))) throw E.validation('Unit cost must not be negative');
   const lines = await baseLines(tx, req.lines);
-  const amounts = req.lines.map((l) => money(d(l.qty).times(d(l.unitCost))));
+  // ของแถม: a line flagged free, or linked to a free PO line, costs 0 whatever the client sent (FIFO lot at 0, not in the AP bill).
+  const freePo = await freePoLineIds(tx, req.lines.flatMap((l) => (l.poLineId ? [l.poLineId] : [])));
+  const free = req.lines.map((l) => l.free === true || (l.poLineId != null && freePo.has(l.poLineId)));
+  const amounts = req.lines.map((l, i) => (free[i] ? '0.00' : money(d(l.qty).times(d(l.unitCost)))));
   if (d(req.billDiscount).lt(0) || d(req.billDiscount).gt(sum(amounts))) throw E.validation('Bill discount must be between 0 and the receipt total');
   // BR-19: the bill discount reduces lot cost only when the shop chose 'alloc'; by default it is a separate purchase discount.
   const mode = await billDiscountMode(tx);
@@ -170,16 +173,16 @@ export async function receipt(
     await recordIn(tx, ctx, wh.id, l.p.id, [{ lotId, qty: l.baseQty, unitCost }], { docType: 'GR', docNo: no, docId, note: `รับสินค้า · ${req.vendorInvoiceNo}` });
     out.push({ productId: l.p.id, qty: l.baseQty, unitCost });
     const rl = req.lines[i]!;
-    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId, poLineId: rl.poLineId ?? null });
+    grLines.push({ productId: l.p.id, warehouseId: wh.id, unitIdx: rl.unitIdx, unitName: unitOf(l.p, rl.unitIdx).name, unitFactor: l.factor, qty: rl.qty, baseQty: l.baseQty, unitPrice: free[i] ? '0' : rl.unitCost, amount: amounts[i]!, lotUnitCost: unitCost, lotId, poLineId: rl.poLineId ?? null, free: free[i] });
   }
   const total = money(sum(amounts).minus(d(req.billDiscount)));
   const doc = await insertStockDocWithId(tx, ctx, docId, {
     no, type: 'GR', date: deps.today(), warehouseId: wh.id, vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, deliveryNo: req.deliveryNo, lines: out, total,
     reason: req.note?.trim() || undefined, // GR note (หมายเหตุ) lives in stock_docs.reason
   });
-  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '', poId: req.poId ?? null }); // REQ-M18-01; PO receipt checks in the hook
+  const apNo = await onGoodsReceipt(tx, ctx, { docId, no, date: deps.today(), vendorId: req.vendorId, vendorInvoiceNo: req.vendorInvoiceNo, billDiscount: req.billDiscount, mode, lines: grLines, note: req.note?.trim() ?? '', poId: req.poId ?? null, overReceiveNote: req.overReceiveNote }); // REQ-M18-01; PO receipt checks in the hook
   await deps.hooks.beforeCommit?.('receipt', tx);
-  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
+  await writeAudit(tx, ctx, [{ action: 'create', object: 'GR', ref: no, detail: `${wh.name} · ใบกำกับ ${req.vendorInvoiceNo} · ใบส่งของ ${req.deliveryNo} · ${out.length} รายการ${free.some(Boolean) ? ` (ของแถม ${free.filter(Boolean).length})` : ''} · ฿${fmtTHB(total)} · ตั้งเจ้าหนี้ ${apNo}` }]);
   return doc;
 }
 

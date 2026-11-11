@@ -42,24 +42,24 @@ export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode: Bi
 interface GrRow {
   id: string; no: string; date: string; vendor_id: string | null; vendor_name: string | null; vendor_invoice_no: string | null; delivery_no: string | null;
   warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; qty_units: { unit: string; qty: string }[] | null; line_count: number; created_by: string; returnable: boolean; created_at: Date; discount: string | null; note: string | null;
-  po_nos: string[] | null; void_at: Date | null; void_reason: string | null; void_by_name: string | null;
+  po_nos: string[] | null; void_at: Date | null; void_reason: string | null; void_by_name: string | null; over_receive_note: string | null;
 }
 const GR_SELECT = `
   select s.id, s.no, to_char(s.date,'YYYY-MM-DD') date, s.vendor_id, v.name vendor_name, s.vendor_invoice_no, s.delivery_no, s.warehouse_id, s.total::text,
          b.no ap_no, b.discount::text discount, u.name created_by, s.created_at, s.reason note,
-         (select string_agg(p.name || ' × ' || trim_scale(g.qty)::text || ' ' || g.unit_name, ', ' order by g.line_no) from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = s.id) preview,
+         (select string_agg(p.name || ' × ' || trim_scale(g.qty)::text || ' ' || g.unit_name || case when g.free then ' (ของแถม)' else '' end, ', ' order by g.line_no) from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = s.id) preview,
          (select json_agg(json_build_object('unit', u.unit_name, 'qty', trim_scale(u.q)::text) order by u.first)
             from (select g.unit_name, sum(g.qty) q, min(g.line_no) first from gr_lines g where g.gr_doc_id = s.id group by g.unit_name) u) qty_units,
          (select count(*)::int from gr_lines g where g.gr_doc_id = s.id) line_count,
          s.void_at is null and exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty) returnable,
          (select array_agg(distinct po.no) from gr_lines g join purchase_orders po on po.id = g.po_id where g.gr_doc_id = s.id) po_nos,
-         s.void_at, s.void_reason, vu.name void_by_name
+         s.void_at, s.void_reason, vu.name void_by_name, s.over_receive_note
     from stock_docs s left join vendors v on v.id = s.vendor_id left join ap_bills b on b.gr_doc_id = s.id join users u on u.id = s.created_by
     left join users vu on vu.id = s.void_by`;
 const toGr = (r: GrRow, ctx: Ctx): GrSummary => ({
   id: r.id, no: r.no, date: r.date, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, deliveryNo: r.delivery_no,
   warehouseId: r.warehouse_id, total: r.total != null && seeCost(ctx) ? money(r.total) : null, apBillNo: r.ap_no, itemsPreview: r.preview ?? '', receivedQty: r.qty_units ?? [], lineCount: r.line_count,
-  createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '', poNos: r.po_nos ?? [], status: r.void_at ? 'void' : 'active',
+  createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '', poNos: r.po_nos ?? [], status: r.void_at ? 'void' : 'active', overReceiveNote: r.over_receive_note,
 });
 
 export async function listReceipts(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; returnable?: boolean }) {
@@ -87,8 +87,8 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
   const r = await tx.query<GrRow>(`${GR_SELECT} where s.type = 'GR' and s.no = $1`, [no]);
   const g = r.rows[0];
   if (!g) throw E.notFound(`ไม่พบใบรับสินค้า ${no}`);
-  const lines = await tx.query<{ id: string; line_no: number; product_id: string; name: string; warehouse_id: string; unit_idx: number; unit_name: string; unit_factor: string; qty: string; returned_base_qty: string; unit_price: string; amount: string }>(
-    `select g.id, g.line_no, g.product_id, p.name, g.warehouse_id, g.unit_idx, g.unit_name, g.unit_factor::text, g.qty::text, g.returned_base_qty::text, g.unit_price::text, g.amount::text
+  const lines = await tx.query<{ id: string; line_no: number; product_id: string; name: string; warehouse_id: string; unit_idx: number; unit_name: string; unit_factor: string; qty: string; returned_base_qty: string; unit_price: string; amount: string; free: boolean }>(
+    `select g.id, g.line_no, g.product_id, p.name, g.warehouse_id, g.unit_idx, g.unit_name, g.unit_factor::text, g.qty::text, g.returned_base_qty::text, g.unit_price::text, g.amount::text, g.free
        from gr_lines g join products p on p.id = g.product_id where g.gr_doc_id = $1 order by g.line_no`, [g.id]);
   const cost = seeCost(ctx);
   const rets = await tx.query<{ no: string; date: string; total: string }>(
@@ -101,7 +101,7 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
     lines: lines.rows.map((l) => ({
       id: l.id, lineNo: l.line_no, productId: l.product_id, name: l.name, warehouseId: l.warehouse_id, unitIdx: l.unit_idx, unitName: l.unit_name,
       unitFactor: qty4(l.unit_factor), qty: qty4(l.qty), returnedQty: qty4(d(l.returned_base_qty).div(d(l.unit_factor))),
-      unitPrice: cost ? qty4(l.unit_price) : null, amount: cost ? money(l.amount) : null,
+      unitPrice: cost ? qty4(l.unit_price) : null, amount: cost ? money(l.amount) : null, free: l.free,
     })),
   };
 }

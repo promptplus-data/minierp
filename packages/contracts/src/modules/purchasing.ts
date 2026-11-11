@@ -40,11 +40,15 @@ export const GrSummary = z.object({
   /** Purchase orders this receipt was received against (gr_lines.po_id). */
   poNos: z.array(z.string()).default([]),
   status: z.enum(['active', 'void']).default('active'),
+  /** Why more than the purchase order was accepted (รับเกินใบสั่งซื้อ). */
+  overReceiveNote: z.string().nullable().default(null),
 });
 export type GrSummary = z.infer<typeof GrSummary>;
 export const GrLineView = z.object({
   id: z.string(), lineNo: z.number().int(), productId: z.string(), name: z.string(), warehouseId: z.string(),
   unitIdx: z.number().int(), unitName: z.string(), unitFactor: Dec, qty: Dec, returnedQty: Dec, unitPrice: Dec.nullable(), amount: Dec.nullable(),
+  /** ของแถม: cost 0, not in the AP bill amount. */
+  free: z.boolean().default(false),
 });
 /** Documents made from this receipt: vendor returns (`returns`). The AP bill is `apBillNo` on the summary. */
 export const GrDetail = GrSummary.extend({
@@ -65,6 +69,8 @@ export const PoLineIn = z.object({
   productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitCost: DecNN, discount: Discount.optional(),
   /** Quotation / sales order line it came from (sourceNo must be set). */
   sourceLineId: z.string().optional(),
+  /** ของแถมตามเงื่อนไขผู้ขาย: cost forced to 0. */
+  free: z.boolean().default(false),
 });
 export const PoReq = z.object({
   vendorId: z.string(), warehouseId: z.string(), date: Ymd.optional(), expectedDate: Ymd.nullable().optional(),
@@ -84,6 +90,9 @@ export const PoLine = z.object({
   /** Cost per line unit for the goods receipt: net after the line discount, ex VAT. */
   grUnitCost: Dec.nullable(),
   sourceLineId: z.string().nullable(), sourceQty: Dec.nullable(),
+  free: z.boolean().default(false),
+  /** Received beyond the ordered qty (accepted with a note on the receipt). */
+  overQty: Dec.default('0'),
 });
 export const PoTotals = z.object({ gross: Dec, lineDisc: Dec, billDisc: Dec, base7: Dec, exempt: Dec, vat: Dec, total: Dec });
 export const PurchaseOrder = z.object({
@@ -91,7 +100,7 @@ export const PurchaseOrder = z.object({
   vendor: z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), phone: z.string().nullable() }),
   warehouseId: z.string(), warehouseName: z.string(), expectedDate: Ymd.nullable(), vendorRef: z.string(), note: z.string(), vatMode: PoVatMode,
   totals: PoTotals.nullable(), source: z.object({ type: z.enum(['QT', 'SO']), no: z.string() }).nullable(), lines: z.array(PoLine),
-  receipts: z.array(z.object({ no: z.string(), date: Ymd, status: z.enum(['active', 'void']) })),
+  receipts: z.array(z.object({ no: z.string(), date: Ymd, status: z.enum(['active', 'void']), overReceiveNote: z.string().nullable().default(null) })),
   createdBy: z.string(), closed: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(),
   voided: z.object({ by: z.string(), at: z.string(), reason: z.string() }).nullable(),
 });
@@ -112,6 +121,9 @@ export const PoPrefill = z.object({
     orderedQty: Dec,
     /** On hand minus what other sales orders reserve in that warehouse. */
     availableQty: Dec,
+    /** Not yet received on open / partially received POs made from this source line ("สั่งแล้ว (ค้างรับ)"). */
+    onOrderQty: Dec.default('0'),
+    /** max(0, ordered − available − on order). */
     qty: Dec, unitCost: Dec.nullable(),
   })),
   /** Service and free-text lines left out. */

@@ -14,8 +14,14 @@ export function poStatus(current: PoStatus, lines: readonly { qty: Num; received
 
 /**
  * Quantity to order for a sales line: what the customer ordered minus what the warehouse can still give
- * (available below zero counts as zero), never below zero.
+ * (available below zero counts as zero) minus what is already on order and not yet received, never below zero.
+ * Received goods are already inside `available`, so `onOrder` must be the unreceived part only.
  */
-export function poShortfall(ordered: Num, available: Num): string {
-  return qty4(Decimal.max(0, d(ordered).minus(Decimal.max(0, d(available)))));
+export function poShortfall(ordered: Num, available: Num, onOrder: Num = 0): string {
+  return qty4(Decimal.max(0, d(ordered).minus(Decimal.max(0, d(available))).minus(Decimal.max(0, d(onOrder)))));
+}
+
+/** Base qty a receipt takes beyond what a PO line still waits for (0 when within). */
+export function poOverQty(ordered: Num, received: Num, taking: Num): string {
+  return qty4(Decimal.max(0, d(received).plus(d(taking)).minus(d(ordered))).minus(Decimal.max(0, d(received).minus(d(ordered)))));
 }

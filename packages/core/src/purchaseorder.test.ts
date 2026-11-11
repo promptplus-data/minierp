@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { poShortfall, poStatus } from './purchaseorder';
+import { poOverQty, poShortfall, poStatus } from './purchaseorder';
 
 describe('purchase order status', () => {
   it('open until something arrives, partial, then received when every line is complete', () => {
@@ -24,5 +24,18 @@ describe('shortfall to order', () => {
   });
   it('negative available (over-reserved) counts as zero', () => {
     expect(poShortfall('10', '-3')).toBe('10');
+  });
+  it('subtracts what is already on order (unreceived), never below zero', () => {
+    expect(poShortfall('10', '4', '3')).toBe('3');
+    expect(poShortfall('10', '4', '8')).toBe('0');
+    expect(poShortfall('10', '-2', '4')).toBe('6');
+  });
+});
+
+describe('poOverQty', () => {
+  it('excess beyond the ordered qty, counting only what this receipt adds', () => {
+    expect(poOverQty('10', '4', '6')).toBe('0');
+    expect(poOverQty('10', '4', '7')).toBe('1');
+    expect(poOverQty('10', '12', '3')).toBe('3'); // already over: everything more is over
   });
 });

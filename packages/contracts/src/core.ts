@@ -100,11 +100,17 @@ export const StockLot = z.object({ id: z.string(), productId: z.string(), wareho
 export const StockLineIn = z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec });
 export const ManualReceiptReq = z.object({ // REQ-M05-06 (the only GR path on onprem)
   vendorId: z.string(), vendorInvoiceNo: z.string().min(1), deliveryNo: z.string().min(1), warehouseId: z.string(),
-  lines: z.array(StockLineIn.extend({ unitCost: DecNN, poLineId: z.string().optional() })).min(1), billDiscount: DecNN.default('0'),
+  lines: z.array(StockLineIn.extend({
+    unitCost: DecNN, poLineId: z.string().optional(),
+    /** ของแถม: the server records unit cost 0 whatever is sent; links only to a free PO line; never an over-receipt. */
+    free: z.boolean().optional(),
+  })).min(1), billDiscount: DecNN.default('0'),
   /** หมายเหตุ on the goods receipt; copied to the AP bill. */
   note: z.string().max(500).optional(),
-  /** Receive against this purchase order (ใบสั่งซื้อ); lines carry poLineId. Receiving more than the PO line's remaining qty is refused. */
+  /** Receive against this purchase order (ใบสั่งซื้อ); lines carry poLineId. */
   poId: z.string().optional(),
+  /** Required (non-blank) when a line receives more than the PO line still waits for; without it the server answers 409 PO_OVER_RECEIVE. */
+  overReceiveNote: z.string().max(500).optional(),
 });
 export const TransferReq = z.object({ fromWarehouseId: z.string(), toWarehouseId: z.string(), lines: z.array(StockLineIn).min(1), note: z.string().optional() });
 export const IssueReq = z.object({ warehouseId: z.string(), lines: z.array(StockLineIn).min(1), reason: z.string().min(1) });

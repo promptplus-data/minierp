@@ -61,20 +61,22 @@ async function loadSource(tx: Tx, no: string): Promise<Source> {
   return { type, id: o.id, no, customerName: o.c_name, warehouseId: o.warehouse_id, lines, skipped: r.rows.length - lines.length };
 }
 
-/** Purchase price per BASE unit to suggest: the last goods receipt of the product, else its moving-average cost. */
+/** Purchase price per BASE unit to suggest: the last paid (not ของแถม) goods receipt line of the product, else its moving-average cost. */
 async function lastCosts(tx: Tx, productIds: string[]): Promise<Map<string, string>> {
   const r = await tx.query<{ product_id: string; c: string }>(
     `select p.id product_id,
             coalesce((select g.unit_price / g.unit_factor from gr_lines g join stock_docs s on s.id = g.gr_doc_id
-                       where g.product_id = p.id and s.void_at is null order by s.created_at desc, g.line_no limit 1), p.cost)::text c
+                       where g.product_id = p.id and not g.free and s.void_at is null order by s.created_at desc, g.line_no limit 1), p.cost)::text c
        from products p where p.id = any($1::uuid[])`, [productIds]);
   return new Map(r.rows.map((x) => [x.product_id, x.c]));
 }
 
 /**
- * Lines to order for a quotation / sales order: each stock line with qty = ordered − available in the warehouse (≥ 0).
+ * Lines to order for a quotation / sales order: each stock line with qty = ordered − available − on order (≥ 0).
  * Available = on hand − what OTHER sales orders reserve (this order's own reservation is added back). Several lines of
- * one product share the available stock in line order.
+ * one product share the available stock in line order. On order = not yet received on open / partially received POs
+ * made from the same source line (received goods are already in "available", so only the unreceived part counts),
+ * so a second PO from the same order suggests only what is still missing.
  */
 export async function prefill(tx: Tx, deps: Deps, ctx: Ctx, sourceNo: string, q: { warehouseId?: string }): Promise<PoPrefill> {
   requirePerm(ctx, 'inv.receive');
@@ -92,6 +94,11 @@ export async function prefill(tx: Tx, deps: Deps, ctx: Ctx, sourceNo: string, q:
     for (const l of src.lines) avail.set(l.product_id, (avail.get(l.product_id) ?? d(0)).plus(d(l.ordered).times(d(l.unit_factor))));
   }
   const costs = await lastCosts(tx, pids);
+  const onOrder = new Map((await tx.query<{ source_line_id: string; q: string }>(
+    `select l.source_line_id, sum(greatest(l.base_qty - coalesce((select sum(g.base_qty) from gr_lines g join stock_docs s on s.id = g.gr_doc_id
+                                                                    where g.po_line_id = l.id and s.void_at is null), 0), 0))::text q
+       from purchase_order_lines l join purchase_orders x on x.id = l.po_id
+      where x.status in ('open','partial') and l.source_line_id = any($1::uuid[]) group by l.source_line_id`, [src.lines.map((l) => l.id)])).rows.map((r) => [r.source_line_id, d(r.q)]));
   const shop = (await tx.query<{ vat_registered: boolean }>(`select vat_registered from tenants where id = $1`, [ctx.tenantId])).rows[0];
   const price = seePrice(ctx);
   return {
@@ -102,9 +109,10 @@ export async function prefill(tx: Tx, deps: Deps, ctx: Ctx, sourceNo: string, q:
       const availableQty = qty4(a.div(f));
       avail.set(l.product_id, a.minus(d(l.ordered).times(f)));
       const c = costs.get(l.product_id);
+      const onOrderQty = qty4((onOrder.get(l.id) ?? d(0)).div(f));
       return {
         sourceLineId: l.id, productId: l.product_id, sku: l.sku, name: l.name, unitIdx: l.unit_idx, unitName: l.unit_name,
-        orderedQty: qty4(l.ordered), availableQty, qty: poShortfall(l.ordered, availableQty), unitCost: price && c != null ? qty4(d(c).times(f)) : null,
+        orderedQty: qty4(l.ordered), availableQty, onOrderQty, qty: poShortfall(l.ordered, availableQty, onOrderQty), unitCost: price && c != null ? qty4(d(c).times(f)) : null,
       };
     }),
     skipped: src.skipped,
@@ -143,7 +151,9 @@ export async function createPo(tx: Tx, deps: Deps, ctx: Ctx, req: PoReq): Promis
       if (sl.product_id !== p.id) throw E.validation(`รายการที่ ${i + 1}: สินค้าไม่ตรงกับเอกสารต้นทาง`, { field: `lines.${i}.productId` });
     }
     const u = unitOf(p, l.unitIdx);
-    return { p, unitIdx: l.unitIdx, unitName: u.name, factor: qty4(u.factor), qty: qty4(l.qty), baseQty: qty4(d(l.qty).times(d(u.factor))), unitCost: qty4(l.unitCost), discount: l.discount ?? null, sl };
+    const free = l.free === true; // ของแถมตามเงื่อนไขผู้ขาย: cost 0, no discount
+    return { p, unitIdx: l.unitIdx, unitName: u.name, factor: qty4(u.factor), qty: qty4(l.qty), baseQty: qty4(d(l.qty).times(d(u.factor))), unitCost: free ? '0' : qty4(l.unitCost),
+      discount: free ? null : l.discount ?? null, sl, free };
   });
   const totals = calcDoc(lines.map((l) => ({ qty: l.qty, unitPrice: l.unitCost, discount: l.discount, vat: l.p.vat })), vatMode, 0);
   const no = await nextDocNo(tx, ctx.tenantId, 'PO', date);
@@ -159,13 +169,13 @@ export async function createPo(tx: Tx, deps: Deps, ctx: Ctx, req: PoReq): Promis
   for (const [i, l] of lines.entries()) {
     await tx.query(
       `insert into purchase_order_lines (tenant_id, po_id, line_no, product_id, unit_idx, unit_name, unit_factor, qty, base_qty, unit_cost, discount, disc_amt, net, vat,
-         source_line_id, source_qty)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+         source_line_id, source_qty, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [ctx.tenantId, id, i + 1, l.p.id, l.unitIdx, l.unitName, l.factor, l.qty, l.baseQty, l.unitCost, l.discount ? JSON.stringify(l.discount) : null,
-        money(lineDiscount({ qty: l.qty, unitPrice: l.unitCost, discount: l.discount })), totals.lines[i]!.net, l.p.vat, l.sl?.id ?? null, l.sl ? qty4(l.sl.ordered) : null],
+        money(lineDiscount({ qty: l.qty, unitPrice: l.unitCost, discount: l.discount })), totals.lines[i]!.net, l.p.vat, l.sl?.id ?? null, l.sl ? qty4(l.sl.ordered) : null, l.free],
     );
   }
-  await writeAudit(tx, ctx, [{ action: 'create', object: 'PO', ref: no, detail: `${vendor.name} · ${wh.name} · ${lines.length} รายการ · ฿${fmtTHB(totals.total)}${src ? ` · จาก ${src.no}` : ''}` }]);
+  await writeAudit(tx, ctx, [{ action: 'create', object: 'PO', ref: no, detail: `${vendor.name} · ${wh.name} · ${lines.length} รายการ${lines.some((l) => l.free) ? ` (ของแถม ${lines.filter((l) => l.free).length})` : ''} · ฿${fmtTHB(totals.total)}${src ? ` · จาก ${src.no}` : ''}` }]);
   return getPo(tx, ctx, no);
 }
 
@@ -194,13 +204,13 @@ export async function getPo(tx: Tx, ctx: Ctx, no: string): Promise<PurchaseOrder
   requireRead(ctx);
   const x = await poRow(tx, no);
   const lines = await tx.query<{ id: string; line_no: number; product_id: string; sku: string; name: string; unit_idx: number; unit_name: string; unit_factor: string;
-    qty: string; unit_cost: string; discount: { kind: 'pct' | 'amt'; value: string } | null; disc_amt: string; net: string; vat: 'v7' | 'exempt'; source_line_id: string | null; source_qty: string | null }>(
+    qty: string; unit_cost: string; discount: { kind: 'pct' | 'amt'; value: string } | null; disc_amt: string; net: string; vat: 'v7' | 'exempt'; source_line_id: string | null; source_qty: string | null; free: boolean }>(
     `select l.id, l.line_no, l.product_id, p.sku, p.name, l.unit_idx, l.unit_name, l.unit_factor::text, l.qty::text, l.unit_cost::text, l.discount, l.disc_amt::text,
-            l.net::text, l.vat, l.source_line_id, l.source_qty::text
+            l.net::text, l.vat, l.source_line_id, l.source_qty::text, l.free
        from purchase_order_lines l join products p on p.id = l.product_id where l.po_id = $1 order by l.line_no`, [x.id]);
   const rec = new Map((await poLineReceipts(tx, x.id)).map((r) => [r.id, r.received]));
-  const receipts = await tx.query<{ no: string; date: string; void_at: Date | null }>(
-    `select s.no, to_char(s.date,'YYYY-MM-DD') date, s.void_at from stock_docs s
+  const receipts = await tx.query<{ no: string; date: string; void_at: Date | null; over_receive_note: string | null }>(
+    `select s.no, to_char(s.date,'YYYY-MM-DD') date, s.void_at, s.over_receive_note from stock_docs s
       where s.type = 'GR' and exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.po_id = $1) order by s.created_at`, [x.id]);
   const price = seePrice(ctx);
   return {
@@ -220,9 +230,10 @@ export async function getPo(tx: Tx, ctx: Ctx, no: string): Promise<PurchaseOrder
         unitCost: price ? qty4(l.unit_cost) : null, discount: l.discount ? { kind: l.discount.kind, value: String(l.discount.value) } : null,
         discAmt: price ? money(l.disc_amt) : null, net: price ? money(l.net) : null, vat: l.vat,
         grUnitCost: price ? qty4(exVat.div(d(l.qty))) : null, sourceLineId: l.source_line_id, sourceQty: l.source_qty != null ? qty4(l.source_qty) : null,
+        free: l.free, overQty: qty4(received.gt(d(l.qty)) ? received.minus(d(l.qty)) : 0),
       };
     }),
-    receipts: receipts.rows.map((r) => ({ no: r.no, date: r.date, status: r.void_at ? 'void' as const : 'active' as const })),
+    receipts: receipts.rows.map((r) => ({ no: r.no, date: r.date, status: r.void_at ? 'void' as const : 'active' as const, overReceiveNote: r.over_receive_note })),
     createdBy: x.created_by_name,
     closed: x.closed_at ? { by: x.closed_by_name ?? '', at: x.closed_at.toISOString(), reason: x.close_reason ?? '' } : null,
     voided: x.void_at ? { by: x.void_by_name ?? '', at: x.void_at.toISOString(), reason: x.void_reason ?? '' } : null,
