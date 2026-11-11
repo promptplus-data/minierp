@@ -74,6 +74,26 @@ test('cashier: a bill discount asks the manager PIN at entry, then the sale goes
   await page.getByTestId('next-bill').click();
 });
 
+test('cashier: a ของแถม line at price 0 needs no PIN or reason; the slip prints (ของแถม)', async ({ page }) => {
+  await login(page, 'prae');
+  await openPos(page);
+  await page.getByTestId('tile-SCG-CEM-T50').click();
+  await page.getByTestId('tile-PVC-4-85').click();
+  await page.getByTestId('free-1').click();
+  await expect(page.getByTestId('cline-1')).toContainText('ของแถม');
+  await expect(page.getByTestId('lnet-1')).toHaveText('0.00');
+  await expect(page.getByTestId('price-1')).toHaveCount(0);
+  await expect(page.getByTestId('total')).toHaveText('฿145.00');
+  await expect(page.getByRole('heading', { name: 'ส่วนลดเกินสิทธิ์' })).toHaveCount(0);
+  await expect(page.getByTestId('below-flag')).toHaveCount(0);
+  await page.getByTestId('pay').click();
+  await page.getByTestId('pay-confirm').click();
+  await expect(page.getByTestId('sale-no')).toHaveText(/^ABB/);
+  await expect(page.getByTestId('slip-free')).toContainText('(ของแถม)');
+  await expect(page.getByTestId('receipt')).toContainText('× 0.00');
+  await page.getByTestId('next-bill').click();
+});
+
 test('cashier: below-cost line shows a red flag but never cost numbers', async ({ page }) => {
   await login(page, 'prae');
   await openPos(page);

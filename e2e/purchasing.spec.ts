@@ -243,3 +243,42 @@ test('purchase order from a sales order: tick lines → save → receive part �
   await page.getByTestId('doc-pos').getByRole('link', { name: poNo }).click();
   await expect(page).toHaveURL(new RegExp(`/purchasing/po/${poNo}$`));
 });
+
+test('manual receipt with a free line, costed by market value: lots 112.50 / 75.00, shown on the GR and its print', async ({ page, request }) => {
+  const run = `${EDITION}-${Date.now()}`;
+  await login(page, 'charoen');
+  await page.goto('/purchasing');
+  await page.getByRole('button', { name: '+ ซื้อเข้าแบบบันทึกเอง' }).click();
+  await pick(page, 'gr-vendor', 'ทวีพัฒนา', 'ทวี');
+  await page.getByTestId('gr-dn').fill(`DN-FC-${run}`);
+  await page.getByTestId('gr-inv').fill(`IV-FC-${run}`);
+  await pick(page, 'gr-p0', 'ปูนซีเมนต์ตราเสือ 50 กก.', 'ปูนเสือ');
+  await page.getByTestId('gr-q0').fill('20');
+  await page.getByTestId('gr-c0').fill('150');
+  await expect(page.getByTestId('gr-fgc')).toHaveCount(0); // the choice appears only with a free line
+  await page.getByTestId('gr-add-free').click();
+  await pick(page, 'gr-p1', 'กาวซีเมนต์ปูกระเบื้อง 20 กก.', 'กาวซีเมนต์');
+  await page.getByTestId('gr-q1').fill('10');
+  await expect(page.getByTestId('gr-fgc-zero')).toBeChecked(); // shop default
+  await page.getByTestId('gr-fgc-allocate').check();
+  await page.getByTestId('gr-m1').fill('100');
+  await expect(page.getByTestId('gr-alloc0')).toContainText('112.50');
+  await expect(page.getByTestId('gr-alloc1')).toContainText('75.00');
+  await page.getByTestId('gr-save').click();
+  await expect(page.getByText(/รับเข้าสต็อก GR\d{4}-\d{4} แล้ว/)).toBeVisible();
+
+  const token = await apiToken(request, 'charoen');
+  const gr = (await (await request.get(`/api/purchasing/receipts?q=IV-FC-${run}`, { headers: { authorization: `Bearer ${token}` } })).json()).items[0];
+  expect(gr.total).toBe('3000.00'); // the AP amount stays what is owed
+  await page.goto(`/purchasing/gr/${gr.no}`);
+  const rows = page.getByTestId('gr-lines');
+  await expect(rows.locator('thead')).toContainText('ต้นทุนหลังเฉลี่ย');
+  await expect(rows.locator('tbody tr').nth(0)).toContainText('112.50');
+  await expect(rows.locator('tbody tr').nth(1)).toContainText('75.00');
+  await expect(page.getByTestId('gr-alloc-note')).toContainText('ต้นทุนเฉลี่ยตามมูลค่าตลาด');
+  await page.getByTestId('gr-print').click();
+  const paper = page.getByRole('dialog').getByTestId('paper');
+  await expect(paper).toContainText('ต้นทุนหลังเฉลี่ย');
+  await expect(paper).toContainText('ต้นทุนเฉลี่ยตามมูลค่าตลาด');
+  await page.keyboard.press('Escape');
+});
