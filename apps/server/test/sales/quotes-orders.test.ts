@@ -148,6 +148,22 @@ describe('sales orders', () => {
     expect(so.belowCostApproval.detail).toContain('คุณเจริญ');
   });
 
+  it('BR-16 follows the shop setting: owner_or_manager takes a manager PIN, none only flags and logs', async () => {
+    const body = { customerId: C.c1, term: { t: 'cash' }, lines: [{ productId: P.p1!, qty: '10', unitPrice: '100' }], priceApproval: apv(env) };
+    expect((await env.suda.patch('/api/sales/settings', { belowCostApprover: 'none' })).status).toBe(403);
+    await ok(env.owner.patch('/api/sales/settings', { belowCostApprover: 'owner_or_manager' }));
+    const so = await ok(env.boy.post('/api/sales/orders', { ...body, belowCostApproval: pin(env, 'suda') }), 201);
+    expect(so.belowCostApproval.detail).toContain('คุณสุดา');
+    await ok(env.owner.patch('/api/sales/settings', { belowCostApprover: 'none' }));
+    const free = await ok(env.boy.post('/api/sales/orders', body), 201);
+    expect(free.belowCostApproval.detail).toContain('ขายต่ำกว่าทุน 1 รายการ');
+    expect(free.belowCostApproval.detail).toContain('ไม่ต้องอนุมัติ');
+    const log = await env.pool.query(`select action from audit_log where object = 'below-cost' and detail like '%ไม่ต้องอนุมัติ%' order by chain_seq desc limit 1`);
+    expect(log.rows[0].action).toBe('flag');
+    await ok(env.owner.patch('/api/sales/settings', { belowCostApprover: 'owner' }));
+    expect((await env.boy.post('/api/sales/orders', body)).status).toBe(409);
+  });
+
   it('BR-08: over the credit limit stops for approval and records the approver', async () => {
     // c2 limit 80,000; an order of 100,000 is over
     const body = { customerId: C.c2, lines: [{ productId: P.p7!, qty: '80', unitPrice: '1250' }] };

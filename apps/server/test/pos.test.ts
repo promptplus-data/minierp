@@ -159,4 +159,48 @@ describe('below cost (BR-16)', () => {
     const log = await env.pool.query(`select user_name, detail from audit_log where object = 'below-cost' order by chain_seq desc limit 1`);
     expect(log.rows[0].detail).toContain('ยืนยันเอง');
   });
+
+  describe('shop setting: who approves (ข้อ 5)', () => {
+    const lastLog = async () => (await env.pool.query(`select action, detail from audit_log where object = 'below-cost' order by chain_seq desc limit 1`)).rows[0];
+    const byPrae = () => ({ ...saleBody(env.seed, praeShift, [{ p: 'p1', qty: '1', price: '120.00' }], '120.00', { discountReason: { code: 'regular' } }), discountApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
+    const setMode = (c: Client, m: string) => c.patch('/api/sales/settings', { belowCostApprover: m });
+
+    it('only the owner changes it; it is audited and shown in meta', async () => {
+      expect((await setMode(suda, 'none')).status).toBe(403);
+      const r = await setMode(owner, 'owner_or_manager');
+      expect(r.status).toBe(200);
+      expect(r.body.belowCostApprover).toBe('owner_or_manager');
+      expect((await suda.get('/api/meta')).body.shop.belowCostApprover).toBe('owner_or_manager');
+      const log = await env.pool.query(`select detail from audit_log where object = 'below-cost-approver' order by chain_seq desc limit 1`);
+      expect(log.rows[0].detail).toContain('เจ้าของร้านหรือผู้จัดการ');
+    });
+
+    it('owner_or_manager: a manager PIN approves, a manager selling confirms himself', async () => {
+      const r = await prae.post('/api/sales/pos', { ...byPrae(), belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
+      expect(r.status).toBe(201);
+      expect((await lastLog()).detail).toContain('อนุมัติโดย คุณสุดา');
+      const none = await prae.post('/api/sales/pos', byPrae());
+      expect(none.status).toBe(409);
+      expect(none.body.details.approvers).toEqual(['owner', 'manager']);
+      expect((await suda.post('/api/sales/pos', body())).status).toBe(201);
+      expect((await lastLog()).detail).toContain('ผู้จัดการ ยืนยันเอง');
+    });
+
+    it('none: no approval, still flagged in the preview and audit-logged', async () => {
+      await setMode(owner, 'none');
+      const pv = await prae.post('/api/sales/pos/preview', byPrae());
+      expect(pv.body.belowCost).toBe(true);
+      const r = await prae.post('/api/sales/pos', byPrae());
+      expect(r.status).toBe(201);
+      expect(await lastLog()).toMatchObject({ action: 'flag' });
+      expect((await lastLog()).detail).toContain('ไม่ต้องอนุมัติตามการตั้งค่าร้าน');
+    });
+
+    it('owner (default) again: a manager PIN is refused', async () => {
+      await setMode(owner, 'owner');
+      const r = await prae.post('/api/sales/pos', { ...byPrae(), belowCostApproval: { approverUserId: env.seed.users.suda, pin: '1234' } });
+      expect(r.status).toBe(409);
+      expect(r.body.details.approvalError).toBe('ROLE_NOT_ALLOWED');
+    });
+  });
 });

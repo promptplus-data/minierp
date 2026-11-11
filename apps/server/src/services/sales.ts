@@ -17,7 +17,7 @@ import { decodeCursor, likeEscape, pageOf } from '../lib/paging';
 import { applyOut, lockLots, planTakes, reverseOuts } from '../lib/stock';
 import { loadProducts, requireWarehouse, unitOf, type ProductRow, type ProductUnitRow } from './master';
 // Read-only reuse of module A (M10): customer row and outstanding AR / overdue for the POS credit check.
-import { creditInfo, loadCustomer } from '../modules/sales/common';
+import { approveBelowCost, creditInfo, loadCustomer } from '../modules/sales/common';
 
 export const SALE_TYPES = ['ABB', 'INV', 'RC'] as const;
 
@@ -425,15 +425,9 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     const seeCost = can(ctx, 'data.cost') === 1;
     const detail = below.map((b) => ({ productId: b.productId, name: b.name, ...(seeCost ? { sell: money(b.sell), cost: money(b.cost) } : {}) }));
     const text = below.map((b) => `${b.name} (ขาย ${money(b.sell)} < ทุน ${money(b.cost)})`).join(', ');
-    if (ctx.role === 'owner') {
-      audits.push({ action: 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · เจ้าของร้าน (ยืนยันเอง)` });
-    } else if (req.belowCostApproval) {
-      const a = await verifyApproval(tx, deps.pool, ctx, req.belowCostApproval, approverRoles('sales.belowCost'), 'ขายต่ำกว่าทุน');
-      if (!a.ok) throw E.belowCost('Below-cost sale needs the owner\'s PIN', { lines: detail, approvalError: a.reason });
-      audits.push({ action: 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · อนุมัติโดย ${a.approver.name}` });
-    } else {
-      throw E.belowCost(`${below.length} line(s) below cost`, { lines: detail });
-    }
+    // BR-16: who approves follows the shop setting (owner / owner or manager / none = flag and log only).
+    const a = await approveBelowCost(tx, deps, ctx, req.belowCostApproval, 'หน้าร้าน', detail, `${below.length} line(s) below cost`);
+    audits.push({ action: a.mode === 'none' ? 'flag' : 'approve', object: 'below-cost', detail: `ขายต่ำกว่าทุน ${below.length} รายการ: ${text} · ${a.mode === 'none' ? a.text : a.id === ctx.userId ? a.text : `อนุมัติโดย ${a.text}`}` });
   }
 
   const note = (req.note ?? '').trim();

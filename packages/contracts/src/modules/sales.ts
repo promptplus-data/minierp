@@ -33,12 +33,16 @@ export type SalesPageQuery = z.infer<typeof SalesPageQuery>;
 
 // ---------- settings (REQ-M08-08 bank accounts, validity) ----------
 export const SalesBankAccount = z.object({ bank: z.string().min(1), branch: z.string().default(''), account: z.string().min(1), name: z.string().min(1) });
+export const SalesBelowCostApprover = z.enum(['owner', 'owner_or_manager', 'none']);
 export const SalesSettings = z.object({
   quoteValidDays: z.number().int(), defaultCreditLimit: Dec, banks: z.array(SalesBankAccount),
+  /** BR-16: who approves a below-cost sale (owner only may change it). */
+  belowCostApprover: SalesBelowCostApprover.default('owner'),
   shop: z.object({ name: z.string(), taxId: z.string(), branch: z.string(), address: z.string(), phone: z.string(), vatRegistered: z.boolean(), b2bVatMode: z.enum(['inc', 'exc']) }),
 });
 export type SalesSettings = z.infer<typeof SalesSettings>;
-export const SalesSettingsUpdate = z.object({ quoteValidDays: z.number().int().min(1).max(365).optional(), defaultCreditLimit: DecNN.optional(), banks: z.array(SalesBankAccount).max(6).optional() });
+export const SalesSettingsUpdate = z.object({ quoteValidDays: z.number().int().min(1).max(365).optional(), defaultCreditLimit: DecNN.optional(), banks: z.array(SalesBankAccount).max(6).optional(),
+  belowCostApprover: SalesBelowCostApprover.optional() });
 
 // ---------- price (BR-05) and credit (BR-08) helpers ----------
 export const SalesPriceQuery = z.object({
