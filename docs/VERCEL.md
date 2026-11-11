@@ -60,6 +60,7 @@ Node 22 comes from `"engines": { "node": "22.x" }` in the root `package.json`. V
    | `TRUST_PROXY` | `1`, so `req.ip` is the client address from Vercel's `X-Forwarded-For`, not the proxy's |
    | `SEED_DEMO` | `1` for a demo deployment. Remove it for a real shop |
    | `LICENSE_SIGNING_KEY` | Optional. The Ed25519 private key (PKCS#8 PEM) SCG Admin uses to issue on-prem license keys (REQ-M19-11). Without it, issuing is disabled. Generate your own pair with `node scripts/license-gen.mjs` and embed the public half in `apps/server/src/modules/admin/license-pubkey.ts` |
+   | `SCGF_DEMO` | Optional, demo only. `1` makes the SCG Family coupon slot return sample coupons (member `SF22018834`, phone 0812345678; `SF10000001` has none). Leave unset in production: the stub then returns no coupons until the real API is connected |
    | `DB_POOL_MAX` | Optional. Default `2` connections per function instance |
    | `LOG_LEVEL` | Optional. Default `warn` |
    | `PROMPTPLUS_BASE_URL`, `PROMPTPLUS_CLIENT_ID` | Optional. Cloud only |
