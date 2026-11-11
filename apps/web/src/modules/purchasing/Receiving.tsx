@@ -136,7 +136,7 @@ function ReceiptList() {
                 <td className="mono small">{g.deliveryNo ?? '-'}<div className="muted">{g.vendorInvoiceNo ?? ''}</div></td>
                 <td>{th(g.date)}</td>
                 <td>{g.vendorName ?? '-'}<div className="small muted">{whs.data?.find((w) => w.id === g.warehouseId)?.name}</div></td>
-                <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div>{g.note && <div className="muted">หมายเหตุ: {g.note}</div>}</td>
+                <td className="pu-cell-wrap small">{g.itemsPreview}<div className="muted">รับโดย {g.createdBy}</div>{g.note && <div className="muted">หมายเหตุ: {g.note}</div>}{g.overReceiveNote && <div style={{ color: 'var(--warn)' }}>รับเกินใบสั่งซื้อ: {g.overReceiveNote}</div>}</td>
                 <td className="n" data-testid={`gr-qty-${g.no}`}>{g.receivedQty.map((x) => <div key={x.unit} style={{ whiteSpace: "nowrap" }}>{fq(x.qty)} {x.unit}</div>)}{g.lineCount > 1 && <div className="small muted">{g.lineCount} รายการ</div>}</td>
                 {seeCost && <td className="n">{g.total != null ? fmt(g.total) : '-'}</td>}
                 <td className="mono small"><DocLink no={g.apBillNo} type="AP" /></td>

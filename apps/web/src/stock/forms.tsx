@@ -8,7 +8,7 @@ import { checkFields, qtyMsg, requiredMsg } from '../errors';
 import { useCatalog, useMeta, useWarehouseStock, useWarehouses, useAllWarehouses } from '../data';
 import { NoteField } from '../ui/NoteField';
 import { VendorPicker } from '../ui/VendorPicker';
-import { fmt, fq, Modal, ReasonField, reasonInit, reasonText, ShortageModal, useToast, type ReasonState, type Shortage } from '../ui';
+import { fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, ShortageModal, useToast, type ReasonState, type Shortage } from '../ui';
 import { ProductPicker } from '../ui/ProductPicker';
 
 export type StockKind = 'tr' | 'iss' | 'adj';
@@ -172,11 +172,17 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
   );
 }
 
-interface RLine { pid: string; u: number; q: string; cost: string; poLineId?: string; left?: string; ordered?: string }
+interface RLine {
+  pid: string; u: number; q: string; cost: string; poLineId?: string; left?: string; ordered?: string;
+  /** ของแถม: cost 0 (the server forces it). A line of a free PO line is free and cannot be unticked. */
+  free?: boolean; poFree?: boolean;
+}
+/** 409 PO_OVER_RECEIVE details, one row per PO line that goes over (PO line unit). */
+interface OverRow { poLineId: string; name: string; unitName: string; ordered: string; received: string; receiving: string; excess: string }
 
 /** Lines still waiting on a purchase order, in the PO line unit, cost = PO net after line discount ex VAT. */
 const poLines = (po: PurchaseOrder): RLine[] => po.lines.filter((l) => d(l.remainingQty).gt(0))
-  .map((l) => ({ pid: l.productId, u: l.unitIdx, q: l.remainingQty, cost: l.grUnitCost ?? '0', poLineId: l.id, left: l.remainingQty, ordered: l.qty }));
+  .map((l) => ({ pid: l.productId, u: l.unitIdx, q: l.remainingQty, cost: l.free ? '0' : l.grUnitCost ?? '0', poLineId: l.id, left: l.remainingQty, ordered: l.qty, free: l.free, poFree: l.free }));
 
 /** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount per BR-19 (purchasing settings). */
 
@@ -198,24 +204,28 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
   const [lines, setLines] = useState<RLine[]>(po ? poLines(po) : [{ pid: '', u: 0, q: '1', cost: '0' }]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState<{ poNo: string; lines: OverRow[] } | null>(null);
+  const [overNote, setOverNote] = useState('');
+  const [overTried, setOverTried] = useState(false);
   const vId = vendor ?? '';
   const whId = wh || active.find((w) => !w.isPos)?.id || active[0]?.id || '';
   const update = (i: number, patch: Partial<RLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const amt = (l: RLine) => (isNum(l.q) && isNum(l.cost) ? d(l.q).times(d(l.cost)) : d(0));
+  const amt = (l: RLine) => (!l.free && isNum(l.q) && isNum(l.cost) ? d(l.q).times(d(l.cost)) : d(0));
   const total = sum(lines.filter((l) => l.pid).map(amt));
   const disc = isNum(bd) ? Math.min(d(bd).toNumber(), total.toNumber()) : 0;
   const net = total.minus(disc);
   const vatAmt = vat ? net.times('0.07') : d(0);
 
-  const save = async () => {
+  /** `overReceiveNote` is sent only from the over-receipt confirm modal. */
+  const save = async (overReceiveNote?: string) => {
     const ls = lines.filter((l) => l.pid);
     if (!ls.length) return setErr('เลือกสินค้าอย่างน้อย 1 รายการ');
     if (!checkFields({
       vendorId: !vId && 'เลือกผู้จำหน่าย',
       deliveryNo: requiredMsg(dn, 'เลขที่ใบส่งของ'), vendorInvoiceNo: requiredMsg(inv, 'เลขที่ใบกำกับภาษี / บิลของผู้ขาย'),
       ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [
-        [`lines.${i}.qty`, qtyMsg(l.q) || (l.left && isNum(l.q) && d(l.q).gt(d(l.left)) && `รับเกินที่สั่ง (ค้างรับ ${fq(l.left)})`)],
-        [`lines.${i}.unitCost`, !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
+        [`lines.${i}.qty`, qtyMsg(l.q)],
+        [`lines.${i}.unitCost`, !l.free && !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
       billDiscount: !!bd && !isNum(bd) && 'ส่วนลดท้ายบิลต้องเป็นตัวเลข',
     })) return;
     setBusy(true);
@@ -224,7 +234,8 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       const res = await api('POST', '/api/stock/receipts', {
         body: {
           vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', note: note.trim() || undefined, poId: po?.id,
-          lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim(), poLineId: l.poLineId })),
+          overReceiveNote,
+          lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.free ? '0' : l.cost.trim(), poLineId: l.poLineId, free: l.free || undefined })),
         },
         schema: StockDoc,
       });
@@ -233,17 +244,27 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       onDone?.(res.no);
       onClose();
     } catch (e) {
-      setErr(errText(e));
+      const det = e instanceof ApiFail ? (e.details as { reason?: string; poNo?: string; lines?: OverRow[] } | null) : null;
+      if (det?.reason === 'PO_OVER_RECEIVE' && det.lines) {
+        setOver({ poNo: det.poNo ?? po?.no ?? '', lines: det.lines });
+        setOverTried(false);
+      } else setErr(errText(e));
     } finally {
       setBusy(false);
     }
+  };
+  const confirmOver = () => {
+    setOverTried(true);
+    if (!overNote.trim()) return;
+    setOver(null);
+    void save(overNote.trim());
   };
 
   return (
     <Modal onClose={onClose} wide label={po ? `รับของตาม ${po.no}` : 'ซื้อเข้าแบบบันทึกเอง'}>
       <h3>{po ? <>รับของตามใบสั่งซื้อ <span className="mono">{po.no}</span></> : 'ซื้อเข้าแบบบันทึกเอง'}</h3>
       <p className="small muted" style={{ margin: 0 }}>{po
-        ? 'แก้จำนวนตามของที่มาจริงได้ (รับบางส่วนได้ ส่วนที่เหลือรอรับครั้งต่อไป) · รับเกินจำนวนที่สั่งไม่ได้ · ลบรายการที่ยังไม่มาออกได้'
+        ? 'แก้จำนวนตามของที่มาจริงได้ (รับบางส่วนได้ ส่วนที่เหลือรอรับครั้งต่อไป) · รับเกินจำนวนที่สั่งได้เมื่อยืนยันพร้อมหมายเหตุ · ของแถมที่มากับบิลให้เพิ่มเป็นรายการของแถม (ต้นทุน 0 ไม่นับเป็นรับเกิน) · ลบรายการที่ยังไม่มาออกได้'
         : 'สำหรับของที่ซื้อจากผู้จำหน่าย · 1 ใบรับได้หลายสินค้า · บันทึกแล้วสร้างล็อตใหม่ตามวันที่รับของ'}</p>
       <div className="fgrid">
         <label className="f">ผู้จำหน่าย (จำเป็น){po ? <input type="text" value={po.vendor.name} disabled aria-label="ผู้จำหน่าย" /> : <VendorPicker value={vendor} onChange={(id) => setVendor(id)} testId="gr-vendor" />}</label>
@@ -253,7 +274,7 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       </div>
       <div className="tw">
         <table>
-          <thead><tr><th>สินค้า</th><th>หน่วย</th>{po && <th className="n">ค้างรับ</th>}<th className="n">จำนวน</th><th className="n">ต้นทุน/หน่วย ({vat ? 'ก่อน VAT' : 'ที่จ่ายจริง'})</th><th className="n">รวม</th><th /></tr></thead>
+          <thead><tr><th>สินค้า</th><th>หน่วย</th>{po && <th className="n">ค้างรับ</th>}<th className="n">จำนวน</th><th className="n">ต้นทุน/หน่วย ({vat ? 'ก่อน VAT' : 'ที่จ่ายจริง'})</th><th className="n">รวม</th><th>ของแถม</th><th /></tr></thead>
           <tbody>
             {lines.map((l, i) => {
               const p = prods.byId.get(l.pid);
@@ -263,13 +284,17 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
                     {l.poLineId ? <>{p?.name ?? '…'}<div className="small muted mono">{p?.sku}</div></> : <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStockProduct} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
                       onChange={(id, np) => update(i, { pid: id ?? '', u: 0, cost: np?.cost ?? l.cost })} />}
                     {!l.pid && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
-                    {po && !l.poLineId && l.pid && <div className="small muted">นอกใบสั่งซื้อ</div>}
+                    {po && !l.poLineId && l.pid && !l.free && <div className="small muted">นอกใบสั่งซื้อ</div>}
+                    {l.left && isNum(l.q) && d(l.q).gt(d(l.left)) && <div className="small" style={{ color: 'var(--warn)' }}>เกินที่สั่ง {fq(d(l.q).minus(d(l.left)))} · ต้องยืนยันพร้อมหมายเหตุ</div>}
                   </td>
                   <td>{p ? (l.poLineId ? p.units[l.u]?.name : <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>) : '-'}</td>
                   {po && <td className="n">{l.left ? <>{fq(l.left)}<div className="small muted">สั่ง {fq(l.ordered ?? '0')}</div></> : '-'}</td>}
                   <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`gr-q${i}`} /></td>
-                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.cost} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
-                  <td className="n">{fmt(amt(l))}</td>
+                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.free ? '0' : l.cost} disabled={l.free} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
+                  <td className="n">{l.free ? <Pill k="acc">ของแถม</Pill> : fmt(amt(l))}</td>
+                  <td><input type="checkbox" checked={!!l.free} disabled={!!l.poLineId} aria-label={`ของแถมแถว ${i + 1}`} data-testid={`gr-free${i}`}
+                    title={l.poLineId ? (l.poFree ? 'ของแถมตามใบสั่งซื้อ' : 'รายการตามใบสั่งซื้อ · ของแถมให้เพิ่มเป็นรายการแยก') : 'ของแถม (ต้นทุน 0)'}
+                    onChange={(e) => update(i, { free: e.target.checked })} /></td>
                   <td>{lines.length > 1 && <button className="btn sm bad" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}>ลบ</button>}</td>
                 </tr>
               );
@@ -277,7 +302,11 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
           </tbody>
         </table>
       </div>
-      <div className="row"><button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0' }])}>+ เพิ่มสินค้า</button><span className="small muted">{lines.filter((l) => l.pid).length} รายการ</span></div>
+      <div className="row">
+        <button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0' }])}>+ เพิ่มสินค้า</button>
+        <button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0', free: true }])} data-testid="gr-add-free">+ เพิ่มของแถม</button>
+        <span className="small muted">{lines.filter((l) => l.pid).length} รายการ{lines.some((l) => l.pid && l.free) ? ` · ของแถม ${lines.filter((l) => l.pid && l.free).length} (ไม่รวมในยอดเจ้าหนี้)` : ''}</span>
+      </div>
       <NoteField value={note} onChange={setNote} testId="gr-note" placeholder="เช่น ของมาไม่ครบ รอส่งเพิ่ม / ชำระเงินสดหน้างาน" />
       <div className="grid g2" style={{ gap: 12 }}>
         <div>
@@ -296,6 +325,29 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
         <button className="btn" onClick={onClose}>ยกเลิก</button>
         <button className="btn pri" disabled={busy} onClick={() => void save()} data-testid="gr-save">บันทึกรับเข้าสต็อก</button>
       </div>
+      {over && (
+        <Modal onClose={() => setOver(null)} label="รับของเกินใบสั่งซื้อ">
+          <h3>รับของเกินใบสั่งซื้อ</h3>
+          <p className="small muted" style={{ margin: 0 }}>รายการต่อไปนี้รับเกินจำนวนที่สั่งใน <span className="mono">{over.poNo}</span> · ถ้ายืนยัน ระบบรับทั้งหมดเข้าสต็อกและตั้งเจ้าหนี้ตามจำนวนที่รับ</p>
+          <div className="tw">
+            <table data-testid="over-table">
+              <thead><tr><th>สินค้า</th><th className="n">สั่ง</th><th className="n">รับแล้ว</th><th className="n">รับครั้งนี้</th><th className="n">เกิน</th></tr></thead>
+              <tbody>{over.lines.map((o) => (
+                <tr key={o.poLineId}><td>{o.name}</td><td className="n">{fq(o.ordered)} {o.unitName}</td><td className="n">{fq(o.received)}</td><td className="n">{fq(o.receiving)}</td><td className="n"><b style={{ color: 'var(--bad)' }}>+{fq(o.excess)} {o.unitName}</b></td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <label className="f">หมายเหตุการรับเกิน (จำเป็น)
+            <textarea value={overNote} maxLength={500} rows={2} onChange={(e) => setOverNote(e.target.value)} placeholder="เช่น ผู้ขายส่งมาเกิน ตกลงรับไว้ / แถมตามโปรโมชัน" data-testid="over-note"
+              aria-invalid={overTried && !overNote.trim()} style={!overNote.trim() ? { borderColor: 'var(--bad)' } : undefined} />
+          </label>
+          {overTried && !overNote.trim() && <div className="err" role="alert">ใส่หมายเหตุก่อนยืนยันรับเกิน</div>}
+          <div className="act">
+            <button className="btn" onClick={() => setOver(null)}>กลับไปแก้จำนวน</button>
+            <button className="btn pri" disabled={busy} onClick={confirmOver} data-testid="over-confirm">ยืนยันรับเกิน</button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }

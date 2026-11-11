@@ -60,6 +60,7 @@ export function GrDetailPage() {
             <span>ใบส่งคืนผู้ขาย</span><span className="mono"><DocLinks nos={g.returns.map((r) => r.no)} type="PR" /></span>
             <span>รับโดย</span><span>{g.createdBy}</span>
             <span>หมายเหตุ</span><NoteText note={g.note} dash />
+            {g.overReceiveNote && <><span>รับเกินใบสั่งซื้อ</span><span data-testid="gr-over-note"><Pill k="warn">รับเกิน</Pill> หมายเหตุ: {g.overReceiveNote}</span></>}
             {g.total != null && <><span>ยอดรวม</span><span><b>{fmt(g.total)}</b>{g.billDiscount && d(g.billDiscount).gt(0) ? ` · ส่วนลดท้ายบิล ${fmt(g.billDiscount)}` : ''}</span></>}
           </div>
           <h3 style={{ marginTop: 14 }}>รายการ</h3>
@@ -69,7 +70,7 @@ export function GrDetailPage() {
               <tbody>
                 {g.lines.map((l) => (
                   <tr key={l.id}>
-                    <td>{l.name}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{d(l.returnedQty).gt(0) ? fq(l.returnedQty) : '-'}</td>
+                    <td>{l.name}{l.free && <> <Pill k="acc">ของแถม</Pill></>}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{d(l.returnedQty).gt(0) ? fq(l.returnedQty) : '-'}</td>
                     {l.unitPrice != null && <><td className="n"><Cost v={l.unitPrice} /></td><td className="n"><Cost v={l.amount} /></td></>}
                   </tr>
                 ))}

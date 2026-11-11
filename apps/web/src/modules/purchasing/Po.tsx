@@ -2,7 +2,7 @@
  * ใบสั่งซื้อ (PO): list (search, status, lazy 20), create form (blank or from a QT / SO with the shortfall prefilled),
  * detail with A4 print, รับของตาม PO (the manual receipt form against the PO), close (short shipment) and void.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PoPrefill, PoSummary, PurchaseOrder, type PoStatus, type Product } from '@erp/contracts';
@@ -75,7 +75,13 @@ export function PoList({ onNew }: { onNew?: () => void }) {
 }
 
 // ---------- form ----------
-interface FLine { pid: string; u: number; q: string; cost: string; disc: string; sourceLineId?: string; ordered?: string; avail?: string; unitName?: string }
+interface FLine {
+  pid: string; u: number; q: string; cost: string; disc: string; sourceLineId?: string; ordered?: string; avail?: string; onOrder?: string; unitName?: string;
+  /** Source lines: ticked = saved (default when the suggested qty is above 0). */
+  on?: boolean;
+  /** ของแถมตามเงื่อนไขผู้ขาย: cost 0. */
+  free?: boolean;
+}
 const blank = (): FLine => ({ pid: '', u: 0, q: '1', cost: '0', disc: '' });
 /** "10%" → 10 percent, "50" → 50 baht, "" → none. */
 const parseDisc = (s: string): { kind: 'pct' | 'amt'; value: string } | null | 'bad' => {
@@ -115,27 +121,33 @@ export function PoFormModal({ fromNo, onClose, onSaved }: { fromNo?: string | nu
     if (!pf.data) return;
     if (!wh) setWh(pf.data.warehouseId);
     setVatMode(pf.data.vatMode);
-    setLines(pf.data.lines.map((l) => ({ pid: l.productId, u: l.unitIdx, q: l.qty, cost: l.unitCost ?? '0', disc: '', sourceLineId: l.sourceLineId, ordered: l.orderedQty, avail: l.availableQty, unitName: l.unitName })));
+    setLines(pf.data.lines.map((l) => ({
+      pid: l.productId, u: l.unitIdx, q: l.qty, cost: l.unitCost ?? '0', disc: '', sourceLineId: l.sourceLineId, ordered: l.orderedQty, avail: l.availableQty,
+      onOrder: l.onOrderQty, unitName: l.unitName, on: d(l.qty).gt(0),
+    })));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pf.data]);
   const update = (i: number, patch: Partial<FLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const counted = lines.filter((l) => l.pid && isNum(l.q) && d(l.q).gt(0));
+  const ticked = (l: FLine) => !l.sourceLineId || l.on === true;
+  const counted = lines.filter((l) => l.pid && ticked(l) && isNum(l.q) && d(l.q).gt(0));
+  const srcLines = lines.filter((l) => l.sourceLineId);
+  const allOn = srcLines.length > 0 && srcLines.every((l) => l.on);
   const totals = calcDoc(counted.map((l) => {
     const disc = parseDisc(l.disc);
-    return { qty: l.q, unitPrice: isNum(l.cost) ? l.cost : '0', discount: disc === 'bad' ? null : disc, vat: cat.byId.get(l.pid)?.vat ?? 'v7' };
+    return { qty: l.q, unitPrice: l.free ? '0' : isNum(l.cost) ? l.cost : '0', discount: disc === 'bad' || l.free ? null : disc, vat: cat.byId.get(l.pid)?.vat ?? 'v7' };
   }), vatShop ? vatMode : 'none', 0);
   const net = (l: FLine) => {
-    if (!isNum(l.q) || !isNum(l.cost)) return d(0);
+    if (l.free || !isNum(l.q) || !isNum(l.cost)) return d(0);
     const disc = parseDisc(l.disc);
     return calcDoc([{ qty: l.q, unitPrice: l.cost, discount: disc === 'bad' ? null : disc, vat: 'v7' }], 'none', 0).lines[0]!.net;
   };
 
   const save = async () => {
-    if (!counted.length) return setErr(fromNo ? 'ไม่มีรายการที่ต้องสั่งซื้อ (จำนวน 0 ทุกรายการ) · แก้จำนวนหรือเพิ่มสินค้า' : 'เลือกสินค้าอย่างน้อย 1 รายการ');
+    if (!counted.length) return setErr(fromNo ? 'ไม่มีรายการที่จะสั่งซื้อ · ติ๊กเลือกรายการและใส่จำนวนมากกว่า 0 หรือเพิ่มสินค้า' : 'เลือกสินค้าอย่างน้อย 1 รายการ');
     if (!checkFields({
       vendorId: !vendor && 'เลือกผู้ขาย',
-      ...Object.fromEntries(lines.flatMap((l, i) => (l.pid && !(l.sourceLineId && l.q.trim() === '0') ? [
-        [`lines.${i}.qty`, qtyMsg(l.q)], [`lines.${i}.unitCost`, !isNum(l.cost) && 'ราคาต้องเป็นตัวเลข'], [`lines.${i}.discount`, parseDisc(l.disc) === 'bad' && 'ส่วนลด เช่น 10% หรือ 50'],
+      ...Object.fromEntries(lines.flatMap((l, i) => (l.pid && ticked(l) ? [
+        [`lines.${i}.qty`, qtyMsg(l.q)], [`lines.${i}.unitCost`, !l.free && !isNum(l.cost) && 'ราคาต้องเป็นตัวเลข'], [`lines.${i}.discount`, !l.free && parseDisc(l.disc) === 'bad' && 'ส่วนลด เช่น 10% หรือ 50'],
       ] : []))),
     })) return;
     setBusy(true);
@@ -147,7 +159,9 @@ export function PoFormModal({ fromNo, onClose, onSaved }: { fromNo?: string | nu
           sourceNo: fromNo ?? undefined,
           lines: counted.map((l) => {
             const disc = parseDisc(l.disc);
-            return { productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim(), discount: disc && disc !== 'bad' ? disc : undefined, sourceLineId: l.sourceLineId };
+            return l.free
+              ? { productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: '0', free: true, sourceLineId: l.sourceLineId }
+              : { productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim(), discount: disc && disc !== 'bad' ? disc : undefined, sourceLineId: l.sourceLineId };
           }),
         },
         schema: PurchaseOrder,
@@ -168,8 +182,10 @@ export function PoFormModal({ fromNo, onClose, onSaved }: { fromNo?: string | nu
     <Modal onClose={onClose} wide label="สร้างใบสั่งซื้อ">
       <h3>สร้างใบสั่งซื้อ (PO){fromNo && <> · จาก <span className="mono" data-testid="po-from">{fromNo}</span></>}</h3>
       {fromNo && <p className="small muted" style={{ margin: 0 }}>
-        ระบบใส่จำนวนที่ขาด = สั่งขาย − พร้อมขายในคลังที่เลือก (ไม่ต่ำกว่า 0) · แก้จำนวนได้ · ข้ามรายการบริการและรายการนอกระบบ{pf.data?.skipped ? ` (${pf.data.skipped} รายการ)` : ''} ·
-        1 ใบสั่งซื้อต่อ 1 ผู้ขาย ถ้าสินค้ามาจากหลายผู้ขาย ให้ลบรายการที่ไม่ใช่ของผู้ขายนี้ แล้วสร้างอีกใบ
+        ระบบใส่จำนวนที่ขาด = สั่งขาย − พร้อมขายในคลังที่เลือก − สั่งแล้ว (ค้างรับ) (ไม่ต่ำกว่า 0) · แก้จำนวนได้ · ข้ามรายการบริการและรายการนอกระบบ{pf.data?.skipped ? ` (${pf.data.skipped} รายการ)` : ''}
+      </p>}
+      {fromNo && <p className="note small" style={{ margin: '6px 0' }} data-testid="po-partial-hint">
+        ติ๊กเฉพาะรายการที่จะสั่งกับผู้ขายนี้ · รายการหรือจำนวนที่เหลือสั่งภายหลังได้ หรือสร้างใบสั่งซื้ออีกใบกับผู้ขายรายอื่น — ระบบจะหักยอดที่สั่งไปแล้วให้
       </p>}
       {pf.isError && <ErrorBanner error={pf.error} onRetry={() => void pf.refetch()} retrying={pf.isFetching} />}
       <div className="fgrid">
@@ -181,13 +197,17 @@ export function PoFormModal({ fromNo, onClose, onSaved }: { fromNo?: string | nu
       </div>
       <div className="tw">
         <table data-testid="po-lines">
-          <thead><tr><th>สินค้า</th><th>หน่วย</th>{fromSrc && <><th className="n">สั่งขาย</th><th className="n">พร้อมขาย</th></>}<th className="n">จำนวนสั่งซื้อ</th><th className="n">ราคา/หน่วย</th><th className="n">ส่วนลด</th><th className="n">รวม</th><th /></tr></thead>
+          <thead><tr>
+            {fromSrc && <th><input type="checkbox" checked={allOn} aria-label="เลือกทุกรายการ" data-testid="po-all" onChange={(e) => setLines((ls) => ls.map((l) => (l.sourceLineId ? { ...l, on: e.target.checked } : l)))} /></th>}
+            <th>สินค้า</th><th>หน่วย</th>{fromSrc && <><th className="n">สั่งขาย</th><th className="n">พร้อมขาย</th><th className="n">สั่งแล้ว (ค้างรับ)</th></>}<th className="n">จำนวนสั่งซื้อ</th><th className="n">ราคา/หน่วย</th><th className="n">ส่วนลด</th><th className="n">รวม</th><th>ของแถม</th><th />
+          </tr></thead>
           <tbody>
-            {fromNo && pf.isLoading && <SkeletonRows cols={9} rows={2} />}
+            {fromNo && pf.isLoading && <SkeletonRows cols={12} rows={2} />}
             {lines.map((l, i) => {
               const p = cat.byId.get(l.pid);
               return (
-                <tr key={i} className={l.sourceLineId && l.q.trim() === '0' ? 'muted' : undefined}>
+                <tr key={i} className={l.sourceLineId && !l.on ? 'muted' : undefined} data-testid={`po-row${i}`}>
+                  {fromSrc && <td>{l.sourceLineId && <input type="checkbox" checked={!!l.on} aria-label={`เลือกแถว ${i + 1}`} data-testid={`po-on${i}`} onChange={(e) => update(i, { on: e.target.checked })} />}</td>}
                   <td>
                     {l.sourceLineId ? <>{p?.name ?? '…'}<div className="small muted mono">{p?.sku}</div></> : (
                       <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStock} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`po-p${i}`} style={{ minWidth: 220 }}
@@ -195,20 +215,22 @@ export function PoFormModal({ fromNo, onClose, onSaved }: { fromNo?: string | nu
                     )}
                   </td>
                   <td>{p ? (l.sourceLineId ? l.unitName : <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>) : '-'}</td>
-                  {fromSrc && <><td className="n">{l.ordered ? fq(l.ordered) : '-'}</td><td className="n">{l.avail != null ? <span className={d(l.avail).lt(0) ? 'bad-text' : ''}>{fq(l.avail)}</span> : '-'}</td></>}
+                  {fromSrc && <><td className="n">{l.ordered ? fq(l.ordered) : '-'}</td><td className="n">{l.avail != null ? <span className={d(l.avail).lt(0) ? 'bad-text' : ''}>{fq(l.avail)}</span> : '-'}</td>
+                    <td className="n" data-testid={`po-onorder${i}`}>{l.onOrder != null ? fq(l.onOrder) : '-'}</td></>}
                   <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนสั่งซื้อแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`po-q${i}`} /></td>
-                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.cost} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`po-c${i}`} /></td>
-                  <td className="n"><input className="qty" type="text" data-field={`lines.${i}.discount`} value={l.disc} style={{ width: 70 }} placeholder="10% / 50" aria-label={`ส่วนลดแถว ${i + 1}`} onChange={(e) => update(i, { disc: e.target.value })} /></td>
-                  <td className="n">{fmt(net(l))}</td>
+                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.free ? '0' : l.cost} disabled={l.free} style={{ width: 96 }} aria-label={`ราคาแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`po-c${i}`} /></td>
+                  <td className="n"><input className="qty" type="text" data-field={`lines.${i}.discount`} value={l.free ? '' : l.disc} disabled={l.free} style={{ width: 70 }} placeholder="10% / 50" aria-label={`ส่วนลดแถว ${i + 1}`} onChange={(e) => update(i, { disc: e.target.value })} /></td>
+                  <td className="n">{l.free ? <Pill k="acc">ของแถม</Pill> : fmt(net(l))}</td>
+                  <td><input type="checkbox" checked={!!l.free} aria-label={`ของแถมแถว ${i + 1}`} title="ของแถมตามเงื่อนไขผู้ขาย (ราคา 0)" data-testid={`po-free${i}`} onChange={(e) => update(i, { free: e.target.checked })} /></td>
                   <td><button className="btn sm bad" onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label={`ลบแถว ${i + 1}`} data-testid={`po-del${i}`}>ลบ</button></td>
                 </tr>
               );
             })}
-            {!pf.isLoading && !lines.length && <tr><td colSpan={9} className="empty">ไม่มีรายการสินค้า{fromNo ? 'ที่เป็นสินค้าสต็อกในเอกสารนี้' : ''}</td></tr>}
+            {!pf.isLoading && !lines.length && <tr><td colSpan={12} className="empty">ไม่มีรายการสินค้า{fromNo ? 'ที่เป็นสินค้าสต็อกในเอกสารนี้' : ''}</td></tr>}
           </tbody>
         </table>
       </div>
-      <div className="row"><button className="btn sm" onClick={() => setLines((ls) => [...ls, blank()])} data-testid="po-add">+ เพิ่มสินค้า</button><span className="small muted">{counted.length} รายการจะถูกบันทึก{fromSrc ? ' · จำนวน 0 ไม่บันทึก' : ''}</span></div>
+      <div className="row"><button className="btn sm" onClick={() => setLines((ls) => [...ls, blank()])} data-testid="po-add">+ เพิ่มสินค้า</button><span className="small muted" data-testid="po-count">{counted.length} รายการจะถูกบันทึก{fromSrc ? ' · รายการที่ไม่ได้ติ๊กหรือจำนวน 0 ไม่บันทึก' : ''}</span></div>
       <NoteField value={note} onChange={setNote} testId="po-note" placeholder="เช่น ส่งก่อน 10 โมง / โทรหาก่อนส่ง" />
       <div className="tot" style={{ maxWidth: 360, marginLeft: 'auto' }}>
         {taxRows({ ...totals, billDisc: '0' }, vatShop ? vatMode : 'none').map(([k, v, b]) => <TotLine key={k} k={k} v={v} b={b} />)}
@@ -256,6 +278,9 @@ export function PoDetailPage() {
           {x.vendorRef && <><span>อ้างอิงผู้ขาย</span><span>{x.vendorRef}</span></>}
           {x.source && <><span>ที่มา</span><span data-testid="po-source">จาก <span className="mono"><DocLink no={x.source.no} type={x.source.type} /></span></span></>}
           <span>ใบรับสินค้า</span><span className="mono" data-testid="po-receipts">{x.receipts.length ? x.receipts.map((r, i) => <span key={r.no}>{i > 0 && ', '}<span style={r.status === 'void' ? { textDecoration: 'line-through' } : undefined}><DocLink no={r.no} type="GR" /></span></span>) : <span className="muted">-</span>}</span>
+          {x.receipts.filter((r) => r.overReceiveNote && r.status === 'active').map((r) => (
+            <Fragment key={r.no}><span>รับเกิน ({r.no})</span><span className="small" data-testid="po-over-note">หมายเหตุ: {r.overReceiveNote}</span></Fragment>
+          ))}
           <span>หมายเหตุ</span><NoteText note={x.note} dash />
           <span>สร้างโดย</span><span>{x.createdBy}</span>
         </div>
@@ -270,10 +295,10 @@ export function PoDetailPage() {
             <tbody>
               {x.lines.map((l) => (
                 <tr key={l.id}>
-                  <td>{l.name}<div className="small muted mono">{l.sku}{l.sourceQty ? ` · ลูกค้าสั่ง ${fq(l.sourceQty)}` : ''}</div></td>
+                  <td>{l.name}{l.free && <> <Pill k="acc">ของแถม</Pill></>}<div className="small muted mono">{l.sku}{l.sourceQty ? ` · ลูกค้าสั่ง ${fq(l.sourceQty)}` : ''}</div></td>
                   <td className="n">{fq(l.qty)} {l.unitName}</td>
                   {x.totals && <><td className="n">{l.unitCost != null ? fmt(l.unitCost) : '-'}{l.discAmt && d(l.discAmt).gt(0) ? <div className="small muted">ลด {fmt(l.discAmt)}</div> : null}</td><td className="n">{l.net != null ? fmt(l.net) : '-'}</td></>}
-                  <td className="n">{fq(l.receivedQty)}</td>
+                  <td className="n">{fq(l.receivedQty)}{d(l.overQty).gt(0) && <div data-testid="po-over-pill"><Pill k="warn">รับเกิน +{fq(l.overQty)}</Pill></div>}</td>
                   <td className="n">{d(l.remainingQty).gt(0) ? <b>{fq(l.remainingQty)}</b> : <Pill k="ok">ครบ</Pill>}</td>
                 </tr>
               ))}
@@ -303,7 +328,7 @@ function poPaper(x: PurchaseOrder) {
       ...(x.vatMode !== 'none' ? [['ราคาในเอกสาร', VAT_TH[x.vatMode]]] : []),
     ] as [string, ReactNode][],
     cols: priced ? 'price' as const : 'qty' as const,
-    rows: x.lines.map((l) => ({ name: l.name, desc: l.sku, qty: l.qty, unit: l.unitName, price: l.unitCost, disc: l.discAmt, amt: l.net })),
+    rows: x.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, desc: l.sku, qty: l.qty, unit: l.unitName, price: l.unitCost, disc: l.discAmt, amt: l.net })),
     totals: x.totals ? taxRows(x.totals, x.vatMode) : undefined, baht: x.totals?.total ?? null, note: x.note || undefined,
     sign: ['ผู้สั่งซื้อ', 'ผู้อนุมัติ', 'ผู้ขายรับคำสั่งซื้อ'],
   };
