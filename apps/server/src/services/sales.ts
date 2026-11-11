@@ -18,6 +18,7 @@ import { applyOut, lockLots, planTakes, reverseOuts } from '../lib/stock';
 import { loadProducts, requireWarehouse, unitOf, type ProductRow, type ProductUnitRow } from './master';
 // Read-only reuse of module A (M10): customer row and outstanding AR / overdue for the POS credit check.
 import { approveBelowCost, creditInfo, loadCustomer } from '../modules/sales/common';
+import { scgfCartOf, scgfCouponValue, scgfDocCoupon, scgfRedeemOnDoc, scgfReturnOnVoid } from './scgfamily';
 
 export const SALE_TYPES = ['ABB', 'INV', 'RC'] as const;
 
@@ -91,6 +92,7 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
     ...(row.type === 'ABB' ? { posId: await posIdOf(tx, row.device_id) } : {}),
     related: await relatedDocs(tx, row.id),
     note: row.note, discReason: row.disc_reason, arBalance: row.status === 'void' ? '0.00' : money(row.ar_balance),
+    ...(process.env.EDITION === 'cloud' ? { coupon: await scgfDocCoupon(tx, 'docs', row.id) } : {}),
   };
 }
 
@@ -147,6 +149,8 @@ type PosCustomer = { id: string; name: string; code: string; phone: string | nul
 interface BuiltBill {
   customer: PosCustomer | null; lines: PosLine[]; reqLines: number; retail: Awaited<ReturnType<typeof retailPosPricing>>;
   totals: ReturnType<typeof calcDoc>; vatMode: 'inc' | 'none'; priceChanges: PriceChange[];
+  /** Cloud only: the bill's member coupon with the provider's value (null on-prem / no coupon). */
+  coupon: { req: NonNullable<PosSaleReq['coupon']>; cart: ReturnType<typeof scgfCartOf>; value: { amount: string; title: string } } | null;
 }
 
 async function shopVatMode(tx: Tx, ctx: Ctx): Promise<{ vatRegistered: boolean; vatMode: 'inc' | 'none' }> {
@@ -155,7 +159,7 @@ async function shopVatMode(tx: Tx, ctx: Ctx): Promise<{ vatRegistered: boolean; 
 }
 
 /** Customer, priced lines (promo / price list / bundles), totals and the manual price changes of a POS cart. */
-async function buildBill(tx: Tx, deps: Deps, req: PosPreviewReq, vatMode: 'inc' | 'none'): Promise<BuiltBill> {
+async function buildBill(tx: Tx, deps: Deps, req: PosPreviewReq & Pick<PosSaleReq, 'coupon'>, vatMode: 'inc' | 'none'): Promise<BuiltBill> {
   let customer: PosCustomer | null = null;
   if (req.customerId) {
     if (!isUuid(req.customerId)) throw E.validation('Unknown customer');
@@ -200,8 +204,17 @@ async function buildBill(tx: Tx, deps: Deps, req: PosPreviewReq, vatMode: 'inc' 
     }
   }
   if (d(req.billDiscount).lt(0)) throw E.validation('Bill discount must not be negative', { field: 'billDiscount' });
-  const totals = calcDoc(lines.map((l) => l.core), vatMode, req.billDiscount);
-  return { customer, lines, reqLines: req.lines.length, retail, totals, vatMode, priceChanges };
+  let totals = calcDoc(lines.map((l) => l.core), vatMode, req.billDiscount);
+  let coupon: BuiltBill['coupon'] = null;
+  if (process.env.EDITION === 'cloud') {
+    // SCG Family coupon (cloud only): value recomputed from the provider against this bill, never the client's.
+    if (deps.edition === 'cloud' && req.coupon) {
+      const cart = scgfCartOf(lines.map((l) => ({ productId: l.p.id, sku: l.p.sku, name: l.p.name, isScg: l.p.is_scg, qty: l.qty, unitPrice: l.unitPrice })), totals, vatMode);
+      coupon = { req: req.coupon, cart, value: await scgfCouponValue(tx, req.coupon, cart) };
+      totals = calcDoc(lines.map((l) => l.core), vatMode, req.billDiscount, coupon.value.amount);
+    }
+  }
+  return { customer, lines, reqLines: req.lines.length, retail, totals, vatMode, priceChanges, coupon };
 }
 
 /** What a line consumes from FIFO lots: base qty taken and its cost. */
@@ -466,6 +479,9 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: type, docNo: no, docId, docLineId: lineId, note: moveNote });
   }
 
+  if (process.env.EDITION === 'cloud') {
+    if (bill.coupon) await scgfRedeemOnDoc(tx, 'docs', docId, no, bill.coupon.req, bill.coupon.value, bill.coupon.cart); // bill close (BR-11)
+  }
   await deps.hooks.beforeCommit?.('posSale', tx);
   const promoNames = [...new Set(lines.flatMap((l) => (l.retail?.promo ? [l.retail.promo.name] : [])))];
   const methodTh = (m: string) => (m === 'credit' ? 'เงินเชื่อ' : m);
@@ -592,6 +608,9 @@ export async function voidDoc(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: { 
   }
   await reverseOuts(tx, ctx, doc.id, { docType: doc.type, docNo: doc.no, docId: doc.id, note: `คืนสต็อก · ยกเลิก ${doc.no}` });
   await tx.query(`update docs set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [doc.id, ctx.userId, body.reason]);
+  if (process.env.EDITION === 'cloud') {
+    if (deps.edition === 'cloud') await scgfReturnOnVoid(tx, 'docs', doc.id, doc.no);
+  }
   await deps.hooks.beforeCommit?.('voidDoc', tx);
   await writeAudit(tx, ctx, [{ action: 'void', object: doc.type, ref: doc.no, detail: `${body.reason} · ฿${fmtTHB(doc.total)}${approvedBy}` }]);
   return getDoc(tx, ctx, no);

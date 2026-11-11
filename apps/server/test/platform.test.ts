@@ -124,7 +124,7 @@ describe('editions (M19)', () => {
   it('onprem: Prompt Plus capabilities false, routes not registered, shop from the single tenant', async () => {
     const { body, allRoutes } = await metaOf('onprem');
     expect(body.edition).toBe('onprem');
-    expect(Object.keys(body.capabilities)).toEqual(['scgFamily']); // nothing cloud-only in the on-prem response
+    expect(Object.keys(body.capabilities)).toEqual([]); // nothing cloud-only in the on-prem response (Prompt Plus, SCG Family)
     expect(Meta.parse(body).capabilities).toEqual({ promptPlusOrders: false, promptPlusSso: false, scgFamily: false }); // OQ-A2: no SCG Family on-prem
     expect(body.shop).toMatchObject({ name: 'ร้านวัสดุเจริญชัย', taxId: '0505561004321', vatRegistered: true, b2bVatMode: 'exc' });
     const missing = allRoutes.filter((r) => !r.registered).map((r) => r.k);

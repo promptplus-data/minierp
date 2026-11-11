@@ -14,6 +14,7 @@ import { registerErrorHandler } from './plugins/errors';
 import { coreRoutes } from './routes/core';
 import { opsRoutes } from './routes/ops';
 import { promptPlusRoutes } from './routes/promptplus';
+import { scgFamilyRoutes } from './routes/scgfamily';
 import { systemRoutes } from './routes/system';
 import { registerModules } from './modules';
 
@@ -61,7 +62,10 @@ export async function buildApp(opts: BuildOptions): Promise<FastifyInstance> {
   coreRoutes(app, deps, authed);
   opsRoutes(app, deps, authed);
   if (process.env.EDITION === 'cloud') {
-    if (edition === 'cloud') promptPlusRoutes(app, authed);
+    if (edition === 'cloud') {
+      promptPlusRoutes(app, authed);
+      scgFamilyRoutes(app, authed);
+    }
   }
   await registerModules(app, { deps, authed });
 

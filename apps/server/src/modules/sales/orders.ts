@@ -13,6 +13,7 @@ import {
 } from './common';
 import { makePricer } from './pricing';
 import { createProjectForOrder } from './projects';
+import { scgfCartOf, scgfCouponValue, scgfDocCoupon, scgfRedeemOnDoc, scgfReturnOnVoid } from '../../services/scgfamily';
 import { effectiveStatus, quoteLines, quoteRow } from './quotes';
 
 interface OrderRow extends PartyCols {
@@ -98,6 +99,7 @@ export async function getOrder(tx: Tx, ctx: Ctx, no: string): Promise<SalesOrder
     deliveries: dlv.rows.map((x) => ({ no: x.no, date: x.date, status: x.status, invoiceNo: x.invoice_no })),
     invoices: inv.rows.map((x) => ({ no: x.no, date: x.date, status: x.status })),
     createdBy: o.created_by_name, voided: voidedJson(o),
+    ...(process.env.EDITION === 'cloud' ? { coupon: await scgfDocCoupon(tx, 'sales_orders', o.id) } : {}),
   };
 }
 
@@ -136,7 +138,16 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
   const vatMode = quote ? quote.vat_mode : await resolveVatMode(tx, ctx, req.vatMode);
   if (quote && req.vatMode && req.vatMode !== quote.vat_mode) throw E.validation('A converted sales order keeps the quotation VAT mode');
   const lines = await buildLines(tx, req.lines, { allowFree: false });
-  const totals = totalsOf(lines, vatMode, req.billDiscount);
+  let totals = totalsOf(lines, vatMode, req.billDiscount);
+  let coupon: { cart: ReturnType<typeof scgfCartOf>; value: { amount: string; title: string } } | null = null;
+  if (process.env.EDITION === 'cloud') {
+    // SCG Family coupon (cloud only): value from the provider for this order's cart, never the client's amount.
+    if (deps.edition === 'cloud' && req.coupon) {
+      const cart = scgfCartOf(lines.map((l) => ({ productId: l.product!.id, sku: l.product!.sku, name: l.name, isScg: l.product!.is_scg, qty: l.qty, unitPrice: l.unitPrice })), totals, vatMode);
+      coupon = { cart, value: await scgfCouponValue(tx, req.coupon, cart) };
+      totals = totalsOf(lines, vatMode, req.billDiscount, coupon.value.amount);
+    }
+  }
   const term = req.term ?? quote?.term ?? customer.term;
   const salesperson = await requireUser(tx, req.salespersonId ?? quote?.salesperson_id ?? ctx.userId);
   const warehouseId = req.warehouseId ? (await requireWarehouse(tx, req.warehouseId)).id : await defaultWarehouse(tx);
@@ -198,6 +209,9 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
     );
   }
   if (quote) await tx.query(`update sales_quotes set status = 'accepted', updated_at = now() where id = $1`, [quote.id]);
+  if (process.env.EDITION === 'cloud') {
+    if (coupon && req.coupon) await scgfRedeemOnDoc(tx, 'sales_orders', id, no, req.coupon, coupon.value, coupon.cart);
+  }
 
   let pjText = '';
   if (req.project?.mode === 'new') {
@@ -221,6 +235,9 @@ export async function voidOrder(tx: Tx, deps: Deps, ctx: Ctx, no: string, body: 
   if (o.project_id && o.pj_status === 'active' && o.pj_main === o.id) down.push((o.pj_no ?? '') + ' (โครงการ)');
   if (down.length) throw E.downstreamFirst(`${no} has downstream documents; void them first`, { docs: down });
   await tx.query(`update sales_orders set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [o.id, ctx.userId, body.reason]);
+  if (process.env.EDITION === 'cloud') {
+    if (deps.edition === 'cloud') await scgfReturnOnVoid(tx, 'sales_orders', o.id, o.no);
+  }
   await writeAudit(tx, ctx, [{ action: 'void', object: 'SO', ref: no, detail: `${body.reason} · ฿${fmtTHB(o.total)}${approvedBy}` }]);
   return getOrder(tx, ctx, no);
 }

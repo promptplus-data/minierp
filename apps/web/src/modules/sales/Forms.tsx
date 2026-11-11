@@ -1,5 +1,6 @@
 /** Create / edit modals of the B2B flow: quotation, sales order (with project options), direct invoice, delivery order, invoice from deliveries, full INV from an ABB. */
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { CloudCouponSlot, CloudCouponTotal, cloudReleaseCoupon, type AppliedCoupon } from '../../cloud';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -62,6 +63,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [pjCustom, setPjCustom] = useState('40,30,30');
   const [pjNote, setPjNote] = useState('');
   const [short, setShort] = useState<Shortage[] | null>(null);
+  const [coupon, setCoupon] = useState<AppliedCoupon | null>(null); // cloud only, sales order only
   const cust = useCustomer(customerId || null).data;
   const creditTerm = (quote?.term.t !== 'cash' ? quote?.term : undefined) ?? (cust && (cust.term as SalesTerm).t !== 'cash' ? (cust.term as SalesTerm) : undefined);
   const soTerms = soPay ?? (creditTerm ? 'credit' : 'cash');
@@ -75,7 +77,9 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   });
   const stockWhs = (whs.data ?? []).filter((w) => w.active);
   const wh = warehouseId || stockWhs.find((w) => !w.isPos)?.id || stockWhs[0]?.id || '';
-  const t = previewTotals(lines, vatMode, billDisc);
+  const cpn = coupon?.amount ?? '0';
+  const t = previewTotals(lines, vatMode, d(billDisc || 0).plus(cpn).toFixed(2));
+  const cancel = () => { cloudReleaseCoupon(coupon, 'cart_cleared'); onClose(); };
   const check = useLineCheck(lines, vatMode, billDisc, mode === 'QT' ? undefined : wh);
   const pcts = pjCustom.split(/[,\s/]+/).filter(Boolean);
   const pctSum = pcts.reduce((a, x) => a.plus(d(Number.isFinite(Number(x)) ? x : 0)), d(0));
@@ -90,7 +94,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         ? { mode: 'new', name: pjName, site: pjSite, note: pjNote, template: pjTpl, ...(pjTpl === 'custom' ? { installments: pcts.map((p) => ({ pct: p })) } : {}) }
         : pjMode ? { mode: 'existing', projectId: pjMode } : undefined;
       const term = soTerms === 'cash' || !creditTerm ? { t: 'cash' } : creditTerm;
-      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, term, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...extra };
+      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, term, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...(coupon ? { coupon: { memberId: coupon.memberId, code: coupon.code, reservationId: coupon.reservationId, amount: coupon.amount } } : {}), ...extra };
     }
     const payments = pay === 'credit' ? undefined : [{ method: pay, amount: t.total }];
     return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, salespersonId: sp, billDiscount: disc, lines: ls, payments, ...extra };
@@ -119,7 +123,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const freeLeft = mode !== 'QT' && lines.some((l) => !l.productId);
   const title = mode === 'QT' ? (edit ? `แก้ไขใบเสนอราคา ${edit.no}` : 'สร้างใบเสนอราคา') : mode === 'SO' ? (quote ? `แปลง ${quote.no} เป็นใบสั่งขาย` : 'สร้างใบสั่งขาย') : 'ออกใบกำกับภาษี (ขายตรง)';
   return (
-    <Modal onClose={onClose} wide label={title}>
+    <Modal onClose={cancel} wide label={title}>
       <h3>{title}</h3>
       <p className="small muted" style={{ margin: 0 }}>
         {mode === 'QT' && `ราคาตามลำดับ: ราคาลูกค้า → ราคากลุ่ม → โปรโมชัน → ราคาปลีก · ใส่สินค้าที่ยังไม่มีในระบบได้ (พิมพ์รายการเอง) · ราคาต่ำกว่าทุน${below.need} · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ`}
@@ -194,11 +198,18 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <label className="f" style={{ maxWidth: 180 }}>ส่วนลดท้ายบิล (บาท)<input type="number" min="0" step="0.01" name="billDiscount" value={billDisc} onChange={(e) => setBillDisc(e.target.value)} /></label>
         <div className="tot" style={{ minWidth: 240 }}>
-          <span className="muted">รวมหลังส่วนลด</span><span>{fmt(d(t.net).minus(d(billDisc || 0)))}</span>
+          {coupon && CloudCouponTotal && <Suspense fallback={null}><CloudCouponTotal coupon={coupon} /></Suspense>}
+          <span className="muted">รวมหลังส่วนลด</span><span>{fmt(d(t.net).minus(d(billDisc || 0)).minus(cpn))}</span>
           {vatMode !== 'none' && <><span className="muted">VAT 7%{vatMode === 'inc' ? ' (รวมในราคา)' : ''}</span><span>{fmt(t.vat)}</span></>}
           <span style={{ fontWeight: 600 }}>รวมทั้งสิ้น</span><span className="big" data-testid="doc-total">฿{fmt(t.total)}</span>
         </div>
       </div>
+      {mode === 'SO' && CloudCouponSlot && (
+        <Suspense fallback={null}>
+          <CloudCouponSlot customerId={customerId || null} value={coupon} onChange={setCoupon}
+            cart={lines.some((l) => l.productId && !l.free) ? { vatMode, billDiscount: '0', lines: lines.filter((l) => l.productId && !l.free).map((l) => ({ productId: l.productId, qty: l.qty && d(l.qty).gt(0) ? l.qty : '0', unitPrice: l.unitPrice || '0', ...(l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}) })) } : null} />
+        </Suspense>
+      )}
       <ProfitSummary profit={check?.profit} />
       {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึก{below.need}</div>}
       {mode !== 'QT' && !(mode === 'SO' && soTerms === 'cash') && credit.data && cust && (
@@ -209,7 +220,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       )}
       {save.err && <div className="err" role="alert">{save.err}</div>}
       <div className="act">
-        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn" onClick={cancel}>ยกเลิก</button>
         <button className="btn pri" disabled={save.busy || !customerId || freeLeft || (pjMode === 'new' && (!pjName.trim() || (pjTpl === 'custom' && !pctSum.eq(100))))} onClick={() => void save.run()} data-testid="doc-save">
           {mode === 'QT' ? 'บันทึกใบเสนอราคา' : mode === 'SO' ? 'บันทึกใบสั่งขาย' : 'ออกใบกำกับภาษี'}
         </button>

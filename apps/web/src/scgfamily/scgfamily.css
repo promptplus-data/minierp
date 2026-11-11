@@ -1,0 +1,44 @@
+/* CLOUD ONLY. SCG Family coupon slot + "เพิ่มส่วนลด" picker. App tokens only; touch mode gets 48px targets. */
+.scgf-slot{margin:8px 0}
+.scgf-tag{font-size:12px;font-weight:700;color:var(--accent);background:var(--accent-soft);border-radius:99px;padding:2px 10px;white-space:nowrap}
+.scgf-open{width:100%;display:flex;align-items:center;gap:10px;border:1px dashed var(--accent);background:var(--surface);color:var(--fg);border-radius:10px;padding:10px 12px;cursor:pointer;text-align:left;font:inherit}
+.scgf-open:hover:not(:disabled){background:var(--accent-soft)}
+.scgf-open:disabled{opacity:.6;cursor:default;border-color:var(--line)}
+.scgf-chev{margin-left:auto;font-size:20px;color:var(--muted)}
+.scgf-applied{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;border:1px solid var(--ok);background:var(--ok-soft);border-radius:10px;padding:8px 12px}
+.scgf-applied-t{flex:1;min-width:140px}
+.scgf-val{color:var(--ok)}
+.linkbtn{border:0;background:none;padding:0;color:var(--accent);cursor:pointer;text-decoration:underline;font:inherit;align-self:flex-start}
+
+.scgf{display:flex;flex-direction:column;gap:12px}
+.scgf-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.scgf-head h3{flex:1;text-align:center;margin:0}
+.scgf-member{display:inline-flex;gap:6px;align-items:center;color:var(--muted)}
+.scgf-codebar{flex-wrap:nowrap}
+.scgf-codebar input{flex:1;min-width:0}
+.scgf-found{display:flex;flex-direction:column;gap:6px;background:var(--ok-soft);border-radius:8px;padding:10px 12px}
+.scgf-found .ok{color:var(--ok);font-weight:700}
+.scgf-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-height:min(56vh,620px);overflow:auto;padding:2px}
+.scgf-card{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);overflow:hidden;cursor:pointer}
+.scgf-card.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.scgf-card.off{cursor:default}
+.scgf-card.off .scgf-im,.scgf-card.off .scgf-body>:not(.scgf-why):not(.linkbtn):not(.scgf-cond){opacity:.5}
+.scgf-im{height:84px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),var(--c-ov));color:var(--accent-fg);font-weight:700;font-size:18px;letter-spacing:.02em}
+.scgf-im.k-cash_card{background:linear-gradient(135deg,var(--c-sale),var(--ok))}
+.scgf-im.k-points{background:linear-gradient(135deg,var(--c-inv),var(--warn))}
+.scgf-im img{width:100%;height:100%;object-fit:cover}
+.scgf-body{display:flex;flex-direction:column;gap:3px;padding:10px 12px 12px}
+.scgf-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.scgf-chip{font-size:11px;background:var(--surface2);border:1px solid var(--line);border-radius:6px;padding:1px 8px}
+.scgf-top input[type=radio]{width:20px;height:20px;accent-color:var(--accent)}
+.scgf-title{font-size:15px}
+.scgf-why{color:var(--bad)}
+.scgf-cond{margin:2px 0 0;padding-left:18px;color:var(--muted)}
+.scgf-empty{border:1px dashed var(--line);border-radius:var(--r)}
+.scgf-foot{border-top:1px solid var(--line);padding-top:12px}
+@media (max-width:560px){.scgf-grid{grid-template-columns:1fr}.scgf-head h3{text-align:left}.scgf-member{flex-basis:100%}.scgf-im{height:60px}}
+[data-touch="on"] .scgf-open,[data-touch="on"] .scgf-applied{min-height:56px}
+[data-touch="on"] .scgf-top input[type=radio]{width:28px;height:28px}
+[data-touch="on"] .scgf-body{gap:5px;padding:12px 14px 14px}
+[data-touch="on"] .linkbtn{min-height:36px}
+[data-touch="on"] .scgf-head .btn{min-width:72px}

@@ -9,10 +9,10 @@ export const Edition = z.enum(['cloud', 'onprem']);
 export type Edition = z.infer<typeof Edition>;
 
 export const Capabilities = z.object({
-  // The on-prem server omits the two cloud-only flags entirely; parsing fills in false.
+  // The on-prem server omits the cloud-only flags entirely; parsing fills in false.
   promptPlusOrders: z.boolean().default(false), // REQ-M05-01/02/05, M08-11 — false on onprem (REQ-M19-03)
   promptPlusSso: z.boolean().default(false),    // REQ-M01-01 — false on onprem
-  scgFamily: z.boolean(),        // M13 — cloud only; never offered on onprem (OQ-A2)
+  scgFamily: z.boolean().default(false), // M13 — cloud only; never offered on onprem (OQ-A2)
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 export const Meta = z.object({

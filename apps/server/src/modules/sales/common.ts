@@ -96,9 +96,10 @@ export async function buildLines(tx: Tx, lines: SalesLineIn[], opts: { allowFree
 export const coreLine = (l: Pick<BuiltLine, 'qty' | 'unitPrice' | 'discount' | 'vat'>): CoreLine => ({ qty: l.qty, unitPrice: l.unitPrice, discount: l.discount, vat: l.vat });
 export const discAmt = (l: BuiltLine) => money(lineDiscount(coreLine(l)));
 
-export function totalsOf(lines: BuiltLine[], vatMode: VatMode, billDiscount: string) {
+/** coupon: member coupon value (cloud only), applied before the bill discount by calcDoc. */
+export function totalsOf(lines: BuiltLine[], vatMode: VatMode, billDiscount: string, coupon = '0') {
   if (d(billDiscount).lt(0)) throw E.validation('Bill discount must not be negative');
-  return calcDoc(lines.map(coreLine), vatMode, billDiscount);
+  return calcDoc(lines.map(coreLine), vatMode, billDiscount, coupon);
 }
 
 export const totalsJson = (r: { gross: string; line_disc: string; bill_disc: string; base7: string; exempt: string; vat: string; total: string }): SalesTotals => ({
