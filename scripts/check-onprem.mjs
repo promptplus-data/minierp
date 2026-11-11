@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Guard: the on-premise edition must not contain Prompt Plus order/delivery code,
-// URLs, credentials or PROMPTPLUS_* env names.
+// Guard: the on-premise edition must not contain cloud-only integration code: Prompt Plus
+// order/delivery code, URLs, credentials or PROMPTPLUS_* env names, and SCG Family member
+// coupon code (OQ-A2), its /api/scgf routes or SCGF_* env names.
 //
 // Usage
 //   node scripts/check-onprem.mjs <dir> [<dir> ...] [--pattern <regex>]...
@@ -32,6 +33,11 @@ const BASE_PATTERNS = [
   { name: 'Prompt Plus module/identifier', re: /promptplus/i },
   { name: 'Prompt Plus env var', re: /PROMPTPLUS_[A-Z0-9_]*/ },
   { name: 'Prompt Plus (spaced/dashed)', re: /prompt[\s_-]plus/i },
+  // SCG Family is cloud-only (OQ-A2). Identifiers, module paths, routes and env names; the plain-text
+  // product name may appear in shared labels (e.g. the chart-of-accounts name of the coupon account).
+  { name: 'SCG Family module/identifier', re: /scg[_-]?family/i },
+  { name: 'SCG Family route', re: /\/api\/scgf\b/ },
+  { name: 'SCG Family env var', re: /SCGF_[A-Z0-9_]+/ },
 ];
 
 function parseArgs(argv) {
@@ -127,7 +133,7 @@ async function scanSource(patterns) {
       const present = existsSync(srcDir) ? [...walk(srcDir)].map((f) => path.relative(REPO_ROOT, f)) : [];
       console.log(`check-onprem --source: ${err.message.split('\n')[0]}`);
       console.log(`  apps/server/src currently has ${present.length} file(s); nothing to trace yet. Treating as clean.`);
-      const cloudOnly = present.filter((f) => /promptplus/i.test(f));
+      const cloudOnly = present.filter((f) => /promptplus|scgfamily/i.test(f));
       if (cloudOnly.length) console.log(`  cloud-only files present (will be stubbed for onprem): ${cloudOnly.join(', ')}`);
       return { violations: [], files: 0, skipped: true };
     }
@@ -160,10 +166,10 @@ const report = opts.source ? await scanSource(opts.patterns) : scanBundleDirs(op
 if (report.violations.length > 0) {
   console.error(`check-onprem: FAILED, ${report.violations.length} forbidden match(es):`);
   for (const v of report.violations) console.error(`  ${v}`);
-  console.error('Cloud-only (Prompt Plus) code must live in packages/adapters/promptplus* or files named');
-  console.error("*promptplus*, and every call site must sit inside `if (process.env.EDITION === 'cloud')`.");
+  console.error('Cloud-only (Prompt Plus / SCG Family) code must live in files named *promptplus* or *scgfamily*,');
+  console.error("and every call site must sit inside `if (process.env.EDITION === 'cloud')` (web: import.meta.env.VITE_EDITION).");
   process.exit(1);
 }
 if (!report.skipped) {
-  console.log(`check-onprem: OK (${report.files} ${opts.source ? 'modules in onprem graph' : 'files'} scanned, no Prompt Plus references)`);
+  console.log(`check-onprem: OK (${report.files} ${opts.source ? 'modules in onprem graph' : 'files'} scanned, no Prompt Plus / SCG Family references)`);
 }

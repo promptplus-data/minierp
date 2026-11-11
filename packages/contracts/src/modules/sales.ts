@@ -5,7 +5,7 @@
  * Money and quantities are decimal strings. Lists are cursor paged (NFR-12).
  */
 import { z } from 'zod';
-import { Approval, Dec, DecNN, Discount, PaymentMethod, SalesDoc, pageQuery, type RouteEditions } from '../core';
+import { Approval, Dec, DecNN, DocCoupon, DocCouponIn, Discount, PaymentMethod, SalesDoc, pageQuery, type RouteEditions } from '../core';
 
 const ISODate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
 
@@ -167,6 +167,7 @@ export const SalesOrderReq = z.object({
   creditApproval: Approval.optional(),   // BR-08: over the credit limit or overdue bills
   belowCostApproval: Approval.optional(), // BR-16: owner only
   priceApproval: SalesPriceApproval.optional(), // price below BR-05 / discount over the role cap
+  coupon: DocCouponIn.optional(), // member coupon (cloud only); value recomputed by the server
 });
 export type SalesOrderReq = z.infer<typeof SalesOrderReq>;
 export const SalesDlvStatus = z.enum(['open', 'partial', 'delivered']);
@@ -180,6 +181,7 @@ export const SalesOrder = z.object({
   deliveries: z.array(SalesDocRef.extend({ invoiceNo: z.string().nullable() })), invoices: z.array(SalesDocRef),
   priceApproval: SalesApprovalNote.nullable().default(null), profit: SalesProfit.nullable().default(null),
   createdBy: z.string(), voided: SalesVoided.nullable(),
+  coupon: DocCoupon.nullable().optional(), // member coupon (cloud only); totals.total is after it
 });
 export type SalesOrder = z.infer<typeof SalesOrder>;
 export const SalesOrderSummary = z.object({

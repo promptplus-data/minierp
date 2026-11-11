@@ -20,8 +20,8 @@ const MIGRATIONS_DIR = path.join(REPO_ROOT, 'packages/db/migrations');
 
 export const EDITIONS = /** @type {const} */ (['cloud', 'onprem']);
 
-/** Anything whose import specifier or resolved file path matches this is cloud-only (Prompt Plus). */
-export const CLOUD_ONLY_MODULE = /promptplus/i;
+/** Anything whose import specifier or resolved file path matches this is cloud-only (Prompt Plus, SCG Family). */
+export const CLOUD_ONLY_MODULE = /promptplus|scgfamily/i;
 
 /** Native / optional modules that cannot be inlined. Installed next to the bundle instead. */
 export const EXTERNAL_NATIVE = ['argon2', 'pg-native'];
@@ -53,7 +53,7 @@ export class EntryMissingError extends Error {
  * `process.env.EDITION === 'cloud'` (constant-folded by `define`), otherwise the
  * call site itself stays in the bundle and check-onprem fails on the identifier name.
  *
- * The stub's virtual path deliberately contains no "promptplus" text, because esbuild
+ * The stub's virtual path deliberately contains no "promptplus" / "scgfamily" text, because esbuild
  * writes module paths into the bundle as comments.
  */
 export function excludeCloudOnlyModules(excluded = []) {

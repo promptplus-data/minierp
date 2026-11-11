@@ -144,6 +144,18 @@ export const PosPaymentMethod = z.enum(['cash', 'transfer', 'promptpay', 'card',
 export type PosPaymentMethod = z.infer<typeof PosPaymentMethod>;
 /** Reason chip required whenever a POS bill has a manual discount or a changed price; 'other' needs text. */
 export const DiscReason = z.object({ code: z.enum(['regular', 'defect', 'bulk', 'competitor', 'other']), text: z.string().max(200).optional() });
+/**
+ * Member coupon on a bill (cloud edition only, one per bill). The client sends what it reserved; the server
+ * recomputes the value from the coupon provider and rejects a changed amount (never trusts `amount`).
+ */
+export const DocCouponIn = z.object({ memberId: z.string().min(1).max(40), code: z.string().min(1).max(60), reservationId: z.string().min(1).max(120), amount: DecNN });
+export type DocCouponIn = z.infer<typeof DocCouponIn>;
+/** The coupon stored on a saved bill / sales order: shown as its own totals row, not a shop discount. */
+export const DocCoupon = z.object({
+  code: z.string(), title: z.string(), amount: Dec, memberId: z.string(), reservationId: z.string(), redemptionId: z.string().nullable(),
+  status: z.enum(['reserved', 'redeemed', 'released', 'reversed']),
+});
+export type DocCoupon = z.infer<typeof DocCoupon>;
 export const PosSaleReq = z.object({
   idempotencyKey: z.string().uuid(),
   shiftId: z.string(), warehouseId: z.string(),
@@ -165,6 +177,7 @@ export const PosSaleReq = z.object({
   /** Credit sale over the customer's limit / with overdue bills: owner or manager PIN (self-approved by them). */
   creditApproval: z.object({ approverUserId: z.string(), pin: z.string() }).optional(),
   note: z.string().max(500).optional(),
+  coupon: DocCouponIn.optional(),
 });
 export type PosSaleReq = z.infer<typeof PosSaleReq>;
 export const DocLine = z.object({
@@ -196,6 +209,8 @@ export const SalesDoc = z.object({
   arBalance: Dec.optional(),
   /** The `ref` document has a B2B invoice page (sales_invoices); false = a POS bill, opened at /sales/:no. */
   refB2b: z.boolean().optional(),
+  /** Member coupon applied to the bill (cloud only); totals.total is after it. */
+  coupon: DocCoupon.nullable().optional(),
 });
 export type SalesDoc = z.infer<typeof SalesDoc>;
 export const DocSummary = SalesDoc.pick({ id: true, no: true, type: true, date: true, customer: true, status: true }).extend({ total: Dec, itemsPreview: z.string() });
