@@ -5,11 +5,11 @@ stock ledger and reorder list, M05 GR-overdue alert (BR-10) and M19-08 delivery-
 both editions (`purchasingRouteEditions = {}`); the delivery-file import is the on-prem way to receive SCG goods
 and is harmless on cloud. No Prompt Plus API code.
 
-Files: `index.ts` (routes), `ap.ts` (settings, receipts list, AP, payments, vendor returns), `grhook.ts` (called by
+Files: `index.ts` (routes), `po.ts` (purchase orders), `grvoid.ts` (goods-receipt void), `ap.ts` (settings, receipts list, AP, payments, vendor returns), `grhook.ts` (called by
 core `services/inventory.ts` inside the goods-receipt transaction), `delivery.ts` (delivery-file preview/commit,
 GR drafts, column profiles, product aliases), `importhub.ts` (M04), `fileparse.ts` (CSV UTF-8/TIS-620 + XLSX),
 `stockx.ts` (dashboard, BR-10 alert, stock count, ledger, reorder). Pure rules: `packages/core/src/payables.ts`,
-`packages/core/src/importfmt.ts`. Migration `0200_purchasing.sql`. Demo data: `packages/db/src/seedPurchasing.ts`.
+`packages/core/src/importfmt.ts`. Migrations `0200_purchasing.sql`, `0660_purchase_orders.sql` (purchase orders, `gr_lines.po_id/po_line_id`, `stock_docs.void_*`). Demo data: `packages/db/src/seedPurchasing.ts`.
 
 ## Routes
 
@@ -19,6 +19,10 @@ GR drafts, column profiles, product aliases), `importhub.ts` (M04), `fileparse.t
 | purchasingDashboard | `GET /api/purchasing/dashboard` | any (drafts, overdue drafts, below reorder, AP due 7 days when `fin.ap`) |
 | grAlerts | `GET /api/purchasing/gr-alerts` | `inv.receive` or `inv.view` |
 | grReceipts / grReceipt | `GET /api/purchasing/receipts[/:no]` | `inv.receive` or `inv.view` |
+| grVoid | `POST /api/purchasing/receipts/:no/void` `{ reason }` | `inv.receive` (lots untouched, AP bill unpaid / no vendor return) |
+| purchaseOrders / Create / one | `GET|POST /api/purchase-orders`, `GET /api/purchase-orders/:no` | create `inv.receive`; read also `fin.ap` / `inv.view` (prices only with `inv.receive`, `fin.ap` or `data.cost`) |
+| purchaseOrderVoid / Close | `POST /api/purchase-orders/:no/void|close` `{ reason }` | `inv.receive` |
+| purchaseOrderPrefill | `GET /api/purchase-orders/prefill/:QT…|SO…?warehouseId=` | `inv.receive` |
 | apBills, apAging | `GET /api/ap/bills`, `GET /api/ap/aging` | `fin.ap` (read) |
 | apPayments / Create / one | `GET|POST /api/ap/payments`, `GET /api/ap/payments/:no` | `fin.ap` |
 | vendorReturns / Create / one | `GET|POST /api/ap/vendor-returns`, `GET .../:no` | `fin.ap` |
@@ -55,9 +59,13 @@ Every list is cursor-paged (20 default) with `q` search. Uploads travel as base6
 | REQ-M06-05/06 / BR-09: count hides system qty, several counters, sales during the count netted, variance → adjustment request approved by the owner/manager, partial approval and recount | `stockx.ts` + `services/inventory.ts decideAdjust` | `test/purchasing/stock.test.ts` "stock count", `test/stock-returns.test.ts` "stock count" (5 tests) |
 | Damaged returns / stock-flow audit: damaged-goods warehouse (`warehouses.kind`), per-line return condition, every stock-moving flow keeps lots = ledger | `services/returns.ts`, `services/master.ts damagedWarehouse`, `lib/stock.ts` | `test/stock-returns.test.ts`, `test/stock-flows.test.ts` (13 tests) |
 | REQ-M06-01 ledger / reorder | `stockx.ts ledger`, `reorder` | stock.test "stock ledger" (2 tests) |
+| PO (ใบสั่งซื้อ): PO + YYMM-#### gap-free, stock products only, any unit, line discount, VAT inc/exc, audit create/void/close | `po.ts`, core `purchaseorder.ts` | `test/purchasing/po.test.ts` "create a purchase order", "void and close rules"; core `purchaseorder.test.ts` |
+| PO from QT / SO: stock lines only, qty = ordered (SO: still to deliver) − available (on hand − other SOs' reservation) ≥ 0, source stored, listed on the QT / SO | `po.ts prefill`, `createPo`, `posFromSource` | po.test "PO from a sales order / quotation" (3 tests) |
+| Receive against a PO: same vendor, lines of that PO, over-receipt refused, PO row locked; received = active GR lines (`gr_lines.po_line_id`); open → partial → received; closed / void receive nothing | `grhook.ts checkPoReceipt`, `refreshPoStatus` | po.test "receive against a PO" |
+| GR void: lots untouched, AP unpaid, stock-out at the lot cost, AP bill void, PO rolled back | `grvoid.ts` | po.test "voiding a GR rolls the PO back…", "a GR whose goods were already used…" |
 | Seed idempotent, ledger = lots | `seedPurchasing.ts` | `test/purchasing/seed.test.ts` |
 
-Browser flows (both editions): `e2e/purchasing.spec.ts` — delivery file → drafts → map → confirm (stock + AP),
+Browser flows (both editions): `e2e/purchasing.spec.ts` — SO → "สร้างใบสั่งซื้อ (PO)" → save → receive part → partially received; delivery file → drafts → map → confirm (stock + AP),
 BR-10 banner, payment voucher with WHT, vendor return, stock count → approval request, Import Hub dry run +
 commit. Screenshots: `e2e/screenshots/purchasing-<edition>-*.png`.
 

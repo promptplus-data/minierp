@@ -25,3 +25,4 @@ export * from './search';
 export * from './posdisc';
 export * from './belowcostapprover';
 export * from './arreturn';
+export * from './purchaseorder';

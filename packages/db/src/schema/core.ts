@@ -270,6 +270,7 @@ export const stockDocs = pgTable('stock_docs', {
   total: money('total'),
   createdBy: uuid('created_by').notNull(),
   createdAt: createdAt(),
+  voidAt: timestamp('void_at', { withTimezone: true }), voidBy: uuid('void_by'), voidReason: text('void_reason'), // 0660 (GR void)
 }, (t) => [
   uniqueIndex('stock_docs_tenant_no').on(t.tenantId, t.no),
   uniqueIndex('stock_docs_vendor_invoice').on(t.tenantId, t.vendorId, t.vendorInvoiceNo),

@@ -13,6 +13,7 @@ const Import = lazy(() => import('./Import'));
 const GrDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.GrDetailPage })));
 const ApBillDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.ApBillDetailPage })));
 const PvDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.PvDetailPage })));
+const PoDetailPage = lazy(() => import('./Po').then((m) => ({ default: m.PoDetailPage })));
 const VendorReturnDetailPage = lazy(() => import('./Details').then((m) => ({ default: m.VendorReturnDetailPage })));
 
 export const purchasingModule: WebModule = {
@@ -26,6 +27,7 @@ export const purchasingModule: WebModule = {
   routes: [
     { path: '/purchasing', element: <Receiving /> },
     { path: '/purchasing/gr/:no', element: <GrDetailPage /> },
+    { path: '/purchasing/po/:no', element: <PoDetailPage /> },
     { path: '/stock-ledger', element: <Ledger /> },
     { path: '/stock-count', element: <Count /> },
     { path: '/ap', element: <Ap /> },

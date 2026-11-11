@@ -21,6 +21,28 @@ export const grLines = pgTable('gr_lines', {
   qty: qty('qty').notNull(), baseQty: qty('base_qty').notNull(), unitPrice: qty('unit_price').notNull(), amount: money('amount').notNull(),
   lotUnitCost: qty('lot_unit_cost').notNull(), lotId: bigint('lot_id', { mode: 'number' }).notNull(),
   returnedBaseQty: qty('returned_base_qty').notNull().default('0'),
+  poId: uuid('po_id'), poLineId: uuid('po_line_id'), // 0660
+});
+
+/** 0660: purchase orders (ใบสั่งซื้อ). Received qty = sum of active gr_lines.base_qty with this po_line_id. */
+export const purchaseOrders = pgTable('purchase_orders', {
+  id: id(), tenantId: tenantId(), no: text('no').notNull(), date: date('date').notNull(),
+  vendorId: uuid('vendor_id').notNull(), warehouseId: uuid('warehouse_id').notNull(), expectedDate: date('expected_date'),
+  vendorRef: text('vendor_ref').notNull().default(''), note: text('note').notNull().default(''), vatMode: text('vat_mode').notNull(),
+  gross: money('gross').notNull(), lineDisc: money('line_disc').notNull(), base7: money('base7').notNull(), exempt: money('exempt').notNull(),
+  vat: money('vat').notNull(), total: money('total').notNull(), status: text('status').notNull().default('open'),
+  sourceType: text('source_type'), sourceId: uuid('source_id'), sourceNo: text('source_no'), searchText: text('search_text').notNull().default(''),
+  createdBy: uuid('created_by').notNull(), createdAt: createdAt(),
+  closedBy: uuid('closed_by'), closedAt: timestamp('closed_at', { withTimezone: true }), closeReason: text('close_reason'),
+  voidBy: uuid('void_by'), voidAt: timestamp('void_at', { withTimezone: true }), voidReason: text('void_reason'),
+});
+
+export const purchaseOrderLines = pgTable('purchase_order_lines', {
+  id: id(), tenantId: tenantId(), poId: uuid('po_id').notNull(), lineNo: integer('line_no').notNull(), productId: uuid('product_id').notNull(),
+  unitIdx: integer('unit_idx').notNull(), unitName: text('unit_name').notNull(), unitFactor: qty('unit_factor').notNull(),
+  qty: qty('qty').notNull(), baseQty: qty('base_qty').notNull(), unitCost: qty('unit_cost').notNull(), discount: jsonb('discount'),
+  discAmt: money('disc_amt').notNull().default('0'), net: money('net').notNull(), vat: text('vat').notNull(),
+  sourceLineId: uuid('source_line_id'), sourceQty: qty('source_qty'),
 });
 
 export const apBills = pgTable('ap_bills', {

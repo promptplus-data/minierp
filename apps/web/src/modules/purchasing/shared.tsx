@@ -1,10 +1,11 @@
 /** Shared bits of the purchasing screens: BR-10 banner, AP due card, file helpers, error-file download. */
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { GrAlert, PurchasingDashboard } from '@erp/contracts';
-import { api } from '../../api';
+import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { fmt, th } from '../../ui';
+import { fmt, Modal, th, useToast } from '../../ui';
 import './purchasing.css';
 
 export const useGrAlert = () => useQuery({ queryKey: ['pu', 'gr-alert'], queryFn: () => api('GET', '/api/purchasing/gr-alerts', { schema: GrAlert }), staleTime: 30_000 });
@@ -78,3 +79,41 @@ export const STATUS_PILL = { ok: 'ok', warn: 'warn', error: 'bad', exists: 'mut'
 
 export const ageText = (days: number) => (days ? `${days} วัน` : 'วันนี้');
 export const thOrDash = (s: string | null | undefined) => (s ? th(s) : '-');
+
+/** Void / close with a typed reason (ใบสั่งซื้อ, ใบรับสินค้า). The server validates and refuses with a Thai message. */
+export function ReasonModal({ title, url, okLabel, effects = [], danger = true, onClose, onDone, testId = 'reason' }: {
+  title: string; url: string; okLabel: string; effects?: ReactNode[]; danger?: boolean; onClose: () => void; onDone: () => void; testId?: string;
+}) {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!reason.trim()) return setErr('ต้องพิมพ์เหตุผล');
+    setBusy(true);
+    setErr('');
+    try {
+      await api('POST', url, { body: { reason: reason.trim() } });
+      toast(`${title} แล้ว`);
+      onDone();
+      onClose();
+    } catch (e) {
+      setErr(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={onClose} label={title}>
+      <h3>{title}</h3>
+      <p className="small muted" style={{ margin: 0 }}>ระบบไม่ลบเอกสาร เลขที่เดิมไม่นำกลับมาใช้ และบันทึกผู้ทำ เวลา เหตุผล</p>
+      {effects.length > 0 && <div className="note small">{effects.map((x, i) => <div key={i}>• {x}</div>)}</div>}
+      <label className="f">เหตุผล *<input type="text" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="พิมพ์เหตุผล" data-testid={`${testId}-input`} autoFocus /></label>
+      {err && <div className="err" role="alert">{err}</div>}
+      <div className="act">
+        <button className="btn" onClick={onClose}>ไม่ทำ</button>
+        <button className={`btn ${danger ? 'bad' : 'pri'}`} disabled={busy} onClick={() => void submit()} data-testid={`${testId}-ok`}>{okLabel}</button>
+      </div>
+    </Modal>
+  );
+}

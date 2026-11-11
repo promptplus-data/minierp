@@ -42,6 +42,7 @@ export async function updateSettings(tx: Tx, ctx: Ctx, s: { billDiscountMode: Bi
 interface GrRow {
   id: string; no: string; date: string; vendor_id: string | null; vendor_name: string | null; vendor_invoice_no: string | null; delivery_no: string | null;
   warehouse_id: string; total: string | null; ap_no: string | null; preview: string | null; qty_units: { unit: string; qty: string }[] | null; line_count: number; created_by: string; returnable: boolean; created_at: Date; discount: string | null; note: string | null;
+  po_nos: string[] | null; void_at: Date | null; void_reason: string | null; void_by_name: string | null;
 }
 const GR_SELECT = `
   select s.id, s.no, to_char(s.date,'YYYY-MM-DD') date, s.vendor_id, v.name vendor_name, s.vendor_invoice_no, s.delivery_no, s.warehouse_id, s.total::text,
@@ -50,12 +51,15 @@ const GR_SELECT = `
          (select json_agg(json_build_object('unit', u.unit_name, 'qty', trim_scale(u.q)::text) order by u.first)
             from (select g.unit_name, sum(g.qty) q, min(g.line_no) first from gr_lines g where g.gr_doc_id = s.id group by g.unit_name) u) qty_units,
          (select count(*)::int from gr_lines g where g.gr_doc_id = s.id) line_count,
-         exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty) returnable
-    from stock_docs s left join vendors v on v.id = s.vendor_id left join ap_bills b on b.gr_doc_id = s.id join users u on u.id = s.created_by`;
+         s.void_at is null and exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty) returnable,
+         (select array_agg(distinct po.no) from gr_lines g join purchase_orders po on po.id = g.po_id where g.gr_doc_id = s.id) po_nos,
+         s.void_at, s.void_reason, vu.name void_by_name
+    from stock_docs s left join vendors v on v.id = s.vendor_id left join ap_bills b on b.gr_doc_id = s.id join users u on u.id = s.created_by
+    left join users vu on vu.id = s.void_by`;
 const toGr = (r: GrRow, ctx: Ctx): GrSummary => ({
   id: r.id, no: r.no, date: r.date, vendorId: r.vendor_id, vendorName: r.vendor_name, vendorInvoiceNo: r.vendor_invoice_no, deliveryNo: r.delivery_no,
   warehouseId: r.warehouse_id, total: r.total != null && seeCost(ctx) ? money(r.total) : null, apBillNo: r.ap_no, itemsPreview: r.preview ?? '', receivedQty: r.qty_units ?? [], lineCount: r.line_count,
-  createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '',
+  createdBy: r.created_by, returnable: r.returnable, note: r.note ?? '', poNos: r.po_nos ?? [], status: r.void_at ? 'void' : 'active',
 });
 
 export async function listReceipts(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; returnable?: boolean }) {
@@ -68,7 +72,7 @@ export async function listReceipts(tx: Tx, ctx: Ctx, q: { q?: string; limit: num
     const i = params.length;
     where.push(`(s.no ilike $${i} or coalesce(v.name,'') ilike $${i} or coalesce(s.vendor_invoice_no,'') ilike $${i} or coalesce(s.delivery_no,'') ilike $${i})`);
   }
-  if (q.returnable) where.push(`exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty)`);
+  if (q.returnable) where.push(`s.void_at is null and exists (select 1 from gr_lines g where g.gr_doc_id = s.id and g.returned_base_qty < g.base_qty)`);
   if (cur) {
     params.push(cur[0], cur[1]);
     where.push(`(s.created_at, s.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
@@ -93,6 +97,7 @@ export async function getReceipt(tx: Tx, ctx: Ctx, no: string): Promise<GrDetail
     ...toGr(g, ctx),
     returns: rets.rows.map((x) => ({ no: x.no, date: x.date, total: money(x.total) })),
     billDiscount: cost && g.discount != null ? money(g.discount) : null,
+    voided: g.void_at ? { by: g.void_by_name ?? '', at: g.void_at.toISOString(), reason: g.void_reason ?? '' } : null,
     lines: lines.rows.map((l) => ({
       id: l.id, lineNo: l.line_no, productId: l.product_id, name: l.name, warehouseId: l.warehouse_id, unitIdx: l.unit_idx, unitName: l.unit_name,
       unitFactor: qty4(l.unit_factor), qty: qty4(l.qty), returnedQty: qty4(d(l.returned_base_qty).div(d(l.unit_factor))),

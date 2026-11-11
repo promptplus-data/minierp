@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { EDITION, PP, login, logout, pick } from './helpers';
+import { EDITION, PP, apiToken, login, logout, pick } from './helpers';
 
 const DIR = path.join(__dirname, 'screenshots');
 const SAMPLE = path.join(__dirname, '..', 'docs', 'integrations', 'samples', 'delivery-sample.csv');
@@ -146,4 +146,51 @@ test.describe.serial('purchasing', () => {
     await expect(page.getByTestId('imp-history')).toContainText('products.csv');
     expect(readFileSync(SAMPLE).length).toBeGreaterThan(0);
   });
+});
+
+test('purchase order from a sales order: shortfall prefilled → save → receive part → partially received', async ({ page, request }) => {
+  const token = await apiToken(request, 'charoen');
+  const get = async (url: string) => (await (await request.get(url, { headers: { authorization: `Bearer ${token}` } })).json());
+  const paint = (await get('/api/products?q=PNT-PR9&limit=1')).items[0] as { id: string };
+  const backWh = ((await get('/api/warehouses')).items as { id: string; isPos: boolean; active: boolean; kind?: string }[]).find((w) => !w.isPos && w.active && w.kind !== 'damaged')!.id;
+  const customer = ((await get('/api/customers?limit=20')).items as { id: string; code: string }[]).find((c) => c.code === 'C00001')!.id;
+  const avail = Number((await get(`/api/stock?productId=${paint.id}&warehouseId=${backWh}`)).items[0]?.available ?? 0);
+  const qty = Math.max(avail, 0) + 5; // 5 short of what the customer ordered
+  const so = await request.post('/api/sales/orders', {
+    headers: { authorization: `Bearer ${token}` },
+    data: { customerId: customer, warehouseId: backWh, lines: [{ productId: paint.id, qty: String(qty), unitPrice: '1290' }] },
+  });
+  expect(so.ok(), await so.text()).toBeTruthy();
+  const soNo = (await so.json()).no as string;
+
+  await login(page, 'charoen');
+  await page.goto(`/b2b/so/${soNo}`);
+  await page.getByTestId('make-po').click();
+  await expect(page.getByTestId('po-from')).toHaveText(soNo);
+  const lines = page.getByTestId('po-lines');
+  await expect(lines.locator('tbody tr')).toHaveCount(1);
+  await expect(page.getByTestId('po-q0')).toHaveValue('5');
+  await expect(lines.locator('tbody tr').first()).toContainText(String(qty)); // ordered qty shown next to the line
+  await pick(page, 'po-vendor', 'ทวีพัฒนาวัสดุ', 'ทวีพัฒนา');
+  await page.getByTestId('po-save').click();
+  await expect(page).toHaveURL(/\/purchasing\/po\/PO\d{4}-\d{4}$/);
+  const poNo = (await page.getByTestId('doc-no').textContent())!;
+  await expect(page.getByTestId('po-status-pill')).toHaveText('รอรับของ');
+  await expect(page.getByTestId('po-source')).toContainText(soNo);
+
+  await page.getByTestId('po-receive').click();
+  await expect(page.getByTestId('gr-q0')).toHaveValue('5');
+  await page.getByTestId('gr-q0').fill('2');
+  await page.getByTestId('gr-dn').fill(`DN-PO-${Date.now()}`);
+  await page.getByTestId('gr-inv').fill(`IV-PO-${Date.now()}`);
+  await page.getByTestId('gr-save').click();
+  await expect(page.getByTestId('po-status-pill')).toHaveText('รับบางส่วน');
+  await expect(page.getByTestId('po-detail-lines')).toContainText('3');
+  await expect(page.getByTestId('po-receipts')).toContainText('GR');
+  await shot(page, 'po-detail', 1300);
+
+  await page.goto(`/b2b/so/${soNo}`);
+  await expect(page.getByTestId('doc-pos')).toContainText(poNo);
+  await page.getByTestId('doc-pos').getByRole('link', { name: poNo }).click();
+  await expect(page).toHaveURL(new RegExp(`/purchasing/po/${poNo}$`));
 });

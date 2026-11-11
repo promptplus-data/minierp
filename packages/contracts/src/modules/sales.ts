@@ -141,6 +141,8 @@ export const SalesQuote = z.object({
   status: SalesQuoteStatus, revision: z.number().int(), orders: z.array(SalesDocRef), editable: z.boolean(),
   belowCostApproval: SalesApprovalNote.nullable().default(null), priceApproval: SalesApprovalNote.nullable().default(null), profit: SalesProfit.nullable().default(null),
   createdBy: z.string(), voided: SalesVoided.nullable(),
+  /** Purchase orders (ใบสั่งซื้อ) made from this document; status open / partial / received / closed / void. */
+  purchaseOrders: z.array(z.object({ no: z.string(), status: z.string() })).default([]),
 });
 export type SalesQuote = z.infer<typeof SalesQuote>;
 export const SalesQuoteSummary = z.object({
@@ -185,6 +187,8 @@ export const SalesOrder = z.object({
   deliveries: z.array(SalesDocRef.extend({ invoiceNo: z.string().nullable() })), invoices: z.array(SalesDocRef),
   priceApproval: SalesApprovalNote.nullable().default(null), profit: SalesProfit.nullable().default(null),
   createdBy: z.string(), voided: SalesVoided.nullable(),
+  /** Purchase orders (ใบสั่งซื้อ) made from this document; status open / partial / received / closed / void. */
+  purchaseOrders: z.array(z.object({ no: z.string(), status: z.string() })).default([]),
   coupon: DocCoupon.nullable().optional(), // member coupon (cloud only); totals.total is after it
 });
 export type SalesOrder = z.infer<typeof SalesOrder>;

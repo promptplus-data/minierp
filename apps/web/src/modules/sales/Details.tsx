@@ -21,6 +21,10 @@ const Back = ({ tab }: { tab: string }) => <Link to={`/b2b?tab=${tab}`} classNam
 const Refs = ({ items }: { items: { no: string; status: 'active' | 'void'; date?: string; to?: string; extra?: ReactNode }[] }) =>
   items.length ? <>{items.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span className="mono" style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}>{x.to ? <RouteLink to={x.to}>{x.no}</RouteLink> : x.no}</span>{x.extra}</span>)}</> : <span className="muted">-</span>;
 
+/** Purchase orders made from this document; each number links only when the role can open the purchasing screen. */
+const PoRefs = ({ items }: { items: { no: string; status: string }[] }) =>
+  <>{items.map((x, i) => <span key={x.no}>{i > 0 && ', '}<span className="mono" style={x.status === 'void' ? { textDecoration: 'line-through' } : undefined}><DocLink no={x.no} type="PO" /></span></span>)}</>;
+
 // ---------- quotation ----------
 export function QuoteDetail() {
   const { no = '' } = useParams();
@@ -57,6 +61,7 @@ export function QuoteDetail() {
             {canDoc && live && x.editable && x.status !== 'sent' && x.status !== 'expired' && <button className="btn sm" onClick={() => void setStatus('sent')} data-testid="qt-sent">ส่งให้ลูกค้าแล้ว</button>}
             {canDoc && live && x.editable && x.status !== 'lost' && <button className="btn sm" onClick={() => void setStatus('lost')}>ไม่ได้งาน</button>}
             {canDoc && live && x.editable && ['draft', 'sent', 'accepted'].includes(x.status) && <button className="btn sm pri" onClick={() => setM('convert')} data-testid="qt-convert">แปลงเป็นใบสั่งขาย{free ? ' (ต้องผูกสินค้า)' : ''}</button>}
+            {live && can('inv.receive') === 1 && x.lines.some((l) => !l.free) && <Link className="btn sm" to={`/purchasing?po=new&from=${encodeURIComponent(x.no)}`} data-testid="make-po">สร้างใบสั่งซื้อ (PO)</Link>}
             {!!can('sales.voidDoc') && live && <button className="btn sm bad" onClick={() => setM('void')} data-testid="void">ยกเลิก</button>}
           </span>
         </h2>
@@ -66,6 +71,7 @@ export function QuoteDetail() {
           <span>เงื่อนไขชำระ</span><span>{TERM_TH(x.term)}</span>
           <span>พนักงานขาย</span><span>{x.salesperson?.name ?? '-'}</span>
           <span>ใบสั่งขาย</span><span data-testid="qt-orders"><Refs items={x.orders.map((o) => ({ ...o, to: `/b2b/so/${encodeURIComponent(o.no)}` }))} /></span>
+          {x.purchaseOrders.length > 0 && <><span>ใบสั่งซื้อ</span><span data-testid="doc-pos"><PoRefs items={x.purchaseOrders} /></span></>}
           <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
         </div>
         {x.priceApproval && <div className="note small" style={{ marginTop: 10 }} data-testid="price-approval">อนุมัติราคา/ส่วนลด: {x.priceApproval.detail}</div>}
@@ -127,6 +133,7 @@ export function OrderDetail() {
             {live && canDeliver && x.dlvStatus !== 'delivered' && <button className="btn sm pri" onClick={() => setM('deliver')} data-testid="so-deliver">ออกใบส่งของ</button>}
             {live && !x.project && can('sales.project') === 1 && !x.invoices.some((i) => i.status === 'active') && <button className="btn sm" onClick={() => setM('project')} data-testid="so-make-project">ตั้งเป็นโครงการ</button>}
             {x.project && <RouteLink className="btn sm" to={`/projects/${x.project.id}`}>ดูโครงการ</RouteLink>}
+            {live && can('inv.receive') === 1 && x.dlvStatus !== 'delivered' && <Link className="btn sm" to={`/purchasing?po=new&from=${encodeURIComponent(x.no)}`} data-testid="make-po">สร้างใบสั่งซื้อ (PO)</Link>}
             {live && !!can('sales.voidDoc') && <button className="btn sm bad" onClick={() => setM('void')} data-testid="void">ยกเลิก</button>}
           </span>
         </h2>
@@ -141,6 +148,7 @@ export function OrderDetail() {
           <span>หมายเหตุ</span><span data-testid="doc-note-view">{x.note || <span className="muted">-</span>}</span>
           <span>ใบส่งของ</span><span><Refs items={x.deliveries.map((v) => ({ ...v, to: `/b2b/do/${encodeURIComponent(v.no)}`, extra: v.invoiceNo ? <span className="small muted"> → <DocLink no={v.invoiceNo} type="INV" /></span> : null }))} /></span>
           <span>ใบกำกับภาษี</span><span><Refs items={x.invoices.map((v) => ({ ...v, to: `/b2b/inv/${encodeURIComponent(v.no)}` }))} /></span>
+          {x.purchaseOrders.length > 0 && <><span>ใบสั่งซื้อ</span><span data-testid="doc-pos"><PoRefs items={x.purchaseOrders} /></span></>}
         </div>
         {x.creditApproval && <div className="note small" style={{ marginTop: 10 }} data-testid="credit-approval">อนุมัติขายเชื่อ: {x.creditApproval.detail}</div>}
         {x.belowCostApproval && <div className="note warn small" style={{ marginTop: 6 }} data-testid="below-approval">{x.belowCostApproval.detail}</div>}
