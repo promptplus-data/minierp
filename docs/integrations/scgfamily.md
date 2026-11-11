@@ -3,6 +3,20 @@
 สถานะ: **Draft v0.1 (2026-10-27)** · Cloud edition เท่านั้น (OQ-A2) · ยังไม่เชื่อมจริง
 อ่านคู่กับ: [`README.md`](README.md) (auth, idempotency, retry, signature, error format, PDPA), [`openapi/scgfamily.yaml`](openapi/scgfamily.yaml), [`schemas/scgfamily/`](schemas/scgfamily/)
 
+### สถานะการพัฒนา (round 4 ข้อ 7, 2026-11-11)
+
+**ทำแล้ว (Cloud เท่านั้น; On-prem ไม่มีโค้ด SCG Family เลย ตรวจด้วย `node scripts/check-onprem.mjs --source` และ bundle mode):**
+- Provider interface ตาม spec (`apps/server/src/adapters/scgfamily.ts`): `lookupMember`, `evaluateCoupons`, `reserve`, `redeem`, `release`, `reverse`
+  - `stub` (ค่าเริ่มต้น เพราะยังไม่มี API จริง): ไม่มีคูปอง
+  - `demo` (env `SCGF_DEMO=1`): สมาชิก `SF22018834` (คูปอง 6 ใบ: ส่วนลดท้ายบิล / Cash Card, มีจำกัดสิทธิ์และไม่จำกัด, บางใบยอดไม่ถึงขั้นต่ำ) และ `SF10000001` (ไม่มีคูปอง)
+- Endpoint ภายใน `/api/scgf/*` (§1.3; ชื่อ path สั้นลงจาก `/api/scgfamily/*`): ค้นสมาชิก, ผูกรหัสสมาชิกกับลูกค้า (`customers.scgf_member_id`), evaluate, reserve, release
+- หน้า POS และฟอร์มใบสั่งขาย: ช่อง "คูปอง SCG Family" → modal "เพิ่มส่วนลด" (แท็บ โปรโมชั่น / Cash Card / แลกคะแนน, กรอกรหัสคูปอง, การ์ด 2 คอลัมน์, คูปองที่ใช้ไม่ได้แสดงเป็นสีเทาพร้อมเหตุผล); ฟอร์มสร้างลูกค้ามีช่องรหัสสมาชิก
+- คูปองแสดงเป็นบรรทัดแยก "คูปอง SCG Family" ไม่ใช่ส่วนลดของร้าน (ไม่ต้องอนุมัติ ไม่ต้องใส่เหตุผล); 1 บิลใช้ได้ 1 ใบ
+- ตอนบันทึก server ถามมูลค่าจาก provider ใหม่เสมอ (ไม่เชื่อยอดจาก client; ยอดเปลี่ยน → 409 `COUPON_AMOUNT_CHANGED`), redeem ใน transaction ของการปิดบิล (§6.2) และเก็บ `docs.coupon` / `sales_orders.coupon` (code, reservationId, redemptionId, status) + `coupon_amount` (migration 0650); void → reverse / release
+- ใบสั่งขาย: redeem ตอนบันทึกใบสั่งขาย (ใบส่งของ/ใบกำกับที่ออกต่อใช้ `net_after_bill` ที่หักคูปองแล้ว)
+
+**ยังเป็น spec เท่านั้น:** การเรียก API จริง (OAuth, timeout 3 s, retry), ตาราง `coupon_redemptions` + unique BR-11, points batch (§9), reconciliation และ partner endpoint (§10), job reverse ที่ค้าง (§6.2/§8), การหมดอายุ reservation ของบิลพัก, ข้อสรุปภาษี TX-Q01–Q03
+
 SCG Family คือแอปสมาชิก/คูปอง/คะแนนของ SCG สำหรับช่างและเจ้าของบ้าน ERP ใช้ที่หน้า POS (และใบขายเงินสดเต็มรูป) เพื่อ:
 
 | REQ / Rule | เรื่อง | ทิศทาง | Realtime? |

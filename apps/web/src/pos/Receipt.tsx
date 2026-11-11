@@ -1,5 +1,7 @@
 /** 80 mm slip (mockup receiptHtml) for ABB / INV / RC / CN. Wrapped in .print-area so window.print() prints only the slip. */
+import { Suspense } from 'react';
 import { d } from '@erp/core';
+import { CloudCouponTotal } from '../cloud';
 import type { SalesDoc, Shift } from '@erp/contracts';
 import { useMeta } from '../data';
 import { fmt, fq, th, thTime } from '../ui';
@@ -50,6 +52,7 @@ export function Slip({ doc }: { doc: SalesDoc }) {
       <R l="รวมเป็นเงิน" r={fmt(t.gross)} />
       {d(t.lineDisc).gt(0) && <R l="ส่วนลดรายการ" r={`−${fmt(t.lineDisc)}`} />}
       {d(t.billDisc).gt(0) && <R l="ส่วนลดท้ายบิล" r={`−${fmt(t.billDisc)}`} />}
+      {doc.coupon && CloudCouponTotal && <Suspense fallback={null}><CloudCouponTotal coupon={doc.coupon} slip /></Suspense>}
       <R l="สุทธิ" r={fmt(t.total)} b />
       {!nv && (
         <>

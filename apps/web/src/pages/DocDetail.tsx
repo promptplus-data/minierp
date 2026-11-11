@@ -1,11 +1,12 @@
 /** Sales document detail + void with reason (mockup voidModal), PIN approval when the role has 'apv'. */
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SalesDoc } from '@erp/contracts';
 import { d } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
+import { CloudCouponTotal } from '../cloud';
 import { DOC_TITLE, METHOD_TH, Slip } from '../pos/Receipt';
 import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useToast, type ApprovalInput } from '../ui';
 import { ErrorBanner } from '../errors';
@@ -66,6 +67,7 @@ export default function DocDetail() {
           <span className="muted">รวมเป็นเงิน (ก่อนส่วนลด)</span><span>{fmt(t.gross)}</span>
           {d(t.lineDisc).gt(0) && <><span className="muted">ส่วนลดรายการ</span><span>−{fmt(t.lineDisc)}</span></>}
           {d(t.billDisc).gt(0) && <><span className="muted">ส่วนลดท้ายบิล</span><span>−{fmt(t.billDisc)}</span></>}
+          {doc.coupon && CloudCouponTotal && <Suspense fallback={null}><CloudCouponTotal coupon={doc.coupon} /></Suspense>}
           {doc.vatMode !== 'none' && <><span className="muted">มูลค่าก่อนภาษี</span><span>{fmt(d(t.base7).plus(d(t.exempt)))}</span><span className="muted">ภาษีมูลค่าเพิ่ม 7%</span><span>{fmt(t.vat)}</span></>}
           <span style={{ fontWeight: 600 }}>จำนวนเงินรวมทั้งสิ้น</span><span className="big">฿{fmt(t.total)}</span>
         </div>
