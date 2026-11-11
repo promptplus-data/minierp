@@ -10,7 +10,7 @@ import { ApiFail, api, errText } from '../../api';
 import { LoadMore, useLoadMore } from '../../ui/lists';
 import { checkFields, qtyMsg } from '../../errors';
 import { useAuth } from '../../auth';
-import { useMeta, useWarehouses } from '../../data';
+import { useBelowCostRule, useMeta, useWarehouses } from '../../data';
 import { fmt, fq, Modal, Pill, ShortageModal, th, useToast, type Shortage } from '../../ui';
 import { useCustomer } from '../../ui/CustomerPicker';
 import { AddressPicker, DeliverySourceSelect, SaleTypeSelect, SalespersonSelect, WarehouseSelect } from './pickers';
@@ -31,6 +31,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const meta = useMeta();
   const settings = useSalesSettings();
   const whs = useWarehouses();
+  const below = useBelowCostRule();
   const src = edit ?? quote;
   const vatShop = meta.data?.shop.vatRegistered ?? true;
   const [customerId, setCustomerId] = useState(src?.customer.id ?? presetProject?.customerId ?? '');
@@ -117,8 +118,8 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
     <Modal onClose={onClose} wide label={title}>
       <h3>{title}</h3>
       <p className="small muted" style={{ margin: 0 }}>
-        {mode === 'QT' && 'ราคาตามลำดับ: ราคาลูกค้า → ราคากลุ่ม → โปรโมชัน → ราคาปลีก · ใส่สินค้าที่ยังไม่มีในระบบได้ (พิมพ์รายการเอง) · ราคาต่ำกว่าทุนต้องให้เจ้าของร้านอนุมัติ · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ'}
-        {mode === 'SO' && 'สร้างได้เลยโดยไม่ต้องมีใบเสนอราคา · ราคาต่ำกว่าทุนต้องให้เจ้าของร้านอนุมัติ · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ · ขายเชื่อเกินวงเงินหรือมีบิลเกินกำหนดต้องอนุมัติ'}
+        {mode === 'QT' && `ราคาตามลำดับ: ราคาลูกค้า → ราคากลุ่ม → โปรโมชัน → ราคาปลีก · ใส่สินค้าที่ยังไม่มีในระบบได้ (พิมพ์รายการเอง) · ราคาต่ำกว่าทุน${below.need} · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ`}
+        {mode === 'SO' && `สร้างได้เลยโดยไม่ต้องมีใบเสนอราคา · ราคาต่ำกว่าทุน${below.need} · ลดราคา/ส่วนลดเกินสิทธิ์ต้องให้ผู้จัดการอนุมัติ · ขายเชื่อเกินวงเงินหรือมีบิลเกินกำหนดต้องอนุมัติ`}
         {mode === 'INV' && 'ใบกำกับภาษีที่ตัดสต็อกทันที (ไม่ผ่านใบสั่งขาย) · ถ้าลูกค้าฝากของไว้ ออกใบส่งของภายหลังได้โดยไม่ตัดสต็อกซ้ำ'}
       </p>
       <div className="fgrid">
@@ -187,7 +188,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         </div>
       </div>
       <ProfitSummary profit={check?.profit} />
-      {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึกต้องให้เจ้าของร้านใส่ PIN อนุมัติ</div>}
+      {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึก{below.need}</div>}
       {mode !== 'QT' && credit.data && cust && (
         <div className={`small ${credit.data.available != null && d(credit.data.balance).plus(d(t.total)).gt(d(credit.data.limit)) ? 'err' : 'muted'}`}>
           {TERM_TH(credit.data.term)} · วงเงิน {fmt(credit.data.limit)} · ค้างอยู่ {fmt(credit.data.balance)} · หลังบันทึกใบนี้ {fmt(d(credit.data.balance).plus(d(t.total)))}

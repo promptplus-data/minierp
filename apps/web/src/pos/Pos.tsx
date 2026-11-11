@@ -11,7 +11,7 @@ import { DocSummary, SalesDoc, type PosPreviewReq, type PosSaleReq, type Product
 import { calcDoc, d, money, needsOverride, scopeCovers, sum, type DiscReason, type PriceChange } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
-import { useCatalog, useMeta, useShift, useWarehouseStock, useWarehouses } from '../data';
+import { useBelowCostRule, useCatalog, useMeta, useShift, useWarehouseStock, useWarehouses } from '../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, ShortageModal, th, useToast, type ApprovalInput, type Shortage } from '../ui';
 import {
   BundleLine, BundleTiles, HeldBar, PosImg, PROMO_CAT, bundleCoreLines, holdCart, linePrice, tilePromo, useAbbAllowed, usePosPricing, type CartBundle, type HeldCartIn,
@@ -58,6 +58,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
   const qc = useQueryClient();
   const toast = useToast();
   const meta = useMeta();
+  const below = useBelowCostRule();
   const cat = useCatalog();
   const whs = useWarehouses();
   const posWh = whs.data?.find((w) => w.isPos && w.active) ?? whs.data?.[0];
@@ -443,7 +444,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
             <><span className="profit">กำไรขั้นต้นโดยประมาณ (FIFO ก่อน VAT)</span><span className={`profit${d(pv.profit).lt(0) ? ' neg' : ''}`} data-testid="t-profit">{fmt(pv.profit)}{pv.profitPct != null ? ` (${pv.profitPct}%)` : ''}</span></>
           )}
         </div>
-        {pv?.belowCost && <div className="note bad small" style={{ marginTop: 8 }} data-testid="below-flag">มีรายการขายต่ำกว่าทุน ต้องให้เจ้าของร้านอนุมัติตอนชำระเงิน</div>}
+        {pv?.belowCost && <div className="note bad small" style={{ marginTop: 8 }} data-testid="below-flag">มีรายการขายต่ำกว่าทุน · {below.need}{below.mode === 'none' ? '' : 'ตอนชำระเงิน'}</div>}
         <div className="row" style={{ marginTop: 12 }}>
           <button className="btn bad" onClick={clear} disabled={empty}>ยกเลิกบิล</button>
           <button className="btn pri" style={{ flex: 1, justifyContent: 'center' }} onClick={openPay} disabled={empty || !d(totals.total).gt(0) || !posWh} data-testid="pay">ชำระเงิน ฿{fmt(totals.total)}</button>
@@ -474,7 +475,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
           }} />
       )}
       {stage?.k === 'apvBelow' && (
-        <ApprovalModal ownerOnly title="ขายต่ำกว่าต้นทุน · ต้องให้เจ้าของร้านอนุมัติ" onClose={() => setStage(null)} onSubmit={approveWith('belowCostApproval')}
+        <ApprovalModal ownerOnly={below.ownerOnly} title={below.title} onClose={() => setStage(null)} onSubmit={approveWith('belowCostApproval')}
           label={<div className="note warn small" data-testid="below-cost">ขายต่ำกว่าต้นทุน {stage.lines.length} รายการ: {stage.lines.map((b) => (b.sell ? `${b.name} (ขาย ${fmt(b.sell)} < ทุน ${fmt(b.cost)} ต่อหน่วย ก่อน VAT)` : b.name)).join(', ')}</div>} />
       )}
       {stage?.k === 'apvCredit' && (

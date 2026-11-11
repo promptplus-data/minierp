@@ -5,7 +5,7 @@ import { SalesLineCheck, SalesPrice, SalesSettings, type SalesTerm } from '@erp/
 import { bahtText, d, termLabel } from '@erp/core';
 import { ApiFail, api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { useCatalog } from '../../data';
+import { useBelowCostRule, useCatalog } from '../../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, ReasonField, reasonInit, reasonText, th, thTime, useDebounced, useToast, type ApprovalInput } from '../../ui';
 import { ProductPicker, useStockInfo } from '../../ui/ProductPicker';
 import './sales.css';
@@ -346,6 +346,7 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [reason, setReason] = useState('');
+  const below = useBelowCostRule();
   const run = async (extra: Record<string, unknown> = {}): Promise<string | null> => {
     setBusy(true);
     setErr('');
@@ -394,8 +395,8 @@ export function useGatedSave<T>(save: (extra: Record<string, unknown>) => Promis
   };
   const modal = gate && (
     <ApprovalModal
-      ownerOnly={gate.kind === 'belowCost'}
-      title={gate.kind === 'credit' ? 'เกินวงเงิน / มีบิลเกินกำหนด · ต้องอนุมัติ' : gate.kind === 'price' ? 'แก้ราคา / ส่วนลดเกินสิทธิ์ · ต้องให้ผู้จัดการอนุมัติ' : undefined}
+      ownerOnly={gate.kind === 'belowCost' && below.ownerOnly}
+      title={gate.kind === 'credit' ? 'เกินวงเงิน / มีบิลเกินกำหนด · ต้องอนุมัติ' : gate.kind === 'price' ? 'แก้ราคา / ส่วนลดเกินสิทธิ์ · ต้องให้ผู้จัดการอนุมัติ' : below.title}
       label={gate.kind === 'price' ? (
         <>
           {gate.text}
@@ -476,6 +477,8 @@ export function SalesSettingsModal({ onClose }: { onClose: () => void }) {
   const [days, setDays] = useState<string | null>(null);
   const [limit, setLimit] = useState<string | null>(null);
   const [banks, setBanks] = useState<SalesSettings['banks'] | null>(null);
+  const [bcMode, setBcMode] = useState<SalesSettings['belowCostApprover'] | null>(null);
+  const isOwner = useAuth().user?.role === 'owner';
   const [err, setErr] = useState('');
   if (!s.data) return <Modal onClose={onClose} label="ตั้งค่าเอกสารขาย"><div className="sk" /></Modal>;
   const bs = banks ?? s.data.banks;
@@ -483,8 +486,9 @@ export function SalesSettingsModal({ onClose }: { onClose: () => void }) {
   const go = async () => {
     setErr('');
     try {
-      await api('PATCH', '/api/sales/settings', { body: { quoteValidDays: Number(days ?? s.data!.quoteValidDays), defaultCreditLimit: limit ?? s.data!.defaultCreditLimit, banks: bs.filter((b) => b.bank.trim() && b.account.trim()) } });
+      await api('PATCH', '/api/sales/settings', { body: { quoteValidDays: Number(days ?? s.data!.quoteValidDays), defaultCreditLimit: limit ?? s.data!.defaultCreditLimit, banks: bs.filter((b) => b.bank.trim() && b.account.trim()), ...(isOwner && bcMode ? { belowCostApprover: bcMode } : {}) } });
       await qc.invalidateQueries({ queryKey: ['sales-settings'] });
+      await qc.invalidateQueries({ queryKey: ['meta'] });
       toast('บันทึกการตั้งค่าแล้ว');
       onClose();
     } catch (e) {
@@ -497,6 +501,16 @@ export function SalesSettingsModal({ onClose }: { onClose: () => void }) {
       <div className="fgrid">
         <label className="f">ยืนราคาใบเสนอราคา (วัน)<input type="number" min="1" max="365" value={days ?? s.data.quoteValidDays} onChange={(e) => setDays(e.target.value)} /></label>
         <label className="f">วงเงินเครดิตเริ่มต้น (บาท)<input type="number" min="0" step="0.01" value={limit ?? s.data.defaultCreditLimit} onChange={(e) => setLimit(e.target.value)} /></label>
+        {isOwner && (
+          <label className="f">ผู้อนุมัติขายต่ำกว่าทุน (เฉพาะเจ้าของร้าน)
+            <select value={bcMode ?? s.data.belowCostApprover} onChange={(e) => setBcMode(e.target.value as SalesSettings['belowCostApprover'])} data-testid="set-below-cost">
+              <option value="owner">เจ้าของร้านเท่านั้น</option>
+              <option value="owner_or_manager">เจ้าของร้านหรือผู้จัดการ</option>
+              <option value="none">ไม่ต้องอนุมัติ (แจ้งเตือนและบันทึกประวัติ)</option>
+            </select>
+            <span className="small muted">ใช้กับขายหน้าร้าน ใบสั่งขาย ใบกำกับ และโปรโมชัน · ทุกโหมดยังขึ้นป้าย "ต่ำกว่าทุน" สีแดง</span>
+          </label>
+        )}
       </div>
       <b className="small">บัญชีธนาคารรับโอน (พิมพ์ท้ายใบเสนอราคา ใบกำกับเงินเชื่อ ใบวางบิล)</b>
       <div className="tw">
