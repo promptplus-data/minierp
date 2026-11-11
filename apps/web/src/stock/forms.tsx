@@ -245,7 +245,8 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       onClose();
     } catch (e) {
       const det = e instanceof ApiFail ? (e.details as { reason?: string; poNo?: string; lines?: OverRow[] } | null) : null;
-      if (det?.reason === 'PO_OVER_RECEIVE' && det.lines) {
+      if (e instanceof ApiFail && det?.reason === 'PO_OVER_RECEIVE' && det.lines) {
+        e.claim(); // this form asks itself (confirm modal), no error dialog
         setOver({ poNo: det.poNo ?? po?.no ?? '', lines: det.lines });
         setOverTried(false);
       } else setErr(errText(e));

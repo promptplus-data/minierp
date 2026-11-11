@@ -148,17 +148,20 @@ test.describe.serial('purchasing', () => {
   });
 });
 
-test('purchase order from a sales order: shortfall prefilled → save → receive part → partially received', async ({ page, request }) => {
+test('purchase order from a sales order: tick lines → save → receive part → over-receive with a note + a free line', async ({ page, request }) => {
   const token = await apiToken(request, 'charoen');
   const get = async (url: string) => (await (await request.get(url, { headers: { authorization: `Bearer ${token}` } })).json());
-  const paint = (await get('/api/products?q=PNT-PR9&limit=1')).items[0] as { id: string };
+  const product = async (sku: string) => (await get(`/api/products?q=${sku}&limit=1`)).items[0] as { id: string };
+  const paint = await product('PNT-PR9');
+  const sand = await product('SAND-C');
   const backWh = ((await get('/api/warehouses')).items as { id: string; isPos: boolean; active: boolean; kind?: string }[]).find((w) => !w.isPos && w.active && w.kind !== 'damaged')!.id;
   const customer = ((await get('/api/customers?limit=20')).items as { id: string; code: string }[]).find((c) => c.code === 'C00001')!.id;
-  const avail = Number((await get(`/api/stock?productId=${paint.id}&warehouseId=${backWh}`)).items[0]?.available ?? 0);
-  const qty = Math.max(avail, 0) + 5; // 5 short of what the customer ordered
+  const availOf = async (id: string) => Number((await get(`/api/stock?productId=${id}&warehouseId=${backWh}`)).items[0]?.available ?? 0);
+  const qty = Math.max(await availOf(paint.id), 0) + 5; // 5 short of what the customer ordered
+  const sandQty = Math.max(await availOf(sand.id), 0) + 3;
   const so = await request.post('/api/sales/orders', {
     headers: { authorization: `Bearer ${token}` },
-    data: { customerId: customer, warehouseId: backWh, lines: [{ productId: paint.id, qty: String(qty), unitPrice: '1290' }] },
+    data: { customerId: customer, warehouseId: backWh, lines: [{ productId: paint.id, qty: String(qty), unitPrice: '1290' }, { productId: sand.id, qty: String(sandQty), unitPrice: '650' }] },
   });
   expect(so.ok(), await so.text()).toBeTruthy();
   const soNo = (await so.json()).no as string;
@@ -168,15 +171,22 @@ test('purchase order from a sales order: shortfall prefilled → save → receiv
   await page.getByTestId('make-po').click();
   await expect(page.getByTestId('po-from')).toHaveText(soNo);
   const lines = page.getByTestId('po-lines');
-  await expect(lines.locator('tbody tr')).toHaveCount(1);
+  await expect(lines.locator('tbody tr')).toHaveCount(2);
   await expect(page.getByTestId('po-q0')).toHaveValue('5');
+  await expect(page.getByTestId('po-q1')).toHaveValue('3');
   await expect(lines.locator('tbody tr').first()).toContainText(String(qty)); // ordered qty shown next to the line
+  await expect(page.getByTestId('po-partial-hint')).toBeVisible();
+  await expect(page.getByTestId('po-all')).toBeChecked();
+  await page.getByTestId('po-on1').uncheck(); // sand goes on another vendor's PO
+  await expect(page.getByTestId('po-all')).not.toBeChecked();
+  await expect(page.getByTestId('po-count')).toContainText('1 รายการ');
   await pick(page, 'po-vendor', 'ทวีพัฒนาวัสดุ', 'ทวีพัฒนา');
   await page.getByTestId('po-save').click();
   await expect(page).toHaveURL(/\/purchasing\/po\/PO\d{4}-\d{4}$/);
   const poNo = (await page.getByTestId('doc-no').textContent())!;
   await expect(page.getByTestId('po-status-pill')).toHaveText('รอรับของ');
   await expect(page.getByTestId('po-source')).toContainText(soNo);
+  await expect(page.getByTestId('po-detail-lines').locator('tbody tr')).toHaveCount(1);
 
   await page.getByTestId('po-receive').click();
   await expect(page.getByTestId('gr-q0')).toHaveValue('5');
@@ -187,10 +197,42 @@ test('purchase order from a sales order: shortfall prefilled → save → receiv
   await expect(page.getByTestId('po-status-pill')).toHaveText('รับบางส่วน');
   await expect(page.getByTestId('po-detail-lines')).toContainText('3');
   await expect(page.getByTestId('po-receipts')).toContainText('GR');
-  await shot(page, 'po-detail', 1300);
 
+  // second delivery: one more than still due, plus a free bucket (ของแถม)
+  await page.getByTestId('po-receive').click();
+  await expect(page.getByTestId('gr-q0')).toHaveValue('3');
+  await page.getByTestId('gr-q0').fill('4');
+  await page.getByTestId('gr-add-free').click();
+  await pick(page, 'gr-p1', 'สีรองพื้นปูนใหม่ 9 ลิตร', 'PNT-PR9');
+  await expect(page.getByTestId('gr-free1')).toBeChecked();
+  await expect(page.getByTestId('gr-c1')).toBeDisabled();
+  await page.getByTestId('gr-dn').fill(`DN-PO2-${Date.now()}`);
+  await page.getByTestId('gr-inv').fill(`IV-PO2-${Date.now()}`);
+  await page.getByTestId('gr-save').click();
+  const over = page.getByRole('dialog', { name: 'รับของเกินใบสั่งซื้อ' });
+  await expect(over).toBeVisible();
+  await expect(page.getByTestId('over-table')).toContainText('+1');
+  await page.getByTestId('over-confirm').click();
+  await expect(over.getByRole('alert')).toContainText('ใส่หมายเหตุ');
+  await page.getByTestId('over-note').fill('ผู้ขายส่งเกินมา 1 ถัง ตกลงรับไว้');
+  await page.getByTestId('over-confirm').click();
+  await expect(page.getByTestId('po-status-pill')).toHaveText('รับครบ');
+  await expect(page.getByTestId('po-over-pill')).toContainText('รับเกิน +1');
+  await expect(page.getByTestId('po-over-note')).toContainText('ผู้ขายส่งเกินมา 1 ถัง');
+  await shot(page, 'po-detail', 1300);
+  const gr2 = (await page.getByTestId('po-receipts').getByRole('link').last().textContent())!;
+  await page.getByTestId('po-receipts').getByRole('link', { name: gr2 }).click();
+  await expect(page.getByTestId('gr-lines')).toContainText('ของแถม');
+  await expect(page.getByTestId('gr-over-note')).toContainText('ผู้ขายส่งเกินมา');
+
+  // the next PO from the same order suggests only what is still missing (sand), paint is unticked at 0
   await page.goto(`/b2b/so/${soNo}`);
   await expect(page.getByTestId('doc-pos')).toContainText(poNo);
+  await page.getByTestId('make-po').click();
+  await expect(page.getByTestId('po-q1')).toHaveValue('3');
+  await expect(page.getByTestId('po-on0')).not.toBeChecked();
+  await expect(page.getByTestId('po-on1')).toBeChecked();
+  await page.goto(`/b2b/so/${soNo}`);
   await page.getByTestId('doc-pos').getByRole('link', { name: poNo }).click();
   await expect(page).toHaveURL(new RegExp(`/purchasing/po/${poNo}$`));
 });
