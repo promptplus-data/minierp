@@ -452,9 +452,10 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const s = useQuery({ queryKey: ['pu', 'settings'], queryFn: () => api('GET', '/api/purchasing/settings', { schema: PurchasingSettings }) });
   const [err, setErr] = useState('');
-  const set = async (billDiscountMode: 'sep' | 'alloc') => {
+  const isOwner = useAuth().user?.role === 'owner';
+  const set = async (body: Partial<PurchasingSettings>) => {
     try {
-      await api('PATCH', '/api/purchasing/settings', { body: { billDiscountMode }, schema: PurchasingSettings });
+      await api('PATCH', '/api/purchasing/settings', { body, schema: PurchasingSettings });
       await s.refetch();
       toast('บันทึกการตั้งค่าแล้ว');
     } catch (e) {
@@ -465,10 +466,16 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     <Modal onClose={onClose} label="ตั้งค่าส่วนลดท้ายบิล">
       <h3>ส่วนลดท้ายบิลตอนซื้อ (BR-19)</h3>
       {(['sep', 'alloc'] as const).map((m) => (
-        <label key={m} className="row"><input type="radio" name="bdm" checked={s.data?.billDiscountMode === m} onChange={() => void set(m)} />
+        <label key={m} className="row"><input type="radio" name="bdm" checked={s.data?.billDiscountMode === m} onChange={() => void set({ billDiscountMode: m })} />
           {m === 'sep' ? 'บันทึกเป็นส่วนลดรับแยก ไม่ลดทุนรายสินค้า (ค่าเริ่มต้น)' : 'กระจายเข้าทุนสินค้าตามสัดส่วนมูลค่า'}</label>
       ))}
       <p className="small muted" style={{ margin: 0 }}>ยอดเจ้าหนี้และภาษีซื้อคิดจากยอดหลังหักส่วนลดเสมอ · การเปลี่ยนมีผลกับใบรับที่บันทึกหลังจากนี้</p>
+      <h3 style={{ marginTop: 12 }}>วิธีคิดต้นทุนของแถม (ค่าเริ่มต้นของใบรับ)</h3>
+      {(['zero', 'allocate'] as const).map((m) => (
+        <label key={m} className="row"><input type="radio" name="fgc" checked={s.data?.freeGoodsCosting === m} disabled={!isOwner} onChange={() => void set({ freeGoodsCosting: m })} data-testid={`set-fgc-${m}`} />
+          {m === 'zero' ? 'ต้นทุน 0 (ค่าเริ่มต้น)' : 'เฉลี่ยต้นทุนตามมูลค่าตลาด (กระจายยอดที่จ่ายจริงให้ทุกรายการรวมของแถม)'}</label>
+      ))}
+      <p className="small muted" style={{ margin: 0 }}>{isOwner ? 'เลือกเปลี่ยนเป็นรายใบได้ตอนรับของ · ยอดเจ้าหนี้ไม่เปลี่ยน' : 'เฉพาะเจ้าของร้านเปลี่ยนได้'}</p>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn pri" onClick={onClose}>ปิด</button></div>
     </Modal>

@@ -1,8 +1,8 @@
 /** Multi-line stock forms (mockup stockFormModal + mpModal): transfer, issue, adjust request, manual receipt. */
 import { useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { AdjustRequest, StockDoc, type Product, type PurchaseOrder } from '@erp/contracts';
-import { d, sum } from '@erp/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AdjustRequest, PurchasingSettings, StockDoc, type Product, type PurchaseOrder } from '@erp/contracts';
+import { allocate, allocateFreeGoods, d, qty4, sum, type FreeGoodsCosting } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { checkFields, qtyMsg, requiredMsg } from '../errors';
 import { useCatalog, useMeta, useWarehouseStock, useWarehouses, useAllWarehouses } from '../data';
@@ -176,7 +176,11 @@ interface RLine {
   pid: string; u: number; q: string; cost: string; poLineId?: string; left?: string; ordered?: string;
   /** ของแถม: cost 0 (the server forces it). A line of a free PO line is free and cannot be unticked. */
   free?: boolean; poFree?: boolean;
+  /** Free line, 'allocate' costing: market price per unit ('' = the product's retail price for the unit). */
+  mkt?: string;
 }
+/** Retail price of one unit of a product (unit price, else base price × factor). */
+const retailOf = (p: Product | undefined, u: number) => (p ? (p.units[u]?.price != null ? d(p.units[u]!.price!) : d(p.price).times(d(p.units[u]?.factor ?? '1'))) : d(0));
 /** 409 PO_OVER_RECEIVE details, one row per PO line that goes over (PO line unit). */
 interface OverRow { poLineId: string; name: string; unitName: string; ordered: string; received: string; receiving: string; excess: string }
 
@@ -207,6 +211,9 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
   const [over, setOver] = useState<{ poNo: string; lines: OverRow[] } | null>(null);
   const [overNote, setOverNote] = useState('');
   const [overTried, setOverTried] = useState(false);
+  const settings = useQuery({ queryKey: ['pu', 'settings'], queryFn: () => api('GET', '/api/purchasing/settings', { schema: PurchasingSettings }), staleTime: 60_000 });
+  const [fgcPick, setFgc] = useState<FreeGoodsCosting | null>(null);
+  const fgc: FreeGoodsCosting = fgcPick ?? settings.data?.freeGoodsCosting ?? 'zero';
   const vId = vendor ?? '';
   const whId = wh || active.find((w) => !w.isPos)?.id || active[0]?.id || '';
   const update = (i: number, patch: Partial<RLine>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -215,6 +222,20 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
   const disc = isNum(bd) ? Math.min(d(bd).toNumber(), total.toNumber()) : 0;
   const net = total.minus(disc);
   const vatAmt = vat ? net.times('0.07') : d(0);
+  const hasFree = lines.some((l) => l.pid && l.free);
+  const allocating = hasFree && fgc === 'allocate';
+  const mktOf = (l: RLine) => (l.mkt?.trim() ? l.mkt.trim() : qty4(retailOf(prods.byId.get(l.pid), l.u)));
+  /** Preview of the cost per line unit after spreading what is paid by market value (the server computes the real one). */
+  const allocPreview = useMemo(() => {
+    if (!allocating) return null;
+    const ok = lines.filter((l) => l.pid && isNum(l.q) && d(l.q).gt(0) && (l.free ? isNum(mktOf(l)) : isNum(l.cost)));
+    if (ok.length !== lines.filter((l) => l.pid).length) return null;
+    const gross = ok.map((l) => amt(l));
+    const dsc = settings.data?.billDiscountMode === 'alloc' && disc > 0 ? allocate(disc, gross) : gross.map(() => d(0));
+    const r = allocateFreeGoods(ok.map((l, i) => ({ paid: gross[i]!.minus(dsc[i]!), market: l.free ? d(l.q).times(d(mktOf(l))) : gross[i]!, baseQty: l.q })));
+    return new Map(ok.map((l, i) => [l, r[i]!.unitCost]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allocating, lines, disc, settings.data?.billDiscountMode, prods.byId]);
 
   /** `overReceiveNote` is sent only from the over-receipt confirm modal. */
   const save = async (overReceiveNote?: string) => {
@@ -225,7 +246,8 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       deliveryNo: requiredMsg(dn, 'เลขที่ใบส่งของ'), vendorInvoiceNo: requiredMsg(inv, 'เลขที่ใบกำกับภาษี / บิลของผู้ขาย'),
       ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [
         [`lines.${i}.qty`, qtyMsg(l.q)],
-        [`lines.${i}.unitCost`, !l.free && !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
+        [`lines.${i}.unitCost`, !l.free && !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข'],
+        [`lines.${i}.marketUnitPrice`, allocating && l.free && !!l.mkt?.trim() && !isNum(l.mkt) && 'ราคาตลาดต้องเป็นตัวเลข']] : []))),
       billDiscount: !!bd && !isNum(bd) && 'ส่วนลดท้ายบิลต้องเป็นตัวเลข',
     })) return;
     setBusy(true);
@@ -234,8 +256,11 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
       const res = await api('POST', '/api/stock/receipts', {
         body: {
           vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', note: note.trim() || undefined, poId: po?.id,
-          overReceiveNote,
-          lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.free ? '0' : l.cost.trim(), poLineId: l.poLineId, free: l.free || undefined })),
+          overReceiveNote, freeGoodsCosting: hasFree ? fgc : undefined,
+          lines: ls.map((l) => ({
+            productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.free ? '0' : l.cost.trim(), poLineId: l.poLineId, free: l.free || undefined,
+            marketUnitPrice: allocating && l.free ? mktOf(l) : undefined,
+          })),
         },
         schema: StockDoc,
       });
@@ -291,7 +316,12 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
                   <td>{p ? (l.poLineId ? p.units[l.u]?.name : <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>) : '-'}</td>
                   {po && <td className="n">{l.left ? <>{fq(l.left)}<div className="small muted">สั่ง {fq(l.ordered ?? '0')}</div></> : '-'}</td>}
                   <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`gr-q${i}`} /></td>
-                  <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.free ? '0' : l.cost} disabled={l.free} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
+                  <td className="n">
+                    {allocating && l.free
+                      ? <label className="small muted" style={{ display: 'block' }}>ราคาตลาด/หน่วย<br /><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.marketUnitPrice`} value={l.mkt ?? ''} placeholder={l.pid ? mktOf({ ...l, mkt: '' }) : ''} style={{ width: 100 }} aria-label={`ราคาตลาดแถว ${i + 1}`} onChange={(e) => update(i, { mkt: e.target.value })} data-testid={`gr-m${i}`} /></label>
+                      : <input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.free ? '0' : l.cost} disabled={l.free} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} />}
+                    {allocPreview?.has(l) && <div className="small muted" data-testid={`gr-alloc${i}`}>หลังเฉลี่ย {fmt(d(allocPreview.get(l)!).times(d(prods.byId.get(l.pid)?.units[l.u]?.factor ?? '1')))}</div>}
+                  </td>
                   <td className="n">{l.free ? <Pill k="acc">ของแถม</Pill> : fmt(amt(l))}</td>
                   <td><input type="checkbox" checked={!!l.free} disabled={!!l.poLineId} aria-label={`ของแถมแถว ${i + 1}`} data-testid={`gr-free${i}`}
                     title={l.poLineId ? (l.poFree ? 'ของแถมตามใบสั่งซื้อ' : 'รายการตามใบสั่งซื้อ · ของแถมให้เพิ่มเป็นรายการแยก') : 'ของแถม (ต้นทุน 0)'}
@@ -308,6 +338,14 @@ export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?
         <button className="btn sm" onClick={() => setLines((ls) => [...ls, { pid: '', u: 0, q: '1', cost: '0', free: true }])} data-testid="gr-add-free">+ เพิ่มของแถม</button>
         <span className="small muted">{lines.filter((l) => l.pid).length} รายการ{lines.some((l) => l.pid && l.free) ? ` · ของแถม ${lines.filter((l) => l.pid && l.free).length} (ไม่รวมในยอดเจ้าหนี้)` : ''}</span>
       </div>
+      {hasFree && (
+        <div className="row" role="radiogroup" aria-label="วิธีคิดต้นทุนของแถม" data-testid="gr-fgc">
+          <span className="small" style={{ fontWeight: 600 }}>วิธีคิดต้นทุนของแถม:</span>
+          <label className="row small"><input type="radio" name="fgc" checked={fgc === 'zero'} onChange={() => setFgc('zero')} data-testid="gr-fgc-zero" />ต้นทุน 0</label>
+          <label className="row small"><input type="radio" name="fgc" checked={fgc === 'allocate'} onChange={() => setFgc('allocate')} data-testid="gr-fgc-allocate" />เฉลี่ยต้นทุนตามมูลค่าตลาด</label>
+          {allocating && <span className="small muted">กระจายยอดที่จ่ายจริงให้ทุกรายการตามมูลค่าตลาด · ยอดเจ้าหนี้ไม่เปลี่ยน</span>}
+        </div>
+      )}
       <NoteField value={note} onChange={setNote} testId="gr-note" placeholder="เช่น ของมาไม่ครบ รอส่งเพิ่ม / ชำระเงินสดหน้างาน" />
       <div className="grid g2" style={{ gap: 12 }}>
         <div>

@@ -71,17 +71,19 @@ export function GrDetailPage() {
           <h3 style={{ marginTop: 14 }}>รายการ</h3>
           <div className="tw">
             <table data-testid="gr-lines">
-              <thead><tr><th>สินค้า</th><th className="n">จำนวน</th><th className="n">ส่งคืนแล้ว</th>{g.lines.some((l) => l.unitPrice != null) && <><th className="n">ราคา/หน่วย</th><th className="n">จำนวนเงิน</th></>}</tr></thead>
+              <thead><tr><th>สินค้า</th><th className="n">จำนวน</th><th className="n">ส่งคืนแล้ว</th>{g.lines.some((l) => l.unitPrice != null) && <><th className="n">ราคา/หน่วย</th><th className="n">จำนวนเงิน</th></>}{allocShown(g) && <th className="n">ต้นทุนหลังเฉลี่ย</th>}</tr></thead>
               <tbody>
                 {g.lines.map((l) => (
                   <tr key={l.id}>
                     <td>{l.name}{l.free && <> <Pill k="acc">ของแถม</Pill></>}</td><td className="n">{fq(l.qty)} {l.unitName}</td><td className="n">{d(l.returnedQty).gt(0) ? fq(l.returnedQty) : '-'}</td>
                     {l.unitPrice != null && <><td className="n"><Cost v={l.unitPrice} /></td><td className="n"><Cost v={l.amount} /></td></>}
+                    {allocShown(g) && <td className="n" data-testid="gr-alloc">{l.allocUnitCost != null ? <Cost v={l.allocUnitCost} /> : '-'}{l.marketUnitPrice != null && <div className="small muted">ราคาตลาด {fmt(l.marketUnitPrice)}</div>}</td>}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          {g.freeGoodsCosting === 'allocate' && <p className="small muted" style={{ margin: '6px 0 0' }} data-testid="gr-alloc-note">ต้นทุนเฉลี่ยตามมูลค่าตลาด · ราคา/หน่วยคือราคาตามใบกำกับ ยอดเจ้าหนี้ไม่เปลี่ยน</p>}
           {printing && <PrintModal title={g.no} onClose={() => setPrinting(false)}><Paper {...grPaper(g, whs.data?.find((w) => w.id === g.warehouseId)?.name ?? '-')} /></PrintModal>}
           {g.voided && <div className="note bad small" style={{ marginTop: 10 }} data-testid="voided">ยกเลิกโดย {g.voided.by} · เหตุผล: {g.voided.reason}</div>}
           {voiding && <ReasonModal title={`ยกเลิกใบรับสินค้า ${g.no}`} url={`/api/purchasing/receipts/${encodeURIComponent(g.no)}/void`} okLabel="ยืนยันยกเลิกใบรับ" testId="gr-void"
@@ -94,11 +96,14 @@ export function GrDetailPage() {
   );
 }
 
+/** 'allocate' receipt viewed by someone who may see cost: show the cost after the spread next to the invoice price. */
+const allocShown = (g: GrDetail) => g.freeGoodsCosting === 'allocate' && g.lines.some((l) => l.allocUnitCost != null);
+
 /** A4 goods-received note: what came in, from whom, into which warehouse; prices only for users who may see cost; free goods marked. */
 function grPaper(g: GrDetail, whName: string): PaperProps {
   const priced = g.lines.some((l) => l.unitPrice != null);
   const free = g.lines.filter((l) => l.free).length;
-  const notes = [g.note, g.overReceiveNote && `รับเกินใบสั่งซื้อ: ${g.overReceiveNote}`, free ? `มีของแถม ${free} รายการ (ต้นทุน 0 ไม่รวมในยอดตั้งหนี้)` : ''].filter(Boolean);
+  const notes = [g.note, g.overReceiveNote && `รับเกินใบสั่งซื้อ: ${g.overReceiveNote}`, free ? (g.freeGoodsCosting === 'allocate' ? `มีของแถม ${free} รายการ (ไม่รวมในยอดตั้งหนี้) · ต้นทุนเฉลี่ยตามมูลค่าตลาด` : `มีของแถม ${free} รายการ (ต้นทุน 0 ไม่รวมในยอดตั้งหนี้)`) : ''].filter(Boolean);
   return {
     title: 'ใบรับสินค้า', sub: 'Goods Received Note', no: g.no, date: g.date, voided: g.status === 'void',
     party: { label: 'ผู้ขาย', name: g.vendorName ?? '-' },
@@ -110,7 +115,11 @@ function grPaper(g: GrDetail, whName: string): PaperProps {
       ...(g.apBillNo ? [['บิลเจ้าหนี้', g.apBillNo]] : []),
     ] as [string, ReactNode][],
     cols: priced ? 'price' : 'qty',
-    rows: g.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.free ? '0' : l.unitPrice, amt: l.free ? '0' : l.amount })),
+    rows: g.lines.map((l) => ({
+      name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.free ? '0' : l.unitPrice, amt: l.free ? '0' : l.amount,
+      extra: l.allocUnitCost != null ? fmt(l.allocUnitCost) : '-',
+    })),
+    extraCol: allocShown(g) ? 'ต้นทุนหลังเฉลี่ย' : undefined,
     totals: priced && g.total != null ? [
       ...(g.billDiscount && d(g.billDiscount).gt(0) ? [['ส่วนลดท้ายบิล', `-${fmt(g.billDiscount)}`] as [string, string]] : []),
       ['ยอดรวม', fmt(g.total), true],
