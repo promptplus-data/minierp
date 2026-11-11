@@ -3,7 +3,7 @@
  * shown (lists, dashboards, reports, audit log, aging, project pages) instead of plain text.
  *
  * The document type comes from the explicit `type` prop, otherwise from the number's letter prefix (QT, SO, DO, INV,
- * ABB, CN, BN, RE, GR, AP, PV, PR, MO, TR, ADJ, RQ, CNT, LV, IMP, DP). When the signed-in role cannot open the target
+ * ABB, CN, BN, RE, GR, PO, AP, PV, PR, MO, TR, ADJ, RQ, CNT, LV, IMP, DP). When the signed-in role cannot open the target
  * screen (the nav item is hidden), the number renders as plain text instead of a link that bounces to the home page.
  */
 import type { ReactNode } from 'react';
@@ -11,11 +11,11 @@ import { Link } from 'react-router-dom';
 import { navFor, useVisibleNav } from './modules';
 
 export type DocType =
-  | 'ABB' | 'INV' | 'CN' | 'QT' | 'SO' | 'DO' | 'BN' | 'RE' | 'GR' | 'AP' | 'PV' | 'PR' | 'MO' | 'TR' | 'ADJ' | 'RQ' | 'CNT' | 'LV' | 'IMP' | 'DP' | 'PJ' | 'GRD';
+  | 'ABB' | 'INV' | 'CN' | 'QT' | 'SO' | 'DO' | 'BN' | 'RE' | 'GR' | 'PO' | 'AP' | 'PV' | 'PR' | 'MO' | 'TR' | 'ADJ' | 'RQ' | 'CNT' | 'LV' | 'IMP' | 'DP' | 'PJ' | 'GRD';
 
 export const DOC_TYPE_TH: Record<DocType, string> = {
   ABB: 'ใบกำกับภาษีอย่างย่อ', INV: 'ใบกำกับภาษี', CN: 'ใบลดหนี้ / รับคืน', QT: 'ใบเสนอราคา', SO: 'ใบสั่งขาย', DO: 'ใบส่งของ', BN: 'ใบวางบิล', RE: 'ใบเสร็จรับเงิน',
-  GR: 'ใบรับสินค้า', AP: 'บิลเจ้าหนี้', PV: 'ใบสำคัญจ่าย', PR: 'ใบส่งคืนผู้ขาย', MO: 'ใบสั่งผลิต', TR: 'ใบโอนคลัง', ADJ: 'ใบปรับยอดสต็อก', RQ: 'คำขอปรับยอด',
+  GR: 'ใบรับสินค้า', PO: 'ใบสั่งซื้อ', AP: 'บิลเจ้าหนี้', PV: 'ใบสำคัญจ่าย', PR: 'ใบส่งคืนผู้ขาย', MO: 'ใบสั่งผลิต', TR: 'ใบโอนคลัง', ADJ: 'ใบปรับยอดสต็อก', RQ: 'คำขอปรับยอด',
   CNT: 'ใบนับสต็อก', LV: 'ใบลา', IMP: 'ชุดนำเข้าข้อมูล', DP: 'ใบมัดจำ', PJ: 'โครงการ', GRD: 'ใบส่งของรอรับ',
 };
 
@@ -45,6 +45,7 @@ export function docRoute(type: DocType, no: string, opts: { b2b?: boolean } = {}
     case 'BN': return `/ar/bn/${enc(no)}`;
     case 'RE': return `/ar/rc/${enc(no)}`;
     case 'GR': return `/purchasing/gr/${enc(no)}`;
+    case 'PO': return `/purchasing/po/${enc(no)}`;
     case 'AP': return `/ap/bill/${enc(no)}`;
     case 'PV': return `/ap/pv/${enc(no)}`;
     case 'PR': return `/ap/pr/${enc(no)}`;
@@ -97,7 +98,7 @@ export function RouteLink({ to, className, children }: { to: string; className?:
   return owner && visible.includes(owner) ? <Link className={className} to={to} onClick={(e) => e.stopPropagation()}>{children}</Link> : <span className={className}>{children}</span>;
 }
 
-const NO_RE = /\b(ABB|INV|CN|QT|SO|DO|BN|RE|GR|AP|PV|PR|MO|TR|ADJ|RQ|CNT|DP|PJ|LV)\d{4}-\d{4}\b/g;
+const NO_RE = /\b(ABB|INV|CN|QT|SO|DO|BN|RE|GR|PO|AP|PV|PR|MO|TR|ADJ|RQ|CNT|DP|PJ|LV)\d{4}-\d{4}\b/g;
 
 /** Free text that mentions document numbers ("ส่งของ · SO2611-0003"): each number becomes a DocLink. */
 export function DocText({ text }: { text: string | null | undefined }) {

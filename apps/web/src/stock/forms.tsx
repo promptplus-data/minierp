@@ -1,7 +1,7 @@
 /** Multi-line stock forms (mockup stockFormModal + mpModal): transfer, issue, adjust request, manual receipt. */
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { AdjustRequest, StockDoc, type Product } from '@erp/contracts';
+import { AdjustRequest, StockDoc, type Product, type PurchaseOrder } from '@erp/contracts';
 import { d, sum } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { checkFields, qtyMsg, requiredMsg } from '../errors';
@@ -172,11 +172,16 @@ export function StockFormModal({ kind, onClose }: { kind: StockKind; onClose: ()
   );
 }
 
-interface RLine { pid: string; u: number; q: string; cost: string }
+interface RLine { pid: string; u: number; q: string; cost: string; poLineId?: string; left?: string; ordered?: string }
+
+/** Lines still waiting on a purchase order, in the PO line unit, cost = PO net after line discount ex VAT. */
+const poLines = (po: PurchaseOrder): RLine[] => po.lines.filter((l) => d(l.remainingQty).gt(0))
+  .map((l) => ({ pid: l.productId, u: l.unitIdx, q: l.remainingQty, cost: l.grUnitCost ?? '0', poLineId: l.id, left: l.remainingQty, ordered: l.qty }));
 
 /** ซื้อเข้าแบบบันทึกเอง (REQ-M05-06): the only goods-receipt path on-prem. Bill discount per BR-19 (purchasing settings). */
 
-export function ReceiptModal({ onClose }: { onClose: () => void }) {
+/** Manual goods receipt. With `po`, it receives against that purchase order (รับของตาม PO): vendor fixed, lines = what is still due. */
+export function ReceiptModal({ onClose, po, onDone }: { onClose: () => void; po?: PurchaseOrder; onDone?: (grNo: string) => void }) {
   const toast = useToast();
   const invalidate = useInvalidateStock();
   const meta = useMeta();
@@ -184,13 +189,13 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
   const prods = useStockProducts();
   const vat = meta.data?.shop.vatRegistered ?? true;
   const active = (whs.data ?? []).filter((w) => w.active && w.kind !== 'damaged'); // goods received are sellable
-  const [vendor, setVendor] = useState<string | null>(null);
+  const [vendor, setVendor] = useState<string | null>(po?.vendor.id ?? null);
   const [note, setNote] = useState('');
   const [inv, setInv] = useState('');
   const [dn, setDn] = useState('');
-  const [wh, setWh] = useState('');
+  const [wh, setWh] = useState(po?.warehouseId ?? '');
   const [bd, setBd] = useState('');
-  const [lines, setLines] = useState<RLine[]>([{ pid: '', u: 0, q: '1', cost: '0' }]);
+  const [lines, setLines] = useState<RLine[]>(po ? poLines(po) : [{ pid: '', u: 0, q: '1', cost: '0' }]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const vId = vendor ?? '';
@@ -208,18 +213,24 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
     if (!checkFields({
       vendorId: !vId && 'เลือกผู้จำหน่าย',
       deliveryNo: requiredMsg(dn, 'เลขที่ใบส่งของ'), vendorInvoiceNo: requiredMsg(inv, 'เลขที่ใบกำกับภาษี / บิลของผู้ขาย'),
-      ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [[`lines.${i}.qty`, qtyMsg(l.q)], [`lines.${i}.unitCost`, !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
+      ...Object.fromEntries(lines.flatMap((l, i) => (l.pid ? [
+        [`lines.${i}.qty`, qtyMsg(l.q) || (l.left && isNum(l.q) && d(l.q).gt(d(l.left)) && `รับเกินที่สั่ง (ค้างรับ ${fq(l.left)})`)],
+        [`lines.${i}.unitCost`, !isNum(l.cost) && 'ต้นทุนต้องเป็นตัวเลข']] : []))),
       billDiscount: !!bd && !isNum(bd) && 'ส่วนลดท้ายบิลต้องเป็นตัวเลข',
     })) return;
     setBusy(true);
     setErr('');
     try {
       const res = await api('POST', '/api/stock/receipts', {
-        body: { vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', note: note.trim() || undefined, lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim() })) },
+        body: {
+          vendorId: vId, vendorInvoiceNo: inv.trim(), deliveryNo: dn.trim(), warehouseId: whId, billDiscount: bd.trim() || '0', note: note.trim() || undefined, poId: po?.id,
+          lines: ls.map((l) => ({ productId: l.pid, unitIdx: l.u, qty: l.q.trim(), unitCost: l.cost.trim(), poLineId: l.poLineId })),
+        },
         schema: StockDoc,
       });
       await invalidate();
       toast(`รับเข้าสต็อก ${res.no} แล้ว ${ls.length} รายการ`);
+      onDone?.(res.no);
       onClose();
     } catch (e) {
       setErr(errText(e));
@@ -229,29 +240,33 @@ export function ReceiptModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal onClose={onClose} wide label="ซื้อเข้าแบบบันทึกเอง">
-      <h3>ซื้อเข้าแบบบันทึกเอง</h3>
-      <p className="small muted" style={{ margin: 0 }}>สำหรับของที่ซื้อจากผู้จำหน่าย · 1 ใบรับได้หลายสินค้า · บันทึกแล้วสร้างล็อตใหม่ตามวันที่รับของ</p>
+    <Modal onClose={onClose} wide label={po ? `รับของตาม ${po.no}` : 'ซื้อเข้าแบบบันทึกเอง'}>
+      <h3>{po ? <>รับของตามใบสั่งซื้อ <span className="mono">{po.no}</span></> : 'ซื้อเข้าแบบบันทึกเอง'}</h3>
+      <p className="small muted" style={{ margin: 0 }}>{po
+        ? 'แก้จำนวนตามของที่มาจริงได้ (รับบางส่วนได้ ส่วนที่เหลือรอรับครั้งต่อไป) · รับเกินจำนวนที่สั่งไม่ได้ · ลบรายการที่ยังไม่มาออกได้'
+        : 'สำหรับของที่ซื้อจากผู้จำหน่าย · 1 ใบรับได้หลายสินค้า · บันทึกแล้วสร้างล็อตใหม่ตามวันที่รับของ'}</p>
       <div className="fgrid">
-        <label className="f">ผู้จำหน่าย (จำเป็น)<VendorPicker value={vendor} onChange={(id) => setVendor(id)} testId="gr-vendor" /></label>
+        <label className="f">ผู้จำหน่าย (จำเป็น){po ? <input type="text" value={po.vendor.name} disabled aria-label="ผู้จำหน่าย" /> : <VendorPicker value={vendor} onChange={(id) => setVendor(id)} testId="gr-vendor" />}</label>
         <label className="f">เลขที่ใบส่งของ (จำเป็น)<input type="text" name="deliveryNo" value={dn} onChange={(e) => setDn(e.target.value)} placeholder="เช่น DO-6910-0158" data-testid="gr-dn" /></label>
         <label className="f">เลขที่ใบกำกับภาษีผู้ขาย (จำเป็น)<input type="text" name="vendorInvoiceNo" value={inv} onChange={(e) => setInv(e.target.value)} placeholder="เช่น IV6910-0042" data-testid="gr-inv" /></label>
         <label className="f">เข้าคลัง<select name="warehouseId" value={whId} onChange={(e) => setWh(e.target.value)}>{active.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
       </div>
       <div className="tw">
         <table>
-          <thead><tr><th>สินค้า</th><th>หน่วย</th><th className="n">จำนวน</th><th className="n">ต้นทุน/หน่วย ({vat ? 'ก่อน VAT' : 'ที่จ่ายจริง'})</th><th className="n">รวม</th><th /></tr></thead>
+          <thead><tr><th>สินค้า</th><th>หน่วย</th>{po && <th className="n">ค้างรับ</th>}<th className="n">จำนวน</th><th className="n">ต้นทุน/หน่วย ({vat ? 'ก่อน VAT' : 'ที่จ่ายจริง'})</th><th className="n">รวม</th><th /></tr></thead>
           <tbody>
             {lines.map((l, i) => {
               const p = prods.byId.get(l.pid);
               return (
                 <tr key={i}>
                   <td>
-                    <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStockProduct} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
-                      onChange={(id, np) => update(i, { pid: id ?? '', u: 0, cost: np?.cost ?? l.cost })} />
-                    {!p && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
+                    {l.poLineId ? <>{p?.name ?? '…'}<div className="small muted mono">{p?.sku}</div></> : <ProductPicker value={l.pid || null} warehouseId={whId} filter={isStockProduct} ariaLabel={`สินค้าแถว ${i + 1}`} testId={`gr-p${i}`} style={{ minWidth: 240 }}
+                      onChange={(id, np) => update(i, { pid: id ?? '', u: 0, cost: np?.cost ?? l.cost })} />}
+                    {!l.pid && <div className="small" style={{ color: 'var(--warn)' }}>ยังไม่ได้เลือกสินค้า</div>}
+                    {po && !l.poLineId && l.pid && <div className="small muted">นอกใบสั่งซื้อ</div>}
                   </td>
-                  <td>{p ? <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select> : '-'}</td>
+                  <td>{p ? (l.poLineId ? p.units[l.u]?.name : <select value={l.u} aria-label="หน่วย" onChange={(e) => update(i, { u: Number(e.target.value) })}>{p.units.map((u, k) => <option key={k} value={k}>{u.name}</option>)}</select>) : '-'}</td>
+                  {po && <td className="n">{l.left ? <>{fq(l.left)}<div className="small muted">สั่ง {fq(l.ordered ?? '0')}</div></> : '-'}</td>}
                   <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.qty`} value={l.q} aria-label={`จำนวนแถว ${i + 1}`} onChange={(e) => update(i, { q: e.target.value })} data-testid={`gr-q${i}`} /></td>
                   <td className="n"><input className="qty" type="text" inputMode="decimal" data-field={`lines.${i}.unitCost`} value={l.cost} style={{ width: 100 }} aria-label={`ต้นทุนแถว ${i + 1}`} onChange={(e) => update(i, { cost: e.target.value })} data-testid={`gr-c${i}`} /></td>
                   <td className="n">{fmt(amt(l))}</td>

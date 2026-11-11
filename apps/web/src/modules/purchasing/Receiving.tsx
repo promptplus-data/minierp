@@ -2,8 +2,8 @@
  * M05 "ซื้อเข้า / รับของ": BR-10 banner, draft receipts from delivery files (M19-08, one per DN), check-and-confirm
  * (REQ-M05-03/04), confirmed receipts with their AP bill, manual receipt (core form), BR-19 setting.
  */
-import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { DELIVERY_FIELDS, DeliveryCommitRes, DeliveryPreview, GrDraft, GrDraftConfirmRes, GrDraftSummary, GrSummary, PurchasingSettings, type Product } from '@erp/contracts';
 import { d } from '@erp/core';
@@ -19,6 +19,7 @@ import { fmt, fq, Modal, Pill, SkeletonRows, th, useDebounced, useToast } from '
 import { ageText, downloadErrorRows, GrAlertBanner, readAsBase64, STATUS_PILL, STATUS_TH, thOrDash, useDashboard } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink } from '../../doclink';
+import { PoFormModal, PoList } from './Po';
 
 const FIELD_TH: Record<(typeof DELIVERY_FIELDS)[number], string> = {
   product_code: 'รหัสสินค้า', product_name: 'ชื่อสินค้า', qty: 'จำนวน', unit: 'หน่วย', unit_price: 'ราคาต่อหน่วย',
@@ -32,8 +33,13 @@ const isStock = (p: Product) => p.kind === 'stock' && p.active;
 export default function Receiving() {
   const { can } = useAuth();
   const qc = useQueryClient();
-  const [modal, setModal] = useState<'import' | 'manual' | 'settings' | null>(null);
   const [sp, setSp] = useSearchParams();
+  const nav = useNavigate();
+  // ?po=new[&from=SO2611-0003] opens the purchase-order form (the "สร้างใบสั่งซื้อ (PO)" button on quotations / sales orders)
+  const [modal, setModal] = useState<'import' | 'manual' | 'settings' | 'po' | null>(sp.get('po') === 'new' ? 'po' : null);
+  const poFrom = sp.get('from');
+  useEffect(() => { if (sp.get('po') === 'new') setModal('po'); }, [sp]);
+  const closePo = () => { setModal(null); if (sp.has('po')) setSp({}, { replace: true }); };
   const [draftId, setDraftIdState] = useState<string | null>(sp.get('draft'));
   // ?draft=<id> opens that draft (links from the GR-overdue banner and the home dashboard)
   const setDraftId = (id: string | null) => { setDraftIdState(id); if (sp.has('draft') && !id) setSp({}, { replace: true }); };
@@ -59,10 +65,12 @@ export default function Receiving() {
         <DraftList onOpen={setDraftId} />
         <p className="small muted" style={{ margin: '8px 0 0' }}>นำเข้าไฟล์ใบส่งของ (CSV / Excel) แล้วระบบสร้างใบรับของร่าง 1 ใบต่อ 1 เลขที่ใบส่งของ · สต็อกเพิ่มเมื่อกดยืนยันรับเท่านั้น · ยืนยันแล้วตั้งเจ้าหนี้อัตโนมัติ</p>
       </div>
+      <PoList onNew={canReceive ? () => setModal('po') : undefined} />
       <ReceiptList />
       {modal === 'import' && <DeliveryImportModal onClose={() => setModal(null)} onDone={(id) => { setModal(null); void refresh(); if (id) setDraftId(id); }} />}
       {modal === 'manual' && <ReceiptModal onClose={() => { setModal(null); void refresh(); }} />}
       {modal === 'settings' && <SettingsModal onClose={() => setModal(null)} />}
+      {modal === 'po' && <PoFormModal fromNo={poFrom} onClose={closePo} onSaved={(no) => { setModal(null); nav(`/purchasing/po/${encodeURIComponent(no)}`); }} />}
       {draftId && <DraftModal id={draftId} onClose={() => { setDraftId(null); void refresh(); }} />}
     </>
   );
@@ -124,7 +132,7 @@ function ReceiptList() {
           <tbody>
             {loading ? <SkeletonRows cols={cols} rows={4} /> : r.rows.map((g) => (
               <tr key={g.id}>
-                <td className="mono"><DocLink no={g.no} type="GR" /></td>
+                <td className="mono"><DocLink no={g.no} type="GR" />{g.status === 'void' && <div><Pill k="bad">ยกเลิก</Pill></div>}{g.poNos.map((n) => <div key={n} className="small">ตาม <DocLink no={n} type="PO" /></div>)}</td>
                 <td className="mono small">{g.deliveryNo ?? '-'}<div className="muted">{g.vendorInvoiceNo ?? ''}</div></td>
                 <td>{th(g.date)}</td>
                 <td>{g.vendorName ?? '-'}<div className="small muted">{whs.data?.find((w) => w.id === g.warehouseId)?.name}</div></td>

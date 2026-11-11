@@ -3,7 +3,7 @@
  * goods receipt (/purchasing/gr/:no), AP bill (/ap/bill/:no), payment voucher (/ap/pv/:no), vendor return (/ap/pr/:no).
  * Each page lists the documents made from it and the one it came from (all as DocLink).
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApBillDetail, ApPayment, GrDetail, VendorReturn } from '@erp/contracts';
@@ -15,6 +15,7 @@ import { DocLink, DocLinks } from '../../doclink';
 import { useWarehouses } from '../../data';
 import { ErrorBanner } from '../../errors';
 import { fmt, fq, Pill, th } from '../../ui';
+import { ReasonModal } from './shared';
 import './purchasing.css';
 
 const METHOD_TH = { transfer: 'โอนเงิน', cheque: 'เช็ค', cash: 'เงินสด' } as const;
@@ -37,13 +38,19 @@ const Cost = ({ v }: { v: string | null | undefined }) => <>{v == null ? '-' : f
 export function GrDetailPage() {
   const { no = '' } = useParams();
   const whs = useWarehouses();
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const [voiding, setVoiding] = useState(false);
   const q = useQuery({ queryKey: ['pu', 'gr', no], queryFn: () => api('GET', `/api/purchasing/receipts/${encodeURIComponent(no)}`, { schema: GrDetail }) });
   const g = q.data;
+  const live = g?.status !== 'void';
   return (
-    <DetailShell back="/purchasing" backLabel="หน้ารับของ" title="ใบรับสินค้า" no={no} q={q}>
+    <DetailShell back="/purchasing" backLabel="หน้ารับของ" title="ใบรับสินค้า" no={no} q={q} pill={g && !live ? <Pill k="bad">ยกเลิก</Pill> : undefined}>
       {g && (
         <>
+          {live && can('inv.receive') === 1 && <div className="row" style={{ justifyContent: 'flex-end', marginBottom: 8 }}><button className="btn sm bad" onClick={() => setVoiding(true)} data-testid="gr-void">ยกเลิกใบรับ</button></div>}
           <div className="kv">
+            {g.poNos.length > 0 && <><span>ตามใบสั่งซื้อ</span><span className="mono" data-testid="gr-po"><DocLinks nos={g.poNos} type="PO" /></span></>}
             <span>วันที่</span><span>{th(g.date)}</span>
             <span>ผู้ขาย</span><span>{g.vendorName ?? '-'}</span>
             <span>คลัง</span><span>{whs.data?.find((w) => w.id === g.warehouseId)?.name ?? '-'}</span>
@@ -69,6 +76,10 @@ export function GrDetailPage() {
               </tbody>
             </table>
           </div>
+          {g.voided && <div className="note bad small" style={{ marginTop: 10 }} data-testid="voided">ยกเลิกโดย {g.voided.by} · เหตุผล: {g.voided.reason}</div>}
+          {voiding && <ReasonModal title={`ยกเลิกใบรับสินค้า ${g.no}`} url={`/api/purchasing/receipts/${encodeURIComponent(g.no)}/void`} okLabel="ยืนยันยกเลิกใบรับ" testId="gr-void"
+            effects={['ตัดสต็อกที่รับเข้าออกจากล็อตของใบนี้ (ต้องยังไม่ถูกขาย / โอน)', 'ยกเลิกบิลเจ้าหนี้ (ต้องยังไม่จ่ายเงินหรือส่งคืน)', ...(g.poNos.length ? [`คืนยอดค้างรับให้ใบสั่งซื้อ ${g.poNos.join(', ')}`] : [])]}
+            onClose={() => setVoiding(false)} onDone={() => void qc.invalidateQueries({ queryKey: ['pu'] })} />}
           <p className="small muted" style={{ margin: '8px 0 0' }}>ล็อตสต็อกจากใบรับนี้ดูได้ที่ <Link to={`/stock-ledger?q=${encodeURIComponent(g.no)}`}>สมุดคุมสต็อก</Link></p>
         </>
       )}
