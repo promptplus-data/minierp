@@ -211,6 +211,8 @@ export type SalesDelivery = z.infer<typeof SalesDelivery>;
 export const SalesDeliverySummary = z.object({
   id: z.string(), no: z.string(), date: z.string(), customer: z.object({ id: z.string().nullable(), name: z.string() }), soNo: z.string().nullable(),
   invoiceNo: z.string().nullable(), billedBy: z.string().nullable(), projectName: z.string().nullable(), total: Dec, status: z.enum(['active', 'void']), itemsPreview: z.string(),
+  /** From a cash sales order (ขายเงินสด): its invoice is paid on the spot. */
+  cashSale: z.boolean().default(false),
 });
 export type SalesDeliverySummary = z.infer<typeof SalesDeliverySummary>;
 /** GET /api/sales/delivery-sources: sales orders and goods-left invoices that still have something to deliver. */
@@ -226,6 +228,8 @@ const InvoiceCommon = {
   date: ISODate.optional(), attn: z.string().max(200).default(''), note: z.string().max(1000).default(''),
   /** Present and summing to the total = cash sale (paid now). Absent / empty = credit sale (receivable). */
   payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).max(6).optional(),
+  /** Paid now in full by this method (cash / transfer / QR พร้อมเพย์ / card); required for a cash sales order. */
+  payMethod: PaymentMethod.optional(),
   creditApproval: Approval.optional(),
 };
 export const SalesInvoiceReq = z.discriminatedUnion('source', [

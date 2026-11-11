@@ -180,7 +180,14 @@ export async function voidReceipt(tx: Tx, ctx: Ctx, no: string, reason: string):
   if (rc.status === 'void') throw E.conflict(`${no} is already void`);
   const lines = await tx.query<{ invoice_doc_id: string; settled: string }>(`select invoice_doc_id, settled::text from ar_receipt_lines where receipt_id = $1 order by invoice_doc_id`, [rc.id]);
   await tx.query(`select id from docs where id = any($1::uuid[]) order by id for update`, [lines.rows.map((l) => l.invoice_doc_id)]);
-  for (const l of lines.rows) await tx.query(`update docs set ar_balance = ar_balance + $2 where id = $1`, [l.invoice_doc_id, l.settled]);
+  // A receipt on a POS credit bill that was later replaced by a full tax invoice gives the balance back to that invoice.
+  for (const l of lines.rows) {
+    await tx.query(
+      `update docs set ar_balance = ar_balance + $2 where id = coalesce((select n.id from docs n join sales_invoices si on si.doc_id = n.id
+          where n.ref_doc_id = $1 and si.source = 'abb' and n.status = 'active' limit 1), $1)`,
+      [l.invoice_doc_id, l.settled],
+    );
+  }
   await tx.query(`update ar_receipts set status = 'void', void_by = $2, void_at = now(), void_reason = $3 where id = $1`, [rc.id, ctx.userId, reason]);
   await writeAudit(tx, ctx, [{ action: 'void', object: 'RE', ref: no, detail: `${reason} · คืนยอดค้าง ฿${fmtTHB(rc.settled)} (${rc.lines.map((l) => l.invoiceNo).join(', ')})` }]);
   return getReceipt(tx, no);
@@ -312,7 +319,10 @@ export async function dueSoon(tx: Tx, deps: Deps, days = 7) {
   return { asOf, days, dueSoon: pick('soon'), overdue: pick('over') };
 }
 
-/** Customer statement: invoices (debit), credit-refund credit notes, receipts and WHT (credit), with opening balance. */
+/**
+ * Customer statement: invoices (debit); credit notes (the part that reduced a bill, plus a customer credit when refunded
+ * as credit), receipts and WHT (credit), with opening balance. A closing balance below zero is a customer credit.
+ */
 export async function statement(tx: Tx, deps: Deps, q: { customerId: string; from?: string; to?: string }): Promise<ArStatement> {
   const customer = await loadCustomer(tx, q.customerId);
   const to = q.to ?? deps.today();
@@ -322,8 +332,9 @@ export async function statement(tx: Tx, deps: Deps, q: { customerId: string; fro
     `select x.date::text date, x.no, 'INV' kind, null ref, x.total::text debit, '0' credit, coalesce(si.attn, '') note, x.created_at at
        from docs x join sales_invoices si on si.doc_id = x.id where x.customer_id = $1 and x.status = 'active' and si.kind = 'credit' and x.date <= $2::date
      union all
-     select c.date::text, c.no, 'CN', c.ref_no, '0', c.total::text, coalesce(c.reason, ''), c.created_at
-       from docs c join sales_invoices si on si.doc_id = c.ref_doc_id where c.customer_id = $1 and c.type = 'CN' and c.status = 'active' and c.refund = 'credit' and c.date <= $2::date
+     select c.date::text, c.no, 'CN', c.ref_no, '0', (case when c.refund = 'credit' then c.total else c.ar_applied end)::text, coalesce(c.reason, ''), c.created_at
+       from docs c join sales_invoices si on si.doc_id = c.ref_doc_id
+      where c.customer_id = $1 and c.type = 'CN' and c.status = 'active' and (c.refund = 'credit' or c.ar_applied > 0) and c.date <= $2::date
      union all
      select rc.date::text, rc.no, 'RC', null, '0', rc.cash::text, rc.method, rc.created_at from ar_receipts rc where rc.customer_id = $1 and rc.status = 'active' and rc.date <= $2::date
      union all

@@ -1,6 +1,6 @@
 /** Customer returns (REQ-M08-06): searchable bill picker + credit note with stock back at original cost. */
 import type { Tx } from '@erp/db';
-import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4, sum , searchTokens } from '@erp/core';
+import { addDays, approverRoles, calcDoc, d, fmtTHB, money, qty4, returnArSplit, sum , searchTokens } from '@erp/core';
 import { z } from 'zod';
 import type { EligibleQuery, ReturnReq, SalesDoc } from '@erp/contracts';
 import { verifyApproval } from '../lib/approval';
@@ -117,11 +117,18 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
   }
   const totals = calcDoc(picked.map((x, i) => ({ qty: 1, unitPrice: amounts[i]!, vat: x.l.vat })), src.vat_mode);
 
-  let shiftId: string | null = null;
-  if (req.refund === 'cash') shiftId = (await requireOwnOpenShift(tx, ctx)).id; // cash refund is counted in the shift (BR-20)
-  if (req.refund === 'credit' && d(src.ar_balance).lt(d(totals.total))) {
-    throw E.conflict(`Credit refund needs an outstanding balance on ${src.no} (${src.ar_balance})`, { arBalance: src.ar_balance });
+  // A bill still owed (credit invoice, POS credit bill) is credited first, up to what is still owed on it; only the
+  // rest goes back as money (cash / transfer) or, with refund 'credit', stays as a customer credit on the statement.
+  const split = returnArSplit(totals.total, src.ar_balance);
+  const refundMoney = req.refund === 'credit' ? '0.00' : split.over;
+  if (req.refund === 'credit' && d(split.over).gt(0)) {
+    const sale = await tx.query<{ kind: string }>(`select kind from sales_invoices where doc_id = $1`, [src.id]);
+    if (!src.customer_id || sale.rows[0]?.kind !== 'credit') {
+      throw E.conflict(`Only ${split.toAr} is still owed on ${src.no}; refund the rest in cash or by transfer`, { arBalance: src.ar_balance, toAr: split.toAr, over: split.over });
+    }
   }
+  let shiftId: string | null = null;
+  if (req.refund === 'cash' && d(refundMoney).gt(0)) shiftId = (await requireOwnOpenShift(tx, ctx)).id; // cash refund is counted in the shift (BR-20)
   const products = await tx.query<{ id: string; name: string; sku: string; kind: string }>(`select id, name, sku, kind from products where id = any($1::uuid[])`, [picked.map((x) => x.l.product_id)]);
   const prod = new Map(products.rows.map((r) => [r.id, r]));
   const isStock = (x: (typeof picked)[number]) => prod.get(x.l.product_id)?.kind === 'stock';
@@ -139,15 +146,15 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
 
   const date = deps.today();
   const no = await nextDocNo(tx, ctx.tenantId, 'CN', date);
-  const payments = req.refund === 'credit' ? [] : [{ method: req.refund, amount: totals.total }];
+  const payments = d(refundMoney).gt(0) ? [{ method: req.refund, amount: refundMoney }] : [];
   const docId = (await tx.query<{ id: string }>(
     `insert into docs (tenant_id, no, type, date, customer_id, customer_name, customer_phone, vat_mode, warehouse_id, shift_id,
-       gross, line_disc, bill_disc, base7, exempt, vat, total, payments, created_by, ref_doc_id, ref_no, refund, condition, reason, search_text, note)
-     values ($1,$2,'CN',$3,$4,$5,$6,$7,$8,$9,$10,'0','0',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
+       gross, line_disc, bill_disc, base7, exempt, vat, total, payments, created_by, ref_doc_id, ref_no, refund, condition, reason, search_text, note, ar_applied)
+     values ($1,$2,'CN',$3,$4,$5,$6,$7,$8,$9,$10,'0','0',$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) returning id`,
     [ctx.tenantId, no, date, src.customer_id, src.customer_name, src.customer_phone, src.vat_mode, (goodWh ?? dmg?.wh)?.id ?? null, shiftId,
       totals.gross, totals.base7, totals.exempt, totals.vat, totals.total, JSON.stringify(payments), ctx.userId, src.id, src.no,
       req.refund, docCondition, req.reason,
-      searchText({ no, customer: { name: src.customer_name, phone: src.customer_phone }, products: picked.map((x) => prod.get(x.l.product_id)!), total: totals.total }), note],
+      searchText({ no, customer: { name: src.customer_name, phone: src.customer_phone }, products: picked.map((x) => prod.get(x.l.product_id)!), total: totals.total }), note, split.toAr],
   )).rows[0]!.id;
 
   for (const [i, x] of picked.entries()) {
@@ -180,7 +187,7 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
     }
     await tx.query(`update doc_lines set returned_qty = returned_qty + $1 where id = $2`, [x.qty, x.l.id]);
   }
-  if (req.refund === 'credit') await tx.query(`update docs set ar_balance = ar_balance - $1 where id = $2`, [totals.total, src.id]);
+  if (d(split.toAr).gt(0)) await tx.query(`update docs set ar_balance = ar_balance - $1 where id = $2`, [split.toAr, src.id]);
 
   await deps.hooks.beforeCommit?.('createReturn', tx);
   const where = [goodWh ? 'คืนเข้า ' + goodWh.name : '', dmg ? `ชำรุด → ${dmg.wh.name}` : ''].filter(Boolean).join(' · ');
@@ -188,7 +195,7 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
     ...(dmg?.created ? [{ action: 'create', object: 'warehouse', ref: dmg.wh.code, detail: `สร้าง${dmg.wh.name}อัตโนมัติ (คลังของเสีย ไม่ใช่คลังขาย) จากการรับคืนสินค้าชำรุด ${no}` }] : []),
     {
       action: 'create', object: 'CN', ref: no,
-      detail: `อ้างอิง ${src.no} · ฿${fmtTHB(totals.total)} · ${req.refund} · ${where || 'ไม่มีสินค้าสต็อก'} · ${req.reason}${note ? ' · ' + note : ''}${approvedBy}`,
+      detail: `อ้างอิง ${src.no} · ฿${fmtTHB(totals.total)} · ${d(split.toAr).gt(0) ? `ลดยอดค้าง ฿${fmtTHB(split.toAr)} · ` : ''}${d(refundMoney).gt(0) ? `คืนเงิน ${req.refund} ฿${fmtTHB(refundMoney)}` : req.refund === 'credit' && d(split.over).gt(0) ? `เครดิตลูกค้า ฿${fmtTHB(split.over)}` : req.refund} · ${where || 'ไม่มีสินค้าสต็อก'} · ${req.reason}${note ? ' · ' + note : ''}${approvedBy}`,
     },
   ]);
   return getDoc(tx, ctx, no);

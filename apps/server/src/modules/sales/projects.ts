@@ -161,7 +161,7 @@ export async function projectFigures(tx: Tx, id: string): Promise<SalesProject['
   const delivered = sum(dl.rows.map((r) => (r.nab && d(r.nab).gt(0) ? d(r.total).times(d(r.dv ?? 0)).div(d(r.nab)) : d(0))));
   const inv = await tx.query<{ gross: string; ar: string; credited: string | null }>(
     `select coalesce(si.gross_amount, x.total)::text gross, x.ar_balance::text ar,
-            (select sum(c.total) from docs c where c.ref_doc_id = x.id and c.type = 'CN' and c.status = 'active' and c.refund = 'credit')::text credited
+            (select sum(c.ar_applied) from docs c where c.ref_doc_id = x.id and c.type = 'CN' and c.status = 'active')::text credited
        from docs x join sales_invoices si on si.doc_id = x.id where si.project_id = $1 and x.status = 'active' and si.source not in ('deposit','forfeit')`,
     [id],
   );

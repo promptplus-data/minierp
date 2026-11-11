@@ -176,16 +176,16 @@ export async function listDeliveries(tx: Tx, q: SalesPageQuery & { projectId?: s
   const billed = `(select string_agg(dd.no, ', ') from sales_invoice_deliveries sid join docs dd on dd.id = sid.invoice_doc_id where sid.delivery_id = x.id and dd.status = 'active')`;
   if (q.status === 'void') where.push(`x.status = 'void'`);
   else if (q.status === 'unbilled') where.push(`x.status = 'active' and x.so_id is not null and x.project_id is null and ${billed} is null`);
-  return pageNewest<{ id: string; no: string; date: string; customer_id: string | null; customer_name: string; so_no: string | null; inv_no: string | null; billed: string | null; pj_name: string | null; total: string; status: 'active' | 'void'; created_at: Date; preview: string | null }, SalesDeliverySummary>(
+  return pageNewest<{ id: string; no: string; date: string; customer_id: string | null; customer_name: string; so_no: string | null; inv_no: string | null; billed: string | null; pj_name: string | null; total: string; status: 'active' | 'void'; created_at: Date; preview: string | null; cash_sale: boolean }, SalesDeliverySummary>(
     tx,
-    `x.id, x.no, x.date::text, x.customer_id, x.customer_name, so.no so_no, inv.no inv_no, ${billed} billed, pj.name pj_name, x.total::text, x.status, x.created_at,
+    `x.id, x.no, x.date::text, x.customer_id, x.customer_name, so.no so_no, inv.no inv_no, ${billed} billed, pj.name pj_name, x.total::text, x.status, x.created_at, coalesce(so.term->>'t' = 'cash', false) cash_sale,
      (select string_agg(split_part(l.name, ' ', 1) || ' ×' || trim(trailing '.' from trim(trailing '0' from l.qty::text)), ', ' order by l.line_no)
         from (select * from sales_delivery_lines y where y.delivery_id = x.id order by y.line_no limit 3) l) preview`,
     `sales_deliveries x left join sales_orders so on so.id = x.so_id left join docs inv on inv.id = x.inv_doc_id left join sales_projects pj on pj.id = x.project_id`,
     where, params, q,
     (r) => ({
       id: r.id, no: r.no, date: r.date, customer: { id: r.customer_id, name: r.customer_name }, soNo: r.so_no, invoiceNo: r.inv_no, billedBy: r.billed,
-      projectName: r.pj_name, total: r.total, status: r.status, itemsPreview: r.preview ?? '',
+      projectName: r.pj_name, total: r.total, status: r.status, itemsPreview: r.preview ?? '', cashSale: r.cash_sale,
     }),
   );
 }
