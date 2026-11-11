@@ -27,6 +27,9 @@ Files: `quotes.ts orders.ts deliveries.ts invoices.ts receivables.ts projects.ts
 | Cash vs credit invoice, ABB to full tax invoice, credit-note refund as credit | deliveries-invoices |
 | WHT on pre-VAT base, partial / multi-invoice receipts, aging buckets, statement, BR-14 isolation | receivables |
 | Project templates (30/40/30, 50/50, 100), deposits, forfeit, variation order | projects |
+| Cash SO (ข้อ 4): cash default for no-terms customers, no credit gate, each DO invoice paid on the spot (`payMethod` / `payments`), cash and credit DOs not mixed, gap-free INV numbers | cash-so-ar |
+| BR-16 approver setting (ข้อ 5): owner / owner_or_manager / none (flag + audit `action=flag`), owner-only change | quotes-orders, pos (POS path), core belowcostapprover |
+| POS credit ABB → full INV keeps balance, term, due date (ข้อ 9a); returns credit the owed balance first, rest refunded or customer credit (ข้อ 9b, `docs.ar_applied`); statement = aging | cash-so-ar, core arreturn |
 | Idempotent demo seed | seed |
 
 Web e2e `e2e/sales-flow.spec.ts`: customer quick-create from the SO form, partial Thai search, stock on the SO line,
@@ -49,7 +52,7 @@ installment bill, variation order; void blocked by downstream documents.
 | M08-03 credit limit approval | done | PIN, no self-approval via `lib/approval.ts` |
 | M08-04 partial delivery | done | |
 | M08-05 full tax invoice from deliveries | done | several DOs per invoice; also from an ABB |
-| M08-06 returns and credit note | partial | returns screen is the existing POS module; credit-note refund as AR credit added here, list shown in sales |
+| M08-06 returns and credit note | partial | returns screen is the existing POS module; a return against a bill still owed reduces its balance first (up to what is owed), the rest is refunded or kept as a customer credit (statement only, not yet applied to later invoices) |
 | M08-07 SCG Family ID and coupons on B2B bills | not done | cloud-only integration (OQ-A2), out of scope with other module integrations |
 | M08-08 printable quotation | done | |
 | M08-09 free-text lines | done | must be mapped to a product before SO |
