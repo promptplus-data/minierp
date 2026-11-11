@@ -13,6 +13,8 @@ import './sales.css';
 export const useSalesSettings = () => useQuery({ queryKey: ['sales-settings'], queryFn: () => api('GET', '/api/sales/settings', { schema: SalesSettings }), staleTime: 5 * 60_000 });
 
 export const TERM_TH = (t: SalesTerm | null | undefined) => termLabel(t ?? { t: 'cash' });
+/** Payment terms of a sales order (ข้อ 4): cash sale is paid when invoiced; credit shows its term. */
+export const SO_TERM_TH = (t: SalesTerm | null | undefined) => (!t || t.t === 'cash' ? 'ขายเงินสด (ชำระเมื่อออกใบกำกับ)' : `เงินเชื่อ · ${termLabel(t)}`);
 export const QT_STATUS: Record<string, [string, 'ok' | 'warn' | 'bad' | 'acc' | 'mut']> = {
   draft: ['ร่าง', 'mut'], sent: ['ส่งแล้ว · รอลูกค้า', 'acc'], accepted: ['ลูกค้ายอมรับ', 'ok'], lost: ['ไม่ได้งาน', 'mut'], expired: ['หมดอายุ', 'warn'], void: ['ยกเลิก', 'bad'],
 };

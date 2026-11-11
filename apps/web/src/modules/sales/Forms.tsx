@@ -15,7 +15,7 @@ import { fmt, fq, Modal, Pill, ShortageModal, th, useToast, type Shortage } from
 import { useCustomer } from '../../ui/CustomerPicker';
 import { AddressPicker, DeliverySourceSelect, SaleTypeSelect, SalespersonSelect, WarehouseSelect } from './pickers';
 import {
-  blankLine, CustomerSelect, LineEditor, lineReq, previewTotals, priceSourceText, ProfitSummary, TERM_TH, useGatedSave, useLineCheck, useSalesInvalidate, useSalesSettings, type EditLine,
+  blankLine, CustomerSelect, LineEditor, METHOD_TH, lineReq, previewTotals, priceSourceText, ProfitSummary, TERM_TH, useGatedSave, useLineCheck, useSalesInvalidate, useSalesSettings, type EditLine,
 } from './shared';
 
 type Mode = 'QT' | 'SO' | 'INV';
@@ -54,6 +54,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [shipTo, setShipTo] = useState('');
   const [goodsLeft, setGoodsLeft] = useState(false);
   const [pay, setPay] = useState<'credit' | 'cash' | 'transfer'>('credit');
+  const [soPay, setSoPay] = useState<'cash' | 'credit' | null>(null); // ข้อ 4: null = default from the customer's terms
   const [pjMode, setPjMode] = useState<'' | 'new' | string>(presetProject ? presetProject.id : newProject ? 'new' : '');
   const [pjName, setPjName] = useState('');
   const [pjSite, setPjSite] = useState('');
@@ -62,6 +63,8 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [pjNote, setPjNote] = useState('');
   const [short, setShort] = useState<Shortage[] | null>(null);
   const cust = useCustomer(customerId || null).data;
+  const creditTerm = (quote?.term.t !== 'cash' ? quote?.term : undefined) ?? (cust && (cust.term as SalesTerm).t !== 'cash' ? (cust.term as SalesTerm) : undefined);
+  const soTerms = soPay ?? (creditTerm ? 'credit' : 'cash');
   const credit = useQuery({
     queryKey: ['ar', 'credit', customerId], enabled: !!customerId && mode !== 'QT',
     queryFn: () => api<{ limit: string; balance: string; available: string | null; overdue: { no: string }[]; term: SalesTerm }>('GET', `/api/sales/customers/${customerId}/credit`),
@@ -86,7 +89,8 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       const project = pjMode === 'new'
         ? { mode: 'new', name: pjName, site: pjSite, note: pjNote, template: pjTpl, ...(pjTpl === 'custom' ? { installments: pcts.map((p) => ({ pct: p })) } : {}) }
         : pjMode ? { mode: 'existing', projectId: pjMode } : undefined;
-      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...extra };
+      const term = soTerms === 'cash' || !creditTerm ? { t: 'cash' } : creditTerm;
+      return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, term, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...extra };
     }
     const payments = pay === 'credit' ? undefined : [{ method: pay, amount: t.total }];
     return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, salespersonId: sp, billDiscount: disc, lines: ls, payments, ...extra };
@@ -123,7 +127,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
         {mode === 'INV' && 'ใบกำกับภาษีที่ตัดสต็อกทันที (ไม่ผ่านใบสั่งขาย) · ถ้าลูกค้าฝากของไว้ ออกใบส่งของภายหลังได้โดยไม่ตัดสต็อกซ้ำ'}
       </p>
       <div className="fgrid">
-        <div className="f" role="group">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setShipTo(''); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" requireTaxId={mode === 'INV' && vatShop} /></div>
+        <div className="f" role="group">ลูกค้า<CustomerSelect value={customerId} onChange={(id) => { setCustomerId(id); setShipTo(''); setSoPay(null); setPjMode((m) => (m === 'new' ? m : '')); }} noCash testId="doc-customer" requireTaxId={mode === 'INV' && vatShop} /></div>
         {mode === 'QT' && <label className="f">เรียน (ผู้ติดต่อ)<input type="text" value={attn} onChange={(e) => setAttn(e.target.value)} placeholder="เช่น คุณอรุณ (หุ้นส่วนผู้จัดการ)" /></label>}
         {vatShop ? (
           <label className="f">ราคาในเอกสาร
@@ -137,6 +141,14 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
           <div className="f" role="group">{mode === 'SO' ? 'ส่งของจากคลัง' : 'ตัดสต็อกจากคลัง'}
             <WarehouseSelect value={wh} onChange={setWarehouseId} testId="doc-wh" />
           </div>
+        )}
+        {mode === 'SO' && (
+          <label className="f">เงื่อนไขชำระ
+            <select value={soTerms} onChange={(e) => setSoPay(e.target.value as 'cash' | 'credit')} data-testid="so-terms">
+              <option value="cash">ขายเงินสด (ชำระเมื่อออกใบกำกับ)</option>
+              <option value="credit" disabled={!creditTerm}>เงินเชื่อ ({creditTerm ? TERM_TH(creditTerm) : 'ลูกค้านี้ไม่มีเครดิต'})</option>
+            </select>
+          </label>
         )}
         {mode === 'SO' && <div className="f" role="group">ที่อยู่ส่งของ / หน้างาน<AddressPicker customerId={customerId} value={shipTo} onChange={setShipTo} testId="so-ship-to" /></div>}
         <div className="f" role="group">พนักงานขาย<SalespersonSelect value={salespersonId} onChange={setSalespersonId} testId="doc-salesperson" /></div>
@@ -189,7 +201,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       </div>
       <ProfitSummary profit={check?.profit} />
       {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึก{below.need}</div>}
-      {mode !== 'QT' && credit.data && cust && (
+      {mode !== 'QT' && !(mode === 'SO' && soTerms === 'cash') && credit.data && cust && (
         <div className={`small ${credit.data.available != null && d(credit.data.balance).plus(d(t.total)).gt(d(credit.data.limit)) ? 'err' : 'muted'}`}>
           {TERM_TH(credit.data.term)} · วงเงิน {fmt(credit.data.limit)} · ค้างอยู่ {fmt(credit.data.balance)} · หลังบันทึกใบนี้ {fmt(d(credit.data.balance).plus(d(t.total)))}
           {credit.data.overdue.length > 0 && ` · มีบิลเกินกำหนด ${credit.data.overdue.length} ใบ`}
@@ -304,15 +316,19 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
   const [busy, setBusy] = useState(false);
   const items = list.rows;
   const cust = items.find((x) => sel.includes(x.no))?.customer.id;
-  const shown = cust ? items.filter((x) => x.customer.id === cust) : items;
+  const selCash = items.find((x) => sel.includes(x.no))?.cashSale;
+  const shown = cust ? items.filter((x) => x.customer.id === cust && x.cashSale === selCash) : items;
   const total = items.filter((x) => sel.includes(x.no)).reduce((a, x) => a.plus(d(x.total)), d(0));
+  // ข้อ 4: delivery orders of a cash sales order are invoiced and paid on the spot (cash / transfer / QR).
+  const cashSale = items.some((x) => sel.includes(x.no) && x.cashSale);
+  const [payMethod, setPayMethod] = useState<'cash' | 'transfer' | 'promptpay' | 'card'>('cash');
   const go = async () => {
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel, note }, schema: SalesInvoice });
+      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel, note, ...(cashSale ? { payMethod } : {}) }, schema: SalesInvoice });
       await invalidate();
-      toast(`${r.doc.no} ออกแล้ว · ครบกำหนด ${th(r.dueDate)}`);
+      toast(r.kind === 'cash' ? `${r.doc.no} ออกแล้ว · รับชำระ${METHOD_TH[payMethod]} ฿${fmt(r.doc.totals.total)}` : `${r.doc.no} ออกแล้ว · ครบกำหนด ${th(r.dueDate)}`);
       onClose();
       nav(`/b2b/inv/${encodeURIComponent(r.doc.no)}`);
     } catch (e) {
@@ -332,7 +348,7 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
             {list.isLoading ? <tr><td colSpan={7}><div className="sk" /></td></tr> : shown.map((x) => (
               <tr key={x.id}>
                 <td><input type="checkbox" checked={sel.includes(x.no)} onChange={(e) => setSel(e.target.checked ? [...sel, x.no] : sel.filter((n) => n !== x.no))} aria-label={`เลือก ${x.no}`} /></td>
-                <td className="mono">{x.no}</td><td>{th(x.date)}</td><td>{x.customer.name}</td><td className="mono">{x.soNo}</td><td className="small">{x.itemsPreview}</td><td className="n">{fmt(x.total)}</td>
+                <td className="mono">{x.no}</td><td>{th(x.date)}</td><td>{x.customer.name}</td><td className="mono">{x.soNo}{x.cashSale && <> <KindPill kind="cash" /></>}</td><td className="small">{x.itemsPreview}</td><td className="n">{fmt(x.total)}</td>
               </tr>
             ))}
             {!list.isLoading && !shown.length && <tr><td colSpan={7} className="empty">ไม่มีใบส่งของที่รอออกใบกำกับ</td></tr>}
@@ -341,7 +357,14 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
       </div>
       <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} />
       <label className="f">หมายเหตุในใบกำกับ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น อ้างอิงใบสั่งซื้อลูกค้า PO-778" data-testid="inv-note" /></label>
-      <div className="small muted">เลือก {sel.length} ใบ · มูลค่าตามใบส่งของ {fmt(total)} (ก่อน VAT เมื่อเอกสารราคาไม่รวม VAT) · ออกเป็นเงินเชื่อ รับชำระที่หน้าลูกหนี้</div>
+      {cashSale && (
+        <label className="f" style={{ maxWidth: 320 }}>ขายเงินสด · รับชำระตอนออกใบกำกับโดย
+          <select value={payMethod} onChange={(e) => setPayMethod(e.target.value as typeof payMethod)} data-testid="inv-pay-method">
+            {(['cash', 'transfer', 'promptpay', 'card'] as const).map((k) => <option key={k} value={k}>{k === 'promptpay' ? 'พร้อมเพย์ (QR)' : METHOD_TH[k]}</option>)}
+          </select>
+        </label>
+      )}
+      <div className="small muted">เลือก {sel.length} ใบ · มูลค่าตามใบส่งของ {fmt(total)} (ก่อน VAT เมื่อเอกสารราคาไม่รวม VAT) · {cashSale ? 'ใบสั่งขายเงินสด: ออกเป็นใบกำกับภาษี/ใบเสร็จรับเงิน ชำระครบ ไม่เข้าลูกหนี้' : 'ออกเป็นเงินเชื่อ รับชำระที่หน้าลูกหนี้'}</div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={!sel.length || busy} onClick={() => void go()} data-testid="inv-from-do-save">ออกใบกำกับภาษี</button></div>
     </Modal>
