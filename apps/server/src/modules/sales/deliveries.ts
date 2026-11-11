@@ -21,7 +21,7 @@ function requireDeliver(ctx: Ctx): void {
   throw E.forbidden('Permission sales.doc or inv.receive is required', { perms: ['sales.doc', 'inv.receive'] });
 }
 
-interface PlannedLine { productId: string; name: string; unitName: string; unitFactor: string; qty: string; baseQty: string; unitPrice: string; value: string; soLineId: string | null; invLineId: string | null; stock: boolean }
+interface PlannedLine { productId: string; name: string; unitName: string; unitFactor: string; qty: string; baseQty: string; unitPrice: string; value: string; soLineId: string | null; invLineId: string | null; stock: boolean; free: boolean }
 
 export async function createDelivery(tx: Tx, deps: Deps, ctx: Ctx, req: SalesDeliveryReq): Promise<SalesDelivery> {
   requireDeliver(ctx);
@@ -47,6 +47,7 @@ export async function createDelivery(tx: Tx, deps: Deps, ctx: Ctx, req: SalesDel
       return {
         productId: l.product_id!, name: l.name, unitName: l.unit_name, unitFactor: l.unit_factor, qty: qty4(r.qty), baseQty: qty4(d(r.qty).times(d(l.unit_factor))),
         unitPrice: l.unit_price, value: share(l.net_after_bill, r.qty, l.qty, l.delivered, l.delivered_value), soLineId: l.id, invLineId: null, stock: l.product_kind === 'stock',
+        free: l.free === true,
       };
     });
     const pj = so.project_id && so.pj_status === 'active' ? (await tx.query<{ site: string }>(`select site from sales_projects where id = $1`, [so.project_id])).rows[0] : undefined;
@@ -60,8 +61,8 @@ export async function createDelivery(tx: Tx, deps: Deps, ctx: Ctx, req: SalesDel
     if (!x) throw E.notFound(`Invoice ${req.invoiceNo} not found`);
     if (x.status !== 'active') throw E.conflict(`${x.no} is void`);
     if (!x.goods_left) throw E.validation(`${x.no} was not marked "goods left at the shop"`);
-    const il = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; returned_qty: string; unit_price: string; net_after_bill: string; delivered: string; delivered_value: string }>(
-      `select l.id, l.product_id, l.name, l.unit_name, l.unit_factor::text, l.qty::text, l.returned_qty::text, l.unit_price::text, l.net_after_bill::text,
+    const il = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; returned_qty: string; unit_price: string; net_after_bill: string; delivered: string; delivered_value: string; free: boolean }>(
+      `select l.id, l.product_id, l.name, l.unit_name, l.unit_factor::text, l.qty::text, l.returned_qty::text, l.unit_price::text, l.net_after_bill::text, l.free,
               coalesce((select sum(dl.qty) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id where dl.inv_line_id = l.id and dv.status = 'active'), 0)::text delivered,
               coalesce((select sum(dl.value) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id where dl.inv_line_id = l.id and dv.status = 'active'), 0)::text delivered_value
          from doc_lines l where l.doc_id = $1`, [x.id]);
@@ -74,6 +75,7 @@ export async function createDelivery(tx: Tx, deps: Deps, ctx: Ctx, req: SalesDel
       return {
         productId: l.product_id, name: l.name, unitName: l.unit_name, unitFactor: l.unit_factor, qty: qty4(r.qty), baseQty: qty4(d(r.qty).times(d(l.unit_factor))),
         unitPrice: l.unit_price, value: share(l.net_after_bill, r.qty, l.qty, l.delivered, l.delivered_value), soLineId: null, invLineId: l.id, stock: false,
+        free: l.free,
       };
     });
     header = { customerId: x.customer_id, customerName: x.customer_name, soId: null, invId: x.id, projectId: x.project_id, warehouseId: null, shipTo: req.shipTo, ref: x.no };
@@ -97,9 +99,9 @@ export async function createDelivery(tx: Tx, deps: Deps, ctx: Ctx, req: SalesDel
   for (const [i, l] of lines.entries()) {
     const pl = planOf.get(l);
     const lineId = (await tx.query<{ id: string }>(
-      `insert into sales_delivery_lines (tenant_id, delivery_id, line_no, so_line_id, inv_line_id, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, value, cogs)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
-      [ctx.tenantId, id, i + 1, l.soLineId, l.invLineId, l.productId, l.name, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.value, pl?.cogs ?? null],
+      `insert into sales_delivery_lines (tenant_id, delivery_id, line_no, so_line_id, inv_line_id, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, value, cogs, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning id`,
+      [ctx.tenantId, id, i + 1, l.soLineId, l.invLineId, l.productId, l.name, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.value, pl?.cogs ?? null, l.free],
     )).rows[0]!.id;
     if (pl) await applyOut(tx, ctx, header.warehouseId!, pl, { docType: 'DO', docNo: no, docId: id, docLineId: lineId, note: `ส่งของ · ${header.ref}${header.shipTo ? ' · ' + header.shipTo : ''}` });
   }
@@ -131,15 +133,15 @@ export async function deliveryRow(tx: Tx, no: string, forUpdate = false): Promis
 export async function getDelivery(tx: Tx, ctx: Ctx, no: string): Promise<SalesDelivery> {
   const x = await deliveryRow(tx, no);
   const seeCost = can(ctx, 'data.cost') === 1;
-  const lines = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; qty: string; unit_price: string; value: string; cogs: string | null }>(
-    `select id, product_id, name, unit_name, qty::text, unit_price::text, value::text, cogs::text from sales_delivery_lines where delivery_id = $1 order by line_no`, [x.id]);
+  const lines = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; qty: string; unit_price: string; value: string; cogs: string | null; free: boolean }>(
+    `select id, product_id, name, unit_name, qty::text, unit_price::text, value::text, cogs::text, free from sales_delivery_lines where delivery_id = $1 order by line_no`, [x.id]);
   const inv = await tx.query<{ no: string }>(
     `select dd.no from sales_invoice_deliveries sid join docs dd on dd.id = sid.invoice_doc_id where sid.delivery_id = $1 and dd.status = 'active' order by dd.created_at`, [x.id]);
   return {
     id: x.id, no: x.no, date: x.date, customer: partyOf(x, x.customer_name), soNo: x.so_no, invoiceNo: x.inv_no,
     project: x.project_id ? { id: x.project_id, no: x.pj_no!, name: x.pj_name!, site: x.pj_site ?? '' } : null,
     warehouse: x.warehouse_id ? { id: x.warehouse_id, name: x.wh_name ?? '' } : null, cutsStock: !!x.warehouse_id, shipTo: x.ship_to, vehicle: x.vehicle, note: x.note,
-    lines: lines.rows.map((l) => ({ id: l.id, productId: l.product_id, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), unitPrice: qty4(l.unit_price), value: money(l.value), cogs: seeCost && l.cogs != null ? money(l.cogs) : null })),
+    lines: lines.rows.map((l) => ({ id: l.id, productId: l.product_id, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), unitPrice: qty4(l.unit_price), value: money(l.value), cogs: seeCost && l.cogs != null ? money(l.cogs) : null, giveaway: l.free })),
     total: x.total, invoiceNos: inv.rows.map((r) => r.no), status: x.status, createdBy: x.created_by_name, voided: voidedJson(x),
   };
 }

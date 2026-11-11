@@ -5,13 +5,13 @@
  */
 import type { Tx } from '@erp/db';
 import type { SalesPageQuery, SalesQuote, SalesQuoteReq, SalesQuoteStatus, SalesQuoteSummary } from '@erp/contracts';
-import { addDays, fmtTHB } from '@erp/core';
+import { addDays, d, fmtTHB } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { can, requirePerm, type Ctx, type Deps } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
 import { E, isUuid } from '../../lib/errors';
 import {
-  authorizeVoid, belowCostGate, buildLines, discAmt, haystack, lineJson, loadCustomer, pageNewest, partyCols, partyOf, peekUnitCosts, priceGate, profitOf, requireUser,
+  authorizeVoid, belowCostGate, buildLines, discAmt, giveawayAudits, haystack, lineJson, loadCustomer, pageNewest, partyCols, partyOf, peekUnitCosts, priceGate, profitOf, requireUser,
   resolveVatMode, storedLines, TOTAL_COLS, totalsJson, totalsOf, userRef, voidedJson, type BuiltLine, type LineRowBase, type PartyCols, type VoidBody,
 } from './common';
 import { makePricer } from './pricing';
@@ -47,7 +47,7 @@ export interface QuoteLineRow extends LineRowBase { unit_factor: string; product
 export async function quoteLines(tx: Tx, quoteId: string, revision: number): Promise<QuoteLineRow[]> {
   const r = await tx.query<QuoteLineRow>(
     `select l.id, l.line_no, l.product_id, l.unit_idx, p.sku, l.name, l.unit_name, l.unit_factor::text, l.qty::text, l.unit_price::text, l.discount,
-            l.disc_amt::text, l.net::text, l.vat, p.kind product_kind, l.list_price::text, l.price_source, l.price_ref
+            l.disc_amt::text, l.net::text, l.vat, p.kind product_kind, l.list_price::text, l.price_source, l.price_ref, l.free
        from sales_quote_lines l left join products p on p.id = l.product_id where l.quote_id = $1 and l.revision = $2 order by l.line_no`,
     [quoteId, revision],
   );
@@ -86,10 +86,10 @@ async function insertLines(tx: Tx, ctx: Ctx, quoteId: string, revision: number, 
   for (const [i, l] of lines.entries()) {
     await tx.query(
       `insert into sales_quote_lines (tenant_id, quote_id, revision, line_no, product_id, unit_idx, name, unit_name, unit_factor, qty, unit_price, discount, disc_amt, net, vat,
-         list_price, price_source, price_ref)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+         list_price, price_source, price_ref, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [ctx.tenantId, quoteId, revision, i + 1, l.product?.id ?? null, l.product ? l.unitIdx : null, l.name, l.unitName, l.unitFactor, l.qty, l.unitPrice,
-        l.discount ? JSON.stringify(l.discount) : null, discAmt(l), nets[i], l.vat, l.listPrice ?? null, l.priceSource ?? null, l.priceRef ?? null],
+        l.discount ? JSON.stringify(l.discount) : null, discAmt(l), nets[i], l.vat, l.listPrice ?? null, l.priceSource ?? null, l.priceRef ?? null, l.giveaway === true],
     );
   }
 }
@@ -114,13 +114,16 @@ async function prepare(tx: Tx, deps: Deps, ctx: Ctx, req: SalesQuoteReq) {
   const pricer = await makePricer(tx, { customerId: customer.id, date, vatMode, doc: 'quote' });
   for (const l of lines) {
     if (!l.product) { l.priceSource = 'manual'; continue; }
+    if (l.giveaway) continue; // ของแถม: price 0, no BR-05 price
     const r = await pricer(l.product, l.unitIdx!, l.qty);
     Object.assign(l, { listPrice: r.unitPrice, priceSource: r.source, priceRef: r.ref });
   }
   const what = `ใบเสนอราคา ${customer.name}`;
   const pg = await priceGate(tx, deps, ctx, lines, totals, req.priceApproval, what);
-  const bc = await belowCostGate(tx, deps, ctx, lines, vatMode, totals.billDisc, await peekUnitCosts(tx, null, lines), req.belowCostApproval, what);
-  const audits: AuditInput[] = [...pg.audit, ...(bc.audit ? [bc.audit] : [])];
+  const costs = await peekUnitCosts(tx, null, lines);
+  const bc = await belowCostGate(tx, deps, ctx, lines, vatMode, totals.billDisc, costs, req.belowCostApproval, what);
+  const audits: AuditInput[] = [...pg.audit, ...(bc.audit ? [bc.audit] : []),
+    ...giveawayAudits(lines, 'QT', lines.map((l, i) => (costs[i] != null ? d(costs[i]!).times(d(l.baseQty)).toFixed(2) : null)))];
   return { customer, vatMode, lines, totals, salesperson, date, validUntil, term, priceApproval: pg.approval, belowCostApproval: bc.approval, audits };
 }
 

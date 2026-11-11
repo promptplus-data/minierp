@@ -112,11 +112,15 @@ export const SalesLineIn = z.object({
   productId: z.string().optional(), unitIdx: z.number().int().min(0).default(0),
   name: z.string().max(300).optional(), unitName: z.string().max(40).optional(), vat: SalesLineVat.optional(),
   qty: Dec, unitPrice: DecNN, discount: Discount.optional(),
+  /** ของแถม (given free, price forced to 0): a product line; cuts stock / is reserved like any line; not a discount nor below cost. */
+  giveaway: z.boolean().optional(),
 });
 export type SalesLineIn = z.infer<typeof SalesLineIn>;
 export const SalesLine = z.object({
   id: z.string(), lineNo: z.number().int(), productId: z.string().nullable(), unitIdx: z.number().int().nullable(), sku: z.string().nullable(),
   name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, discount: Discount.nullable(), discAmt: Dec, net: Dec, vat: SalesLineVat, free: z.boolean(),
+  /** ของแถม at price 0 (`free` above means a free-text line not in the product master). */
+  giveaway: z.boolean().default(false),
   /** BR-05 price when saved (document VAT basis) and where it came from. */
   listPrice: Dec.nullable().default(null), priceSource: z.string().nullable().default(null), priceRef: z.string().nullable().default(null),
   /** FIFO unit cost per line unit and the line profit before VAT: data.cost users only (null otherwise). */
@@ -156,6 +160,8 @@ export const SalesOrderLineIn = z.object({
   productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional(),
   /** The quotation line this order line comes from (free-text lines are mapped to productId here). */
   quoteLineId: z.string().optional(),
+  /** ของแถม at price 0 (a ของแถม quotation line stays ของแถม whatever is sent). */
+  giveaway: z.boolean().optional(),
 });
 export type SalesOrderLineIn = z.infer<typeof SalesOrderLineIn>;
 export const SalesInstallmentIn = z.object({ pct: DecNN, label: z.string().max(120).default(''), dueDate: ISODate.optional() });
@@ -210,7 +216,7 @@ export const SalesDelivery = z.object({
   id: z.string(), no: z.string(), date: z.string(), customer: SalesParty, soNo: z.string().nullable(), invoiceNo: z.string().nullable(),
   project: z.object({ id: z.string(), no: z.string(), name: z.string(), site: z.string() }).nullable(),
   warehouse: z.object({ id: z.string(), name: z.string() }).nullable(), cutsStock: z.boolean(), shipTo: z.string(), vehicle: z.string(), note: z.string(),
-  lines: z.array(z.object({ id: z.string(), productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, value: Dec, cogs: Dec.nullable() })),
+  lines: z.array(z.object({ id: z.string(), productId: z.string(), name: z.string(), unitName: z.string(), qty: Dec, unitPrice: Dec, value: Dec, cogs: Dec.nullable(), giveaway: z.boolean().default(false) })),
   total: Dec, invoiceNos: z.array(z.string()), status: z.enum(['active', 'void']), createdBy: z.string(), voided: SalesVoided.nullable(),
 });
 export type SalesDelivery = z.infer<typeof SalesDelivery>;

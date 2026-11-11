@@ -16,7 +16,7 @@ import { applyOut, lockLots, planTakes, type Planned } from '../../lib/stock';
 import { requireWarehouse } from '../../services/master';
 import { getDoc, getDocRow, getLines, registerVoidGuard } from '../../services/sales';
 import {
-  belowCostGate, buildLines, creditGate, priceGate, discAmt, haystack, inSeq, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
+  belowCostGate, buildLines, creditGate, giveawayAudits, priceGate, discAmt, haystack, inSeq, loadCustomer, loadShop, pageNewest, partyCols, partyOf, planUnitCosts, requireUser, resolveVatMode,
   totalsOf, userRef, type BuiltLine, type CustomerRow, type PartyCols,
 } from './common';
 import { makePricer } from './pricing';
@@ -24,6 +24,8 @@ import { makePricer } from './pricing';
 export interface InvoiceLineIn {
   productId: string; name: string; unitName: string; unitFactor: string; qty: string; baseQty: string; unitPrice: string; discount: string;
   net: string; after: string; vat: 'v7' | 'exempt'; cogs: string | null; srcLineId?: string | null;
+  /** ของแถม at price 0. */
+  free?: boolean;
 }
 export interface InvoiceExt {
   kind: 'credit' | 'cash'; source: SalesInvoice['source']; soId?: string | null; projectId?: string | null; installmentId?: string | null; depositId?: string | null;
@@ -51,9 +53,9 @@ export async function insertInvoice(tx: Tx, ctx: Ctx, inv: NewInvoice, no?: stri
   const lineIds: string[] = [];
   for (const [i, l] of inv.lines.entries()) {
     lineIds.push((await tx.query<{ id: string }>(
-      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs, src_line_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
-      [ctx.tenantId, id, i + 1, l.productId, l.name, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.discount, l.net, l.after, l.vat, l.cogs, l.srcLineId ?? null],
+      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs, src_line_id, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning id`,
+      [ctx.tenantId, id, i + 1, l.productId, l.name, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.discount, l.net, l.after, l.vat, l.cogs, l.srcLineId ?? null, l.free === true],
     )).rows[0]!.id);
   }
   const e = inv.ext;
@@ -119,8 +121,8 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
   if (!cashSo[0]) await requireTaxId(tx, ctx, customer);
   const vatMode = first.vat_mode!;
 
-  const dl = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; base_qty: string; value: string; cogs: string | null; vat: 'v7' | 'exempt'; dno: string }>(
-    `select dl.id, dl.product_id, dl.name, dl.unit_name, dl.unit_factor::text, dl.qty::text, dl.base_qty::text, dl.value::text, dl.cogs::text, sol.vat, dv.no dno
+  const dl = await tx.query<{ id: string; product_id: string; name: string; unit_name: string; unit_factor: string; qty: string; base_qty: string; value: string; cogs: string | null; vat: 'v7' | 'exempt'; dno: string; free: boolean }>(
+    `select dl.id, dl.product_id, dl.name, dl.unit_name, dl.unit_factor::text, dl.qty::text, dl.base_qty::text, dl.value::text, dl.cogs::text, sol.vat, dv.no dno, dl.free
        from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id join sales_order_lines sol on sol.id = dl.so_line_id
       where dl.delivery_id = any($1::uuid[]) order by dv.created_at, dl.line_no`,
     [r.rows.map((x) => x.id)],
@@ -136,7 +138,7 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
     date, customer, vatMode, totals, payments: settle.payments, arBalance: settle.arBalance,
     lines: dl.rows.map((l) => ({
       productId: l.product_id, name: l.name, unitName: l.unit_name, unitFactor: l.unit_factor, qty: l.qty, baseQty: l.base_qty,
-      unitPrice: qty4(d(l.value).div(d(l.qty))), discount: '0', net: l.value, after: l.value, vat: l.vat, cogs: l.cogs,
+      unitPrice: qty4(d(l.value).div(d(l.qty))), discount: '0', net: l.value, after: l.value, vat: l.vat, cogs: l.cogs, free: l.free,
     })),
     search: [...dl.rows.map((l) => l.name), ...r.rows.map((x) => `${x.no} ${x.so_no ?? ''}`)],
     ext: { kind: settle.kind, source: 'delivery', soId: r.rows.length === 1 || r.rows.every((x) => x.so_id === first.so_id) ? first.so_id : null, term, dueDate: dueDate(date, term), attn: req.attn, note: req.note, salespersonId: first.salesperson_id },
@@ -162,6 +164,7 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   // BR-05 price per line and the price / discount approval (same gate as the sales order)
   const pricer = await makePricer(tx, { customerId: customer.id, date, vatMode, doc: 'order' });
   for (const l of lines) {
+    if (l.giveaway) continue; // ของแถม: price 0, no BR-05 price
     const r = await pricer(l.product!, l.unitIdx!, l.qty);
     Object.assign(l, { listPrice: r.unitPrice, priceSource: r.source, priceRef: r.ref });
   }
@@ -176,6 +179,7 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   const planOf = new Map<BuiltLine, Planned>(stock.map((l, i) => [l, plans[i]!]));
   const bc = await belowCostGate(tx, deps, ctx, lines, vatMode, totals.billDisc, planUnitCosts(lines, planOf), req.belowCostApproval, `ใบกำกับ ${no}`);
   if (bc.audit) audits.push(bc.audit);
+  audits.push(...giveawayAudits(lines, 'INV', lines.map((l) => planOf.get(l)?.cogs ?? null)));
   if (settle.kind === 'credit') {
     const cr = await creditGate(tx, deps, ctx, customer, term, totals.total, req.creditApproval, `ใบกำกับ ${no} ${customer.name}`);
     if (cr.audit) audits.push(cr.audit);
@@ -184,7 +188,7 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
     date, customer, vatMode, totals, payments: settle.payments, arBalance: settle.arBalance, warehouseId: wh.id,
     lines: lines.map((l, i) => ({
       productId: l.product!.id, name: l.name, unitName: l.unitName, unitFactor: l.unitFactor, qty: l.qty, baseQty: l.baseQty, unitPrice: l.unitPrice,
-      discount: discAmt(l), net: totals.lines[i]!.net, after: totals.lines[i]!.after, vat: l.vat, cogs: planOf.get(l)?.cogs ?? null,
+      discount: discAmt(l), net: totals.lines[i]!.net, after: totals.lines[i]!.after, vat: l.vat, cogs: planOf.get(l)?.cogs ?? null, free: l.giveaway === true,
     })),
     search: lines.map((l) => `${l.name} ${l.product!.sku}`),
     ext: { kind: settle.kind, source: 'direct', term, dueDate: dueDate(date, term), goodsLeft: req.goodsLeft, attn: req.attn, note: req.note, salespersonId: salesperson },

@@ -68,6 +68,8 @@ export interface BuiltLine {
   qty: string; baseQty: string; unitPrice: string; discount: LineDiscount | null; vat: 'v7' | 'exempt';
   /** BR-05 price for this line (document VAT basis) and its source; set by priceLines. Null for free-text lines. */
   listPrice?: string | null; priceSource?: string | null; priceRef?: string | null;
+  /** ของแถม: price 0, no discount; cuts stock and costs COGS, but no price / discount / below-cost approval. */
+  giveaway?: boolean;
 }
 
 /** Validates and resolves request lines. Free-text lines (no productId) only when allowFree (quotations). */
@@ -86,6 +88,13 @@ export async function buildLines(tx: Tx, lines: SalesLineIn[], opts: { allowFree
     const p = products.get(l.productId)!;
     if (!p.active) throw E.validation(`Product ${p.sku} is inactive`);
     const u = unitOf(p, l.unitIdx);
+    if (l.giveaway) {
+      if (p.kind !== 'stock') throw E.validation(`Line ${i + 1}: only stock goods can be given free`, { field: `lines.${i}.giveaway` });
+      return {
+        product: p, unitIdx: l.unitIdx, name: p.name, unitName: u.name, unitFactor: qty4(u.factor), qty: qty4(l.qty),
+        baseQty: qty4(d(l.qty).times(d(u.factor))), unitPrice: '0', discount: null, vat: p.vat, giveaway: true,
+      };
+    }
     return {
       product: p, unitIdx: l.unitIdx, name: p.name, unitName: u.name, unitFactor: qty4(u.factor), qty: qty4(l.qty),
       baseQty: qty4(d(l.qty).times(d(u.factor))), unitPrice: qty4(l.unitPrice), discount, vat: p.vat,
@@ -111,13 +120,22 @@ export interface LineRowBase {
   id: string; line_no: number; product_id: string | null; unit_idx: number | null; sku: string | null; name: string; unit_name: string; qty: string;
   unit_price: string; discount: LineDiscount | null; disc_amt: string; net: string; vat: 'v7' | 'exempt';
   list_price?: string | null; price_source?: string | null; price_ref?: string | null;
+  free?: boolean; // ของแถม (0680)
 }
 export const lineJson = (l: LineRowBase): SalesLine => ({
   id: l.id, lineNo: l.line_no, productId: l.product_id, unitIdx: l.unit_idx, sku: l.sku, name: l.name, unitName: l.unit_name, qty: qty4(l.qty),
   unitPrice: qty4(l.unit_price), discount: l.discount ? { kind: l.discount.kind, value: String(l.discount.value) } : null, discAmt: money(l.disc_amt),
-  net: money(l.net), vat: l.vat, free: !l.product_id,
+  net: money(l.net), vat: l.vat, free: !l.product_id, giveaway: l.free === true,
   listPrice: l.list_price != null ? money(l.list_price) : null, priceSource: l.price_source ?? null, priceRef: l.price_ref ?? null, unitCost: null, profit: null,
 });
+
+/** BR-18: one audit row per ของแถม line of a sales document (product, qty, cost value when known). */
+export function giveawayAudits(lines: BuiltLine[], what: string, costs?: (string | null)[]): AuditInput[] {
+  return lines.flatMap((l, i) => (l.giveaway ? [{
+    action: 'free_goods', object: what,
+    detail: `ของแถม ${l.name} × ${qty4(l.qty)} ${l.unitName}${costs?.[i] != null ? ` · ต้นทุน ฿${fmtTHB(costs[i]!)}` : ''}`,
+  }] : []));
+}
 
 /** Lower-cased search haystack: number, customer, products, amount. */
 export function haystack(no: string, c: { name: string; code?: string | null; phone?: string | null; tax_id?: string | null } | null, names: string[], total: string, extra: string[] = []): string {
@@ -275,7 +293,8 @@ export async function belowCostGate(
   preApproved?: { lines: Set<number>; by: string },
 ): Promise<{ approval: Record<string, unknown> | null; audit: AuditInput | null }> {
   const sell = netUnitPricesExVat(lines.map((l) => ({ ...coreLine(l), baseQty: l.baseQty })), vatMode, billDisc);
-  const all = checkBelowCost(lines.map((_, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: unitCosts[i] })));
+  // ของแถม is given away on purpose: never a below-cost line.
+  const all = checkBelowCost(lines.map((l, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: l.giveaway ? null : unitCosts[i] })));
   const below = all.filter((i) => !preApproved?.lines.has(i));
   if (!below.length) {
     if (!all.length) return { approval: null, audit: null };
@@ -304,7 +323,7 @@ export interface PriceApprovalIn extends Approval { reason: string }
 export async function priceGate(
   tx: Tx, deps: Deps, ctx: Ctx, lines: BuiltLine[], totals: { gross: string; lineDisc: string; billDisc: string }, approval: PriceApprovalIn | undefined, what: string,
 ): Promise<{ approval: Record<string, unknown> | null; audit: AuditInput[] }> {
-  const lowered = lines.flatMap((l, i) => (l.product && l.listPrice != null && d(l.unitPrice).lt(d(l.listPrice)) ? [i] : []));
+  const lowered = lines.flatMap((l, i) => (l.product && !l.giveaway && l.listPrice != null && d(l.unitPrice).lt(d(l.listPrice)) ? [i] : []));
   const cap = can(ctx, 'pos.discCap');
   const capPct = typeof cap === 'number' ? cap : 0;
   const pct = discountPct(totals.gross, d(totals.lineDisc).plus(d(totals.billDisc)));
@@ -354,12 +373,12 @@ export function profitOf(lines: Pick<BuiltLine, 'qty' | 'unitPrice' | 'discount'
 }
 
 /** Rebuilds minimal BuiltLines from stored line rows (product, unit factor) to price their cost. */
-export async function storedLines(tx: Tx, rows: { product_id: string | null; unit_factor: string; qty: string; unit_price: string; discount: LineDiscount | null; vat: 'v7' | 'exempt'; name: string; unit_name: string; unit_idx: number | null }[]): Promise<BuiltLine[]> {
+export async function storedLines(tx: Tx, rows: { product_id: string | null; unit_factor: string; qty: string; unit_price: string; discount: LineDiscount | null; vat: 'v7' | 'exempt'; name: string; unit_name: string; unit_idx: number | null; free?: boolean }[]): Promise<BuiltLine[]> {
   const ids = [...new Set(rows.flatMap((r) => (r.product_id ? [r.product_id] : [])))];
   const products = ids.length ? await loadProducts(tx, ids) : new Map<string, ProductRow>();
   return rows.map((r) => ({
     product: r.product_id ? products.get(r.product_id) ?? null : null, unitIdx: r.unit_idx, name: r.name, unitName: r.unit_name, unitFactor: qty4(r.unit_factor),
-    qty: qty4(r.qty), baseQty: qty4(d(r.qty).times(d(r.unit_factor))), unitPrice: qty4(r.unit_price), discount: r.discount, vat: r.vat,
+    qty: qty4(r.qty), baseQty: qty4(d(r.qty).times(d(r.unit_factor))), unitPrice: qty4(r.unit_price), discount: r.discount, vat: r.vat, giveaway: r.free === true,
   }));
 }
 

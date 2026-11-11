@@ -8,7 +8,7 @@ import { nextDocNo } from '../../lib/docno';
 import { E, isUuid } from '../../lib/errors';
 import { requireWarehouse } from '../../services/master';
 import {
-  authorizeVoid, belowCostGate, buildLines, creditGate, discAmt, haystack, lineJson, loadCustomer, pageNewest, partyCols, partyOf, peekUnitCosts, priceGate, profitOf,
+  authorizeVoid, belowCostGate, buildLines, creditGate, discAmt, giveawayAudits, haystack, lineJson, loadCustomer, pageNewest, partyCols, partyOf, peekUnitCosts, priceGate, profitOf,
   requireUser, resolveVatMode, storedLines, TOTAL_COLS, totalsJson, totalsOf, userRef, voidedJson, type LineRowBase, type PartyCols, type VoidBody,
 } from './common';
 import { makePricer } from './pricing';
@@ -47,7 +47,7 @@ export interface OrderLineRow extends LineRowBase {
 export async function orderLines(tx: Tx, soId: string): Promise<OrderLineRow[]> {
   const r = await tx.query<OrderLineRow>(
     `select l.id, l.line_no, l.product_id, l.unit_idx, p.sku, l.name, l.unit_name, l.unit_factor::text, l.qty::text, l.base_qty::text, l.unit_price::text, l.discount,
-            l.disc_amt::text, l.net::text, l.net_after_bill::text, l.vat, l.quote_line_id, p.kind product_kind, l.list_price::text, l.price_source, l.price_ref,
+            l.disc_amt::text, l.net::text, l.net_after_bill::text, l.vat, l.quote_line_id, p.kind product_kind, l.list_price::text, l.price_source, l.price_ref, l.free,
             coalesce((select sum(dl.qty) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id where dl.so_line_id = l.id and dv.status = 'active'), 0)::text delivered,
             coalesce((select sum(dl.value) from sales_delivery_lines dl join sales_deliveries dv on dv.id = dl.delivery_id where dl.so_line_id = l.id and dv.status = 'active'), 0)::text delivered_value
        from sales_order_lines l join products p on p.id = l.product_id where l.so_id = $1 order by l.line_no`,
@@ -138,7 +138,9 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
 
   const vatMode = quote ? quote.vat_mode : await resolveVatMode(tx, ctx, req.vatMode);
   if (quote && req.vatMode && req.vatMode !== quote.vat_mode) throw E.validation('A converted sales order keeps the quotation VAT mode');
-  const lines = await buildLines(tx, req.lines, { allowFree: false });
+  // A ของแถม quotation line stays ของแถม on the order (QT → SO keeps the flag).
+  const reqLines = req.lines.map((l) => (l.quoteLineId && qLines.get(l.quoteLineId)?.free ? { ...l, giveaway: true } : l));
+  const lines = await buildLines(tx, reqLines, { allowFree: false });
   let totals = totalsOf(lines, vatMode, req.billDiscount);
   let coupon: { cart: ReturnType<typeof scgfCartOf>; value: { amount: string; title: string } } | null = null;
   if (process.env.EDITION === 'cloud') {
@@ -158,6 +160,7 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
   const pricer = await makePricer(tx, { customerId: customer.id, date, vatMode, doc: 'order' });
   const preApproved = new Set<number>();
   for (const [i, l] of lines.entries()) {
+    if (l.giveaway) continue; // ของแถม: price 0, no BR-05 price
     const ql = req.lines[i]!.quoteLineId ? qLines.get(req.lines[i]!.quoteLineId!) : undefined;
     if (ql && quote) {
       Object.assign(l, { listPrice: qty4(ql.unit_price), priceSource: 'quote', priceRef: quote.no });
@@ -172,7 +175,9 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
   const pg = await priceGate(tx, deps, ctx, lines, totals, req.priceApproval, `ใบสั่งขาย ${customer.name}`);
   audits.push(...pg.audit);
   // BR-16 on the sales order (lines approved below cost on the quotation and carried unchanged keep that approval).
-  const bc = await belowCostGate(tx, deps, ctx, lines, vatMode, totals.billDisc, await peekUnitCosts(tx, warehouseId, lines), req.belowCostApproval, 'ใบสั่งขาย',
+  const costs = await peekUnitCosts(tx, warehouseId, lines);
+  audits.push(...giveawayAudits(lines, 'SO', lines.map((l, i) => (costs[i] != null ? d(costs[i]!).times(d(l.baseQty)).toFixed(2) : null))));
+  const bc = await belowCostGate(tx, deps, ctx, lines, vatMode, totals.billDisc, costs, req.belowCostApproval, 'ใบสั่งขาย',
     quote?.below_cost_approval ? { lines: preApproved, by: `${quote.below_cost_approval.by} (${quote.no})` } : undefined);
   if (bc.audit) audits.push(bc.audit);
   // BR-08 / REQ-M08-03.
@@ -203,10 +208,10 @@ export async function createOrder(tx: Tx, deps: Deps, ctx: Ctx, req: SalesOrderR
   for (const [i, l] of lines.entries()) {
     await tx.query(
       `insert into sales_order_lines (tenant_id, so_id, line_no, product_id, unit_idx, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, disc_amt, net, net_after_bill, vat, quote_line_id,
-         list_price, price_source, price_ref)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+         list_price, price_source, price_ref, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [ctx.tenantId, id, i + 1, l.product!.id, l.unitIdx, l.name, l.unitName, l.unitFactor, l.qty, l.baseQty, l.unitPrice, l.discount ? JSON.stringify(l.discount) : null,
-        discAmt(l), totals.lines[i]!.net, totals.lines[i]!.after, l.vat, req.lines[i]!.quoteLineId ?? null, l.listPrice ?? null, l.priceSource ?? null, l.priceRef ?? null],
+        discAmt(l), totals.lines[i]!.net, totals.lines[i]!.after, l.vat, req.lines[i]!.quoteLineId ?? null, l.listPrice ?? null, l.priceSource ?? null, l.priceRef ?? null, l.giveaway === true],
     );
   }
   if (quote) await tx.query(`update sales_quotes set status = 'accepted', updated_at = now() where id = $1`, [quote.id]);
