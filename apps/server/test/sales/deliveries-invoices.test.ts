@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { lotsOf, openShift, saleBody, stockQty } from '../helpers';
 import { apv, arOf, ok, pin, setupSales, type SalesEnv } from './sales-helpers';
+import { SALE_LINES_CTE } from '../../src/modules/reports/sources';
 
 let env: SalesEnv;
 let P: Record<string, string>;
@@ -199,5 +200,32 @@ describe('lists and permissions', () => {
     const dl = await ok(deliver(so.no, [{ srcLineId: so.lines[0].id, qty: '10' }]), 201);
     expect((await env.boy.post(`/api/sales/deliveries/${dl.no}/void`, { reason: 'x' })).status).toBe(403);
     expect((await ok(env.boy.post(`/api/sales/deliveries/${dl.no}/void`, { reason: 'x', ...pin(env) }))).status).toBe('void');
+  });
+});
+
+describe('sales report cost for invoices whose stock moved elsewhere', () => {
+  const costOf = async (no: string) => {
+    const r = await env.pool.query(
+      `with ${SALE_LINES_CTE} select sum(cogs)::text c from sl where no = $3`, ['2000-01-01', '2100-01-01', no]);
+    return r.rows[0].c as string | null;
+  };
+  it('an invoice made from delivery orders carries the delivery orders\' FIFO cost; so does an ABB converted to a full invoice', async () => {
+    const so = await order([{ productId: P.p4!, qty: '6', unitPrice: '196.26' }]);
+    const dlv = await ok(deliver(so.no, [{ srcLineId: so.lines[0].id, qty: '6' }]), 201);
+    const doCost = (await env.pool.query(`select sum(m.cost)::text c from stock_moves m join sales_deliveries d on d.id = m.doc_id where d.no = $1`, [dlv.no])).rows[0].c;
+    expect(Number(doCost)).toBeGreaterThan(0);
+    const inv = await ok(env.boy.post('/api/sales/invoices', { source: 'delivery', deliveryNos: [dlv.no] }), 201);
+    expect(Number(await costOf(inv.doc.no))).toBeCloseTo(Number(doCost), 2);
+    // the delivery order itself is not a sales document, so the cost is counted once
+    expect(await costOf(dlv.no)).toBeNull();
+
+    const cur = await env.prae.get('/api/shifts/current');
+    const shift = cur.status === 200 && cur.body?.id ? cur.body.id as string : await openShift(env.prae);
+    const abb = await ok(env.prae.post('/api/sales/pos', saleBody(env.seed, shift, [{ p: 'p4', qty: '2', price: '210.00' }], '420.00')), 201);
+    const abbCost = await costOf(abb.no);
+    expect(Number(abbCost)).toBeGreaterThan(0);
+    const full = await ok(env.prae.post("/api/sales/invoices/from-abb", { abbNo: abb.no, customerId: C.c1 }), 201);
+    expect(await costOf(abb.no)).toBeNull(); // the ABB is voided by the conversion
+    expect(Number(await costOf(full.doc.no))).toBeCloseTo(Number(abbCost), 2);
   });
 });

@@ -74,7 +74,9 @@ export const SALE_DOC_TYPES = ['ABB', 'INV', 'RC', 'CN'] as const;
  * - ex: inc → the document's base7 shared over 7% lines pro-rata, remainder on the last 7% line (core lineExVat);
  *   exc / none → net after bill discount. Σ ex per document = base7 + exempt.
  * - lvat: the document's VAT shared over 7% lines by ex, remainder on the last 7% line. Σ per document = vat.
- * - cogs: Σ ledger cost of the line's moves (out = +cost, in = −cost).
+ * - cogs: Σ ledger cost of the line's own moves (out = +cost, in = −cost). A line that moved no stock itself takes the
+ *   cost where its goods moved: an invoice made from delivery orders or converted from an ABB carries the FIFO cost
+ *   of those moves in doc_lines.cogs (an invoice with goods left at the shop cut stock itself, so it has its own moves).
  * - sale_type: POS documents (with a shift; a credit note follows its source bill) are retail, others wholesale.
  *   Project sales come with M09.
  */
@@ -87,7 +89,7 @@ export const SALE_LINES_CTE = `
      where d.status = 'active' and d.type in ('ABB','INV','RC','CN') and d.date between $1::date and $2::date
   ),
   sl0 as (
-    select sd.*, l.id line_id, l.product_id, l.base_qty, l.vat lv, l.line_no, l.free,
+    select sd.*, l.id line_id, l.product_id, l.base_qty, l.vat lv, l.line_no, l.free, l.cogs cogs0,
            case when sd.vat_mode = 'inc' and l.vat = 'v7'
                 then coalesce(round(l.net_after_bill * sd.base7 / nullif(sum(l.net_after_bill) filter (where l.vat = 'v7') over (partition by l.doc_id), 0), 2), 0)
                 else l.net_after_bill end ex0,
@@ -115,6 +117,6 @@ export const SALE_LINES_CTE = `
     select sl2.id doc_id, sl2.no, sl2.type, sl2.date, sl2.sgn, sl2.vat_mode, sl2.customer_id, sl2.customer_name, sl2.created_by, sl2.sale_type,
            sl2.line_id, sl2.product_id, sl2.base_qty, sl2.ex, sl2.free,
            case when lv = 'v7' and vat_mode <> 'none' and rn = 1 then v0 + vat - sum(v0) over (partition by id, lv) else v0 end lvat,
-           coalesce(smv.cost, 0) cogs
+           coalesce(smv.cost, sl2.cogs0, 0) cogs
       from sl2 left join smv on smv.doc_line_id = sl2.line_id
   )`;
