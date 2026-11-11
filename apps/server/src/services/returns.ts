@@ -173,10 +173,10 @@ export async function createReturn(tx: Tx, deps: Deps, ctx: Ctx, req: ReturnBody
       unitCost = row?.q && d(row.q).gt(0) ? qty4(d(row.v).div(d(row.q))) : x.l.cogs != null && d(x.l.base_qty).gt(0) ? qty4(d(x.l.cogs).div(d(x.l.base_qty))) : '0';
     }
     const lineId = (await tx.query<{ id: string }>(
-      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs, src_line_id, return_condition)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'0',$11,$11,$12,$13,$14,$15) returning id`,
+      `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs, src_line_id, return_condition, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'0',$11,$11,$12,$13,$14,$15,$16) returning id`,
       [ctx.tenantId, docId, i + 1, x.l.product_id, x.l.name, x.l.unit_name, x.l.unit_factor, x.qty, baseQty, qty4(d(amounts[i]!).div(d(x.qty))),
-        amounts[i], x.l.vat, unitCost != null ? money(d(unitCost).times(d(baseQty))) : null, x.l.id, x.cond],
+        amounts[i], x.l.vat, unitCost != null ? money(d(unitCost).times(d(baseQty))) : null, x.l.id, x.cond, x.l.free === true],
     )).rows[0]!.id;
     // Back into stock at the original FIFO cost as a new lot (BR-21); damaged goods into the damaged-goods warehouse.
     if (stock && wh && unitCost != null) {

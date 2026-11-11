@@ -35,6 +35,7 @@ interface LineRow {
   retail_promo_id: string | null; retail_promo_name: string | null; retail_list_price: string | null; retail_price_source: 'customer' | 'group' | 'promo' | 'bundle' | null;
   retail_bundle_no: number | null; retail_bundle_sets: string | null; retail_bundle_qty: string | null; retail_bundle_price: string | null;
   return_condition: 'good' | 'damaged' | null; // credit-note lines (stock workstream, 0630)
+  free: boolean; // ของแถม (0680)
 }
 
 const DOC_SELECT = `select d.id, d.no, d.type, d.date, d.customer_id, d.customer_name, d.customer_phone, d.vat_mode, d.warehouse_id, d.shift_id,
@@ -55,7 +56,7 @@ export async function getLines(tx: Tx, docId: string): Promise<LineRow[]> {
     `select id, product_id, name, unit_name, unit_factor::text, qty::text, base_qty::text, unit_price::text, discount::text, net::text,
             net_after_bill::text, vat, returned_qty::text, cogs::text, src_line_id,
             retail_promo_id, retail_promo_name, retail_list_price::text, retail_price_source, retail_bundle_no, retail_bundle_sets::text, retail_bundle_qty::text,
-            retail_bundle_price::text, return_condition
+            retail_bundle_price::text, return_condition, free
        from doc_lines where doc_id = $1 order by line_no`,
     [docId],
   );
@@ -74,6 +75,7 @@ export async function getDoc(tx: Tx, ctx: Ctx, no: string): Promise<SalesDoc> {
       id: l.id, productId: l.product_id, name: l.name, unitName: l.unit_name, qty: qty4(l.qty), unitPrice: qty4(l.unit_price), discount: money(l.discount),
       net: money(l.net), returnedQty: qty4(l.returned_qty), cogs: seeCost && l.cogs != null ? money(l.cogs) : null,
       ...(l.return_condition ? { returnCondition: l.return_condition } : {}),
+      ...(l.free ? { free: true } : {}),
       ...(l.retail_price_source ? {
         listPrice: l.retail_list_price != null ? qty4(l.retail_list_price) : null, priceSource: l.retail_price_source,
         promo: l.retail_promo_id ? { id: l.retail_promo_id, name: l.retail_promo_name ?? '' } : null,
@@ -144,6 +146,8 @@ interface PosLine {
   p: ProductRow; u: ProductUnitRow; qty: string; unitPrice: string; core: CoreLine & { baseQty: string };
   retail: { listPrice: string; source: 'customer' | 'group' | 'promo' | 'bundle'; promo: { id: string; name: string; belowCost: boolean } | null } | null;
   bundle: { no: number; sets: string; qtyPerSet: string; setPrice: string; amount: string } | null;
+  /** ของแถม: price 0, no discount, no promo; cuts stock and goes to COGS but is never a below-cost line. */
+  free?: boolean;
 }
 type PosCustomer = { id: string; name: string; code: string; phone: string | null; tax_id: string | null };
 interface BuiltBill {
@@ -172,17 +176,25 @@ async function buildBill(tx: Tx, deps: Deps, req: PosPreviewReq & Pick<PosSaleRe
   for (const [i, l] of req.lines.entries()) if (!d(l.qty).gt(0)) throw E.validation(`Line ${i + 1}: qty must be > 0`, { field: `lines.${i}.qty` });
   // Module C (M15 / BR-05): promo and price-list prices, bundle expansion. Without promos / lists every line
   // expects its retail price, exactly as before.
-  const retail = await retailPosPricing(tx, deps, { customerId: customer?.id ?? null, lines: req.lines, bundles: reqBundles }, products, vatMode);
+  // ของแถม lines stay out of promo / price-list pricing (they do not count towards a promo either).
+  const paidReq = req.lines.filter((l) => !l.free);
+  const retail = await retailPosPricing(tx, deps, { customerId: customer?.id ?? null, lines: paidReq, bundles: reqBundles }, products, vatMode);
   const priceChanges: PriceChange[] = [];
+  let paidIdx = 0;
   const lines: PosLine[] = req.lines.map((l, i) => {
     const p = products.get(l.productId)!;
     if (!p.active) throw E.validation(`Product ${p.sku} is inactive`);
     const u = unitOf(p, l.unitIdx);
+    if (l.free) {
+      if (p.kind !== 'stock') throw E.validation(`Line ${i + 1}: only stock goods can be given free`, { field: `lines.${i}.free` });
+      const core: CoreLine & { baseQty: string } = { qty: l.qty, unitPrice: '0', discount: null, vat: p.vat, baseQty: qty4(d(l.qty).times(d(u.factor))) };
+      return { p, u, qty: l.qty, unitPrice: '0', core, retail: null, bundle: null, free: true };
+    }
     if (d(l.unitPrice).lt(0)) throw E.validation(`Line ${i + 1}: unit price must not be negative`, { field: `lines.${i}.unitPrice` });
     if (l.discount && (d(l.discount.value).lt(0) || (l.discount.kind === 'pct' && d(l.discount.value).gt(100)))) {
       throw E.validation(`Line ${i + 1}: discount must be 0..100% or a non-negative amount`, { field: `lines.${i}.discount` });
     }
-    const rp = retail.lines[i]!;
+    const rp = retail.lines[paidIdx++]!;
     const atExpected = d(l.unitPrice).eq(rp.expected);
     // The expected (promo / list) price and the retail list price both sell without a price-change approval.
     if (!atExpected && !d(l.unitPrice).eq(rp.retail)) priceChanges.push({ productId: p.id, unitIdx: l.unitIdx, price: qty4(l.unitPrice) });
@@ -217,6 +229,11 @@ async function buildBill(tx: Tx, deps: Deps, req: PosPreviewReq & Pick<PosSaleRe
   return { customer, lines, reqLines: req.lines.length, retail, totals, vatMode, priceChanges, coupon };
 }
 
+/** BR-18: every ของแถม line on a bill is audited with its product, qty and cost value (FIFO). */
+export function freeLineAudit(type: string, no: string, name: string, qty: string, unit: string, cogs: string): AuditInput {
+  return { action: 'free_goods', object: type, ref: no, detail: `ของแถม ${name} × ${qty4(qty)} ${unit} · ต้นทุน ฿${fmtTHB(cogs)}` };
+}
+
 /** What a line consumes from FIFO lots: base qty taken and its cost. */
 type Consumed = { qty: string; cogs: string } | null;
 interface BelowRow { productId: string; name: string; sell: string; cost: string }
@@ -238,7 +255,8 @@ function evalBelowCost(bill: BuiltBill, consumed: Map<PosLine, Consumed>) {
     const promoExVat = priceExVat(d(l.unitPrice).div(d(l.u.factor)), vatMode, l.p.vat);
     return d(promoExVat).lt(d(cost)) ? promoExVat : cost;
   };
-  const items = lines.map((l, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: l.bundle ? null : floorOf(l, unitCosts[i] ?? null) }));
+  // ของแถม is given away on purpose: not a below-cost sale (BR-16 does not apply).
+  const items = lines.map((l, i) => ({ netUnitExVat: sell[i] ?? '0', unitCost: l.bundle || l.free ? null : floorOf(l, unitCosts[i] ?? null) }));
   const lineIdx = new Set(checkBelowCost(items));
   const rows: BelowRow[] = [...lineIdx].map((i) => ({ productId: lines[i]!.p.id, name: lines[i]!.p.name, sell: sell[i]!, cost: items[i]!.unitCost! }));
   const bundleNos = new Set<number>();
@@ -467,15 +485,16 @@ export async function posSale(tx: Tx, deps: Deps, ctx: Ctx, req: PosSaleReq): Pr
     const pl = planOf.get(l);
     const lineId = (await tx.query<{ id: string }>(
       `insert into doc_lines (tenant_id, doc_id, line_no, product_id, name, unit_name, unit_factor, qty, base_qty, unit_price, discount, net, net_after_bill, vat, cogs,
-         retail_promo_id, retail_promo_name, retail_list_price, retail_price_source, retail_bundle_no, retail_bundle_sets, retail_bundle_qty, retail_bundle_price)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23) returning id`,
+         retail_promo_id, retail_promo_name, retail_list_price, retail_price_source, retail_bundle_no, retail_bundle_sets, retail_bundle_qty, retail_bundle_price, free)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) returning id`,
       [ctx.tenantId, docId, i + 1, l.p.id, l.p.name, l.u.name, l.u.factor, l.qty, l.core.baseQty, l.unitPrice,
         money(lineDiscount(l.core)),
         totals.lines[i]!.net, totals.lines[i]!.after, l.p.vat, pl ? pl.cogs : null,
         l.retail?.promo?.id ?? null, l.retail?.promo?.name ?? null, l.retail?.listPrice ?? null, l.retail?.source ?? null,
-        l.bundle?.no ?? null, l.bundle?.sets ?? null, l.bundle?.qtyPerSet ?? null, l.bundle?.setPrice ?? null],
+        l.bundle?.no ?? null, l.bundle?.sets ?? null, l.bundle?.qtyPerSet ?? null, l.bundle?.setPrice ?? null, l.free === true],
     )).rows[0]!.id;
-    const moveNote = l.bundle ? `ขายชุดโปร · ${l.retail!.promo!.name}` : l.retail?.promo ? `ขายหน้าร้าน · โปร ${l.retail.promo.name}` : 'ขายหน้าร้าน';
+    if (l.free) audits.push(freeLineAudit(type, no, l.p.name, l.qty, l.u.name, pl?.cogs ?? '0'));
+    const moveNote = l.free ? 'ของแถม · ขายหน้าร้าน' : l.bundle ? `ขายชุดโปร · ${l.retail!.promo!.name}` : l.retail?.promo ? `ขายหน้าร้าน · โปร ${l.retail.promo.name}` : 'ขายหน้าร้าน';
     if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: type, docNo: no, docId, docLineId: lineId, note: moveNote });
   }
 

@@ -183,7 +183,11 @@ export const PosSaleReq = z.object({
   customerId: z.string().optional(),
   // A bill needs at least one line or one bundle (checked by the server). promoId: the live promo the client
   // priced the line with (module C, M15); the server re-derives the promo and rejects one that is no longer live.
-  lines: z.array(z.object({ productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional(), promoId: z.string().optional() })).default([]),
+  lines: z.array(z.object({
+    productId: z.string(), unitIdx: z.number().int().min(0).default(0), qty: Dec, unitPrice: DecNN, discount: Discount.optional(), promoId: z.string().optional(),
+    /** ของแถม: price 0 (the server forces it), cuts stock FIFO, not a discount nor a below-cost sale; its cost goes to COGS. */
+    free: z.boolean().optional(),
+  })).default([]),
   /** M15 bundle sets sold at the promo's set price (BR-17: every component cut FIFO, revenue split pro-rata). */
   bundles: z.array(z.object({ promoId: z.string(), sets: Dec })).optional(),
   billDiscount: DecNN.default('0'),
@@ -210,6 +214,8 @@ export const DocLine = z.object({
   promo: z.object({ id: z.string(), name: z.string() }).nullable().optional(),
   /** Bundle component line: lines with the same `no` are one bundle sold as `sets` sets (returned whole sets only). */
   bundle: z.object({ no: z.number().int(), promoId: z.string(), name: z.string(), sets: Dec, qtyPerSet: Dec, setPrice: Dec }).nullable().optional(),
+  /** ของแถม: given at price 0. */
+  free: z.boolean().optional(),
 });
 export const SalesDoc = z.object({
   id: z.string(), no: z.string(), type: z.enum(['ABB', 'INV', 'RC', 'CN', 'QT', 'SO', 'DO']), date: z.string(),
