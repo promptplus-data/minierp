@@ -4,13 +4,49 @@
  * - lazy list: shows 20 rows and adds 20 more as the list scrolls (local items) or fetches the next page (remote)
  * - optional "+ สร้างใหม่" row that hands the typed text to the caller (quick-create customer etc.)
  * Keyboard: ↑ ↓ Enter Esc. Touch: rows are 44px+, the input works with the on-screen keyboard.
+ * The list is portalled to <body> with position:fixed so a scrolling table or a modal never clips it; it follows the
+ * input on scroll/resize, opens upward when there is more room above, and closes once the input scrolls out of view.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { matchesSearch, searchRank } from '@erp/core';
 import { useDebounced } from '../ui';
 
 export const PAGE = 20;
+
+const MAX_H = 320;
+
+/** True when `el` is hidden by an ancestor that clips (overflow other than visible) or by the viewport. */
+function clippedOut(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect();
+  const cy = r.top + r.height / 2;
+  if (cy < 0 || cy > window.innerHeight) return true;
+  for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+    const cs = getComputedStyle(a);
+    if (/(auto|scroll|hidden|clip)/.test(cs.overflowY + cs.overflowX)) {
+      const b = a.getBoundingClientRect();
+      if (cy < b.top || cy > b.bottom) return true;
+    }
+  }
+  // something painted over the input (a sticky table header, a toolbar) hides it too
+  const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), cy);
+  return !!hit && !el.contains(hit) && !hit.closest('.ss-list');
+}
+
+/** Fixed-position box for the list under (or above) the anchor. */
+function placeList(anchor: HTMLElement, touch: boolean): CSSProperties {
+  const r = anchor.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const cap = touch ? Math.min(420, vh * 0.5) : MAX_H;
+  const below = vh - r.bottom - 12, above = r.top - 12;
+  const up = below < Math.min(cap, 200) && above > below;
+  const width = Math.min(Math.max(r.width, 260), vw - 16);
+  const left = Math.max(8, Math.min(r.left, vw - width - 8));
+  return up
+    ? { position: 'fixed', left, width, bottom: vh - r.top + 4, maxHeight: Math.max(120, Math.min(cap, above)) }
+    : { position: 'fixed', left, width, top: r.bottom + 4, maxHeight: Math.max(120, Math.min(cap, below)) };
+}
 
 export interface RemotePage<T> { items: T[]; nextCursor: string | null }
 
@@ -56,6 +92,7 @@ export function SearchSelect<T>(p: SearchSelectProps<T>) {
   const input = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
+  const [pos, setPos] = useState<CSSProperties | null>(null);
   const q = useDebounced(text, p.fetchPage ? 250 : 0);
 
   const remote = useInfiniteQuery({
@@ -95,11 +132,28 @@ export function SearchSelect<T>(p: SearchSelectProps<T>) {
   useEffect(() => { setHi(0); setShown(PAGE); }, [text]);
   useEffect(() => {
     if (!open) return;
-    const off = (e: MouseEvent | TouchEvent) => { if (!wrap.current?.contains(e.target as Node)) close(); };
+    const off = (e: MouseEvent | TouchEvent) => { const t = e.target as Node; if (!wrap.current?.contains(t) && !listRef.current?.contains(t)) close(); };
     document.addEventListener('mousedown', off);
     document.addEventListener('touchstart', off);
     return () => { document.removeEventListener('mousedown', off); document.removeEventListener('touchstart', off); };
   });
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    let raf = 0;
+    const place = (moved: boolean) => {
+      raf = 0;
+      const el = wrap.current;
+      if (!el) return;
+      if (moved && clippedOut(el)) { close(); input.current?.blur(); return; }
+      setPos(placeList(el, document.documentElement.hasAttribute('data-touch')));
+    };
+    const onMove = (e: Event) => { if (listRef.current && e.target instanceof Node && listRef.current.contains(e.target)) return; if (!raf) raf = requestAnimationFrame(() => place(true)); };
+    place(false);
+    window.addEventListener('scroll', onMove, true);
+    window.addEventListener('resize', onMove);
+    return () => { window.removeEventListener('scroll', onMove, true); window.removeEventListener('resize', onMove); if (raf) cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [hi]);
@@ -160,8 +214,8 @@ export function SearchSelect<T>(p: SearchSelectProps<T>) {
         data-testid={p.testId ? `${p.testId}-input` : undefined}
       />
       <span className="ss-caret" aria-hidden>▾</span>
-      {open && (
-        <ul className="ss-list" role="listbox" id={listId} ref={listRef} onScroll={onScroll} onClick={(e) => e.preventDefault() /* inside a <label>, a row click would otherwise re-activate the input and reopen the list */} data-testid={p.testId ? `${p.testId}-list` : undefined}>
+      {open && createPortal(
+        <ul className="ss-list" role="listbox" id={listId} ref={listRef} onScroll={onScroll} style={pos ?? { position: 'fixed', visibility: 'hidden' }} onClick={(e) => e.preventDefault() /* inside a <label>, a row click would otherwise re-activate the input and reopen the list */} data-testid={p.testId ? `${p.testId}-list` : undefined}>
           {opts.map((o, i) => {
             if (o.k === 'empty') return <li key="__empty" role="option" aria-selected={p.value == null} data-i={i} className={`${hi === i ? 'hi' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)} onMouseEnter={() => setHi(i)}>{p.emptyLabel}</li>;
             if (o.k === 'create') return <li key="__create" role="option" aria-selected={false} data-i={i} className={`ss-create${hi === i ? ' hi' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => choose(o)} onMouseEnter={() => setHi(i)} data-testid={p.testId ? `${p.testId}-create` : undefined}>+ {p.createLabel ?? 'สร้างใหม่'}{text.trim() ? ` "${text.trim()}"` : ''}</li>;
@@ -179,7 +233,8 @@ export function SearchSelect<T>(p: SearchSelectProps<T>) {
           {loading && <li className="ss-info">กำลังค้นหา…</li>}
           {!loading && !rows.length && text.trim() && <li className="ss-info">ไม่พบ "{text.trim()}"</li>}
           {more && <li className="ss-info"><button type="button" className="btn sm" onMouseDown={(e) => e.preventDefault()} onClick={loadMore}>{remote.isFetchingNextPage ? 'กำลังโหลด…' : 'โหลดเพิ่ม'}</button></li>}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );

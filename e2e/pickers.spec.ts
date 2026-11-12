@@ -85,3 +85,33 @@ test('payslip button is disabled with "รอเผยแพร่รอบเ�
   await page.getByTestId('slip-all').click();
   await expect(page.getByTestId('payslip').first()).toBeVisible();
 });
+
+test('picker list inside a scrolling line table is not clipped, and closes once its row scrolls under the header', async ({ page }) => {
+  await login(page, 'charoen');
+  await page.goto('/purchasing');
+  await page.getByTestId('po-new').click();
+  await page.getByTestId('po-add').click();
+  await page.getByTestId('po-add').click();
+  const input = page.getByTestId('po-p2-input');
+  await input.click();
+  const list = page.getByTestId('po-p2-list');
+  await expect(list.getByRole('option').first()).toBeVisible();
+  // the list is outside the table's scroll box: tall enough for several rows and nothing painted over its middle
+  const box = (await list.boundingBox())!;
+  expect(box.height).toBeGreaterThan(150);
+  const onTop = await list.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!hit && el.contains(hit);
+  });
+  expect(onTop).toBe(true);
+  await list.getByRole('option').first().click();
+  await expect(list).toHaveCount(0);
+  await expect(input).not.toHaveValue('');
+  // the line table's header paints over a row scrolled beneath it (the sticky th sits above the picker)
+  const headerOnTop = await page.getByTestId('po-lines').evaluate((t) => {
+    const th = t.querySelector('th')!;
+    return getComputedStyle(th).zIndex !== 'auto' && Number(getComputedStyle(th).zIndex) > 0;
+  });
+  expect(headerOnTop).toBe(true);
+});

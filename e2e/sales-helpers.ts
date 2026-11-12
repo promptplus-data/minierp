@@ -8,10 +8,12 @@ export async function pick(sel: Locator, contains: string, typed = contains) {
     const input = sel.locator('input[role="combobox"]');
     await input.click();
     await input.fill(typed);
-    const row = sel.locator('li[role="option"]').filter({ hasText: contains }).first();
+    // the list is portalled to <body>: reach it through the combobox's aria-controls
+    const list = sel.page().locator(`[id="${await input.getAttribute('aria-controls')}"]`);
+    const row = list.locator('li[role="option"]').filter({ hasText: contains }).first();
     await expect(row).toBeVisible();
     await row.click();
-    await expect(sel.locator('[role="listbox"]')).toHaveCount(0);
+    await expect(list).toHaveCount(0);
     return;
   }
   await expect(sel.locator('option').filter({ hasText: contains }).first()).toBeAttached();

@@ -48,7 +48,8 @@ export async function pick(page: Page, target: string | Locator, text: string, q
   const input = typeof target === 'string' ? page.getByTestId(`${target}-input`) : target;
   await input.click();
   await input.fill(query);
-  const list = input.locator('xpath=..').getByRole('listbox');
+  // the list is portalled to <body>: reach it through the combobox's aria-controls
+  const list = page.locator(`[id="${await input.getAttribute('aria-controls')}"]`);
   await list.getByRole('option', { name: text }).first().click();
   await expect(list).toBeHidden();
 }

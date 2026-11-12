@@ -79,7 +79,11 @@ input[type=text],input[type=number],input[type=date],select,textarea{border:1px 
 input.qty{width:80px;text-align:right}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
 label.f > *{color:var(--fg)}
-.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:12px}
+/* a <fieldset> defaults to min-width:min-content, so a wide table inside one pushes the whole form past a phone screen */
+fieldset{min-width:0}
+/* phones: one field per row, including fields that span two columns on wide screens (inline grid-column:span 2) */
+@media (max-width:640px){.fgrid>*{grid-column:auto!important}}
 .muted{color:var(--muted)}.small{font-size:12px}.mono{font-family:var(--mono)}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
 .tabs button{border:0;background:none;padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted);white-space:nowrap}
@@ -178,7 +182,7 @@ body[data-mod="hr"]{--accent:var(--c-hr);--accent-soft:var(--c-hr-soft)}
 .crumb{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--accent);background:var(--accent-soft);border-radius:99px;padding:1px 10px;font-family:var(--font);font-weight:600}
 .crumb + .mono{margin-left:8px}
 .content{gap:18px}
-th{background:var(--surface2);position:sticky;top:0}
+th{background:var(--surface2);position:sticky;top:0;z-index:2}
 table tr:first-child th:first-child{border-top-left-radius:8px}table tr:first-child th:last-child{border-top-right-radius:8px}
 td{border-bottom-color:color-mix(in srgb,var(--line) 70%,transparent)}
 .btn{border-radius:9px}
@@ -257,7 +261,7 @@ input.qty.bad{border-color:var(--bad);color:var(--bad)}
 .ss>input{width:100%;padding-right:28px}
 .ss-caret{position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--muted);font-size:12px}
 .ss.bad>input{border-color:var(--bad);box-shadow:0 0 0 3px var(--bad-soft)}
-.ss-list{position:absolute;z-index:60;left:0;right:0;top:calc(100% + 4px);min-width:260px;max-height:320px;overflow:auto;margin:0;padding:4px;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.16)}
+.ss-list{position:fixed;z-index:1000;overflow:auto;box-sizing:border-box;margin:0;padding:4px;list-style:none;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.16)}
 .ss-list li{display:flex;flex-direction:column;gap:1px;padding:8px 10px;border-radius:8px;cursor:pointer;min-height:40px;justify-content:center}
 .ss-list li.hi{background:var(--accent-soft)}
 .ss-list li.sel .ss-l{font-weight:600;color:var(--accent)}
@@ -266,5 +270,4 @@ input.qty.bad{border-color:var(--bad);color:var(--bad)}
 .ss-list li.ss-create{color:var(--accent);font-weight:600;border-top:1px solid var(--line);margin-top:2px}
 .ss-list li.ss-info{cursor:default;color:var(--muted);font-size:12px;align-items:center}
 html[data-touch] .ss-list li{min-height:48px}
-html[data-touch] .ss-list{max-height:min(420px,50vh)}
 .loadmore{display:flex;justify-content:center;padding:10px}
