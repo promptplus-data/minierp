@@ -23,11 +23,26 @@ export const HrLeaveEnt = z.object({
 });
 export type HrLeaveEnt = z.infer<typeof HrLeaveEnt>;
 
+/** Banks for salary transfers (Bank of Thailand codes); '' = not set. */
+export const THAI_BANKS = [
+  { code: 'BBL', name: 'ธนาคารกรุงเทพ' }, { code: 'KBANK', name: 'ธนาคารกสิกรไทย' }, { code: 'KTB', name: 'ธนาคารกรุงไทย' },
+  { code: 'SCB', name: 'ธนาคารไทยพาณิชย์' }, { code: 'BAY', name: 'ธนาคารกรุงศรีอยุธยา' }, { code: 'TTB', name: 'ธนาคารทหารไทยธนชาต (ttb)' },
+  { code: 'GSB', name: 'ธนาคารออมสิน' }, { code: 'BAAC', name: 'ธ.ก.ส.' }, { code: 'GHB', name: 'ธนาคารอาคารสงเคราะห์' },
+  { code: 'UOB', name: 'ธนาคารยูโอบี' }, { code: 'CIMB', name: 'ธนาคารซีไอเอ็มบี ไทย' }, { code: 'KKP', name: 'ธนาคารเกียรตินาคินภัทร' },
+  { code: 'TISCO', name: 'ธนาคารทิสโก้' }, { code: 'LHB', name: 'ธนาคารแลนด์ แอนด์ เฮ้าส์' }, { code: 'ICBC', name: 'ธนาคารไอซีบีซี (ไทย)' },
+  { code: 'IBANK', name: 'ธนาคารอิสลามแห่งประเทศไทย' },
+] as const;
+export const BankCode = z.enum(['', ...THAI_BANKS.map((b) => b.code)] as [string, ...string[]]);
+export const bankName = (code: string) => THAI_BANKS.find((b) => b.code === code)?.name ?? '';
+/** One line for payslips and the payroll snapshot: "ธนาคารกสิกรไทย 012-3-45678-9 (ชื่อบัญชี)". */
+export const bankLine = (e: { bank: string; bankAccount: string; bankAccountName: string }) =>
+  [bankName(e.bank), e.bankAccount.trim(), e.bankAccountName.trim() ? `(${e.bankAccountName.trim()})` : ''].filter(Boolean).join(' ');
+
 export const HrEmployee = z.object({
   id: z.string(), code: z.string(), name: z.string(), position: z.string(), type: HrEmpType, startDate: z.string(),
   // pay fields are null when the caller lacks hr.salary
   salary: Dec.nullable(), dailyRate: Dec.nullable(), commissionPct: Dec.nullable(), sso: z.boolean(),
-  bankAccount: z.string(), nationalId: z.string(), phone: z.string(), leaveEnt: HrLeaveEnt,
+  bank: z.string(), bankAccount: z.string(), bankAccountName: z.string(), nationalId: z.string(), phone: z.string(), leaveEnt: HrLeaveEnt,
   status: z.enum(['active', 'resigned']), resignedAt: z.string().nullable(), resignReason: z.string().nullable(),
   user: z.object({ id: z.string(), username: z.string(), role: Role, status: z.string() }).nullable(),
 });
@@ -38,7 +53,8 @@ const HrEmployeeFields = z.object({
   code: z.string().trim().max(20).optional(), name: z.string().trim().min(1), position: z.string().default(''),
   type: HrEmpType.default('monthly'), startDate: YMD,
   salary: DecNN.default('0'), dailyRate: DecNN.default('0'), commissionPct: DecNN.default('0'), sso: z.boolean().default(true),
-  bankAccount: z.string().default(''), nationalId: z.string().default(''), phone: z.string().default(''),
+  bank: BankCode.default(''), bankAccount: z.string().trim().max(30).default(''), bankAccountName: z.string().trim().max(100).default(''),
+  nationalId: z.string().default(''), phone: z.string().default(''),
   leaveEnt: HrLeaveEnt.optional(),
 });
 /** REQ-M17-01 + REQ-M01-10: the login user is created together with the employee (or not at all). */

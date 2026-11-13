@@ -12,9 +12,11 @@ import pg from 'pg';
 import { DEFAULT_LEAVE_ENTITLEMENT, payRow } from '@erp/core';
 import { withTenant } from './tx';
 
+const BANK_TH: Record<string, string> = { KBANK: 'ธนาคารกสิกรไทย', SCB: 'ธนาคารไทยพาณิชย์', BBL: 'ธนาคารกรุงเทพ', KTB: 'ธนาคารกรุงไทย' };
+
 interface EmpSeed {
   user: string | null; code: string; name: string; position: string; type: 'monthly' | 'daily' | 'parttime' | 'owner' | 'external';
-  start: string; salary: number; daily: number; comm: number; sso: boolean; bank: string; nid: string; phone: string; resigned?: string;
+  start: string; salary: number; daily: number; comm: number; sso: boolean; bank: string; acct: string; nid: string; phone: string; resigned?: string;
 }
 
 /** Valid Thai national id from a 12-digit stem (check digit = (11 - Σ d·(13-i) mod 11) mod 10). */
@@ -25,12 +27,12 @@ const nid = (stem: string) => {
 };
 
 const EMPLOYEES: EmpSeed[] = [
-  { user: 'charoen', code: 'OWN001', name: 'คุณเจริญ ศรีสุข', position: 'เจ้าของกิจการ', type: 'owner', start: '2015-03-01', salary: 0, daily: 0, comm: 0, sso: false, bank: 'กสิกร 012-3-45678-9', nid: nid('310050012345'), phone: '081-222-3344' },
-  { user: 'suda', code: 'EMP001', name: 'คุณสุดา ศรีสุข', position: 'ผู้จัดการร้าน', type: 'monthly', start: '2018-06-01', salary: 25000, daily: 0, comm: 0, sso: true, bank: 'กสิกร 012-3-11111-1', nid: nid('310050023456'), phone: '086-111-2299' },
-  { user: 'prae', code: 'EMP002', name: 'น้องแพร', position: 'แคชเชียร์', type: 'daily', start: '2024-02-15', salary: 0, daily: 420, comm: 0, sso: true, bank: 'ไทยพาณิชย์ 404-1-22222-2', nid: nid('110370034567'), phone: '092-333-4455' },
-  { user: 'boy', code: 'EMP003', name: 'พี่บอย', position: 'พนักงานขาย', type: 'monthly', start: '2021-09-01', salary: 15000, daily: 0, comm: 1, sso: true, bank: 'กรุงเทพ 101-4-33333-3', nid: nid('150990045678'), phone: '081-555-0142' },
-  { user: 'chai', code: 'EMP004', name: 'พี่ชัย', position: 'พนักงานคลัง', type: 'daily', start: '2022-01-10', salary: 0, daily: 450, comm: 0, sso: true, bank: 'กรุงไทย 678-0-44444-4', nid: nid('340010056789'), phone: '' },
-  { user: 'ton', code: 'EMP005', name: 'น้องต้น', position: 'พนักงานคลัง', type: 'daily', start: '2025-04-01', salary: 0, daily: 400, comm: 0, sso: true, bank: '', nid: nid('110200067890'), phone: '', resigned: '2026-08-31' },
+  { user: 'charoen', code: 'OWN001', name: 'คุณเจริญ ศรีสุข', position: 'เจ้าของกิจการ', type: 'owner', start: '2015-03-01', salary: 0, daily: 0, comm: 0, sso: false, bank: 'KBANK', acct: '012-3-45678-9', nid: nid('310050012345'), phone: '081-222-3344' },
+  { user: 'suda', code: 'EMP001', name: 'คุณสุดา ศรีสุข', position: 'ผู้จัดการร้าน', type: 'monthly', start: '2018-06-01', salary: 25000, daily: 0, comm: 0, sso: true, bank: 'KBANK', acct: '012-3-11111-1', nid: nid('310050023456'), phone: '086-111-2299' },
+  { user: 'prae', code: 'EMP002', name: 'น้องแพร', position: 'แคชเชียร์', type: 'daily', start: '2024-02-15', salary: 0, daily: 420, comm: 0, sso: true, bank: 'SCB', acct: '404-1-22222-2', nid: nid('110370034567'), phone: '092-333-4455' },
+  { user: 'boy', code: 'EMP003', name: 'พี่บอย', position: 'พนักงานขาย', type: 'monthly', start: '2021-09-01', salary: 15000, daily: 0, comm: 1, sso: true, bank: 'BBL', acct: '101-4-33333-3', nid: nid('150990045678'), phone: '081-555-0142' },
+  { user: 'chai', code: 'EMP004', name: 'พี่ชัย', position: 'พนักงานคลัง', type: 'daily', start: '2022-01-10', salary: 0, daily: 450, comm: 0, sso: true, bank: 'KTB', acct: '678-0-44444-4', nid: nid('340010056789'), phone: '' },
+  { user: 'ton', code: 'EMP005', name: 'น้องต้น', position: 'พนักงานคลัง', type: 'daily', start: '2025-04-01', salary: 0, daily: 400, comm: 0, sso: true, bank: '', acct: '', nid: nid('110200067890'), phone: '', resigned: '2026-08-31' },
 ];
 
 const CENTRAL = [
@@ -56,10 +58,10 @@ export async function seedAdmin(pool: pg.Pool, tenantId: string): Promise<SeedAd
         const ent = e.type === 'owner' ? { sick: 0, personal: 0, vacation: 0, maternity: 0, other: 0 } : DEFAULT_LEAVE_ENTITLEMENT;
         const r = await c.query<{ id: string }>(
           `insert into employees (tenant_id, code, name, position, emp_type, start_date, salary, daily_rate, commission_pct, sso, bank_account, national_id, phone,
-             leave_ent, status, resigned_at, resign_reason, user_id, created_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) returning id`,
-          [tenantId, e.code, e.name, e.position, e.type, e.start, e.salary, e.daily, e.comm, e.sso, e.bank, e.nid, e.phone, JSON.stringify(ent),
-            e.resigned ? 'resigned' : 'active', e.resigned ?? null, e.resigned ? 'ลาออกเอง' : null, uid, owner],
+             leave_ent, status, resigned_at, resign_reason, user_id, created_by, bank, bank_account_name)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning id`,
+          [tenantId, e.code, e.name, e.position, e.type, e.start, e.salary, e.daily, e.comm, e.sso, e.acct, e.nid, e.phone, JSON.stringify(ent),
+            e.resigned ? 'resigned' : 'active', e.resigned ?? null, e.resigned ? 'ลาออกเอง' : null, uid, owner, e.bank, e.acct ? e.name : ''],
         );
         out.employees[e.code] = r.rows[0]!.id;
       }
@@ -86,7 +88,7 @@ export async function seedAdmin(pool: pg.Pool, tenantId: string): Promise<SeedAd
           `insert into payroll_lines (tenant_id, run_id, employee_id, emp_code, emp_name, emp_position, emp_type, bank_account, pay, rate, commission_pct, sso_enrolled,
              days, ot, allowance, advance, unpaid_days, commission_base, base, commission, unpaid_amt, gross, sso, tax, net)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,0,0,$16,$17,$18,$19,$20,$21,$22,$23)`,
-          [tenantId, run.rows[0]!.id, out.employees[e.code], e.code, e.name, e.position, e.type, e.bank, daily ? 'daily' : 'monthly', daily ? e.daily : e.salary, e.comm, e.sso,
+          [tenantId, run.rows[0]!.id, out.employees[e.code], e.code, e.name, e.position, e.type, e.acct ? `${BANK_TH[e.bank]} ${e.acct} (${e.name})` : '', daily ? 'daily' : 'monthly', daily ? e.daily : e.salary, e.comm, e.sso,
             inp.days, inp.ot, inp.allowance, inp.commissionBase, r.base, r.commission, r.unpaidAmt, r.gross, r.sso, r.tax, r.net]);
       }
       await c.query(`update payroll_runs set status = 'approved', approved_by = $2, approved_at = '2026-09-29T10:00:00+07:00' where id = $1`, [run.rows[0]!.id, owner]);

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
+import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, THAI_BANKS, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
 import { DEFAULT_LEAVE_ENTITLEMENT, USERNAME_RE, thaiIdValid } from '@erp/core';
 import { api } from '../../api';
 import { ROLE_TH, useAuth } from '../../auth';
@@ -129,7 +129,7 @@ export default function Employees() {
 }
 
 interface Form {
-  code: string; name: string; position: string; type: HrEmpType; startDate: string; phone: string; bankAccount: string; nationalId: string;
+  code: string; name: string; position: string; type: HrEmpType; startDate: string; phone: string; bank: string; bankAccount: string; bankAccountName: string; nationalId: string;
   salary: string; dailyRate: string; commissionPct: string; sso: boolean; ent: HrLeaveEnt;
   username: string; role: z.infer<typeof Role>; pin: string;
 }
@@ -139,7 +139,7 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
   const isNew = !emp;
   const [f, setF] = useState<Form>(() => ({
     code: emp?.code ?? '', name: emp?.name ?? '', position: emp?.position ?? '', type: emp?.type ?? 'monthly', startDate: emp?.startDate ?? todayYmd(),
-    phone: emp?.phone ?? '', bankAccount: emp?.bankAccount ?? '', nationalId: emp?.nationalId ?? '',
+    phone: emp?.phone ?? '', bank: emp?.bank ?? '', bankAccount: emp?.bankAccount ?? '', bankAccountName: emp?.bankAccountName ?? '', nationalId: emp?.nationalId ?? '',
     salary: emp?.salary ?? '0', dailyRate: emp?.dailyRate ?? '0', commissionPct: emp?.commissionPct ?? '0', sso: emp?.sso ?? true,
     ent: emp?.leaveEnt ?? { ...DEFAULT_LEAVE_ENTITLEMENT }, username: emp?.user?.username ?? '', role: emp?.user?.role ?? 'cashier', pin: '',
   }));
@@ -154,13 +154,15 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
     if (!checkFields({
       name: requiredMsg(f.name, 'ชื่อพนักงาน'),
       'user.username': isNew && withUser && !USERNAME_RE.test(uname) && 'ชื่อผู้ใช้ 3–20 ตัว ใช้ a–z 0–9 . _',
+      bank: !f.bank && !!f.bankAccount.trim() && 'เลือกธนาคารของบัญชีนี้',
+      bankAccount: !!f.bankAccount.trim() && !/^\d{10,15}$/.test(f.bankAccount.replace(/[\s-]/g, '')) && 'เลขที่บัญชีเป็นตัวเลข 10–15 หลัก',
       'user.pin': !!f.pin && !/^\d{4,6}$/.test(f.pin) && 'PIN อนุมัติเป็นตัวเลข 4–6 หลัก',
       nationalId: sal && !!f.nationalId.trim() && !thaiIdValid(f.nationalId.trim()) && 'เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก ตรวจเลขท้ายไม่ผ่าน)',
     })) return;
     setBusy(true);
     setErr('');
     const base = {
-      name: f.name.trim(), position: f.position.trim(), startDate: f.startDate, phone: f.phone.trim(), bankAccount: f.bankAccount.trim(), leaveEnt: f.ent,
+      name: f.name.trim(), position: f.position.trim(), startDate: f.startDate, phone: f.phone.trim(), bank: f.bank, bankAccount: f.bankAccount.trim(), bankAccountName: f.bankAccountName.trim(), leaveEnt: f.ent,
       ...(owner ? {} : { type: f.type }),
       ...(sal ? { salary: f.salary || '0', dailyRate: f.dailyRate || '0', commissionPct: f.commissionPct || '0', sso: f.sso, nationalId: f.nationalId.trim() } : {}),
     };
@@ -199,7 +201,17 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
         </label>
         <label className="f">วันเริ่มงาน<input type="date" value={f.startDate} onChange={(e) => set('startDate', e.target.value)} /></label>
         <label className="f">เบอร์โทร<input type="text" value={f.phone} onChange={(e) => set('phone', e.target.value)} /></label>
-        <label className="f" style={{ gridColumn: 'span 2' }}>บัญชีรับเงินเดือน<input type="text" value={f.bankAccount} placeholder="ธนาคาร เลขที่บัญชี" onChange={(e) => set('bankAccount', e.target.value)} /></label>
+      </div>
+      <h4 className="sec">บัญชีรับเงินเดือน</h4>
+      <div className="fgrid">
+        <label className="f">ธนาคาร
+          <select name="bank" value={f.bank} onChange={(e) => set('bank', e.target.value)} data-testid="emp-bank">
+            <option value="">— เลือกธนาคาร —</option>
+            {THAI_BANKS.map((b) => <option key={b.code} value={b.code}>{b.name}</option>)}
+          </select>
+        </label>
+        <label className="f">เลขที่บัญชี<input type="text" name="bankAccount" inputMode="numeric" value={f.bankAccount} placeholder="เช่น 012-3-45678-9" onChange={(e) => set('bankAccount', e.target.value)} data-testid="emp-bank-account" /></label>
+        <label className="f" style={{ gridColumn: 'span 2' }}>ชื่อบัญชี<input type="text" name="bankAccountName" value={f.bankAccountName} placeholder="ชื่อตามสมุดบัญชี" onChange={(e) => set('bankAccountName', e.target.value)} data-testid="emp-bank-name" /></label>
       </div>
       {sal ? (
         <>

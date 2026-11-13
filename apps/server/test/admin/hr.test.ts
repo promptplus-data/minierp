@@ -21,7 +21,7 @@ afterAll(async () => { await env.close(); });
 
 const newEmp = (over: Record<string, unknown> = {}) => ({
   name: 'นายสมชาย ใจดี', position: 'พนักงานขาย', type: 'monthly', startDate: '2026-10-01', salary: '18000.00', nationalId: '1101700230708',
-  bankAccount: 'กสิกร 111-1-11111-1', user: { username: 'somchai', role: 'sales' }, ...over,
+  bank: 'KBANK', bankAccount: '111-1-11111-1', bankAccountName: 'นายสมชาย ใจดี', user: { username: 'somchai', role: 'sales' }, ...over,
 });
 
 describe('employees with their login user (REQ-M17-01, REQ-M01-10)', () => {
@@ -43,6 +43,18 @@ describe('employees with their login user (REQ-M17-01, REQ-M01-10)', () => {
     expect((await owner.post('/api/hr/employees', newEmp({ user: { username: 'ton', role: 'wh' } }))).body.details.reason).toBe('USERNAME_TAKEN');
     expect((await owner.post('/api/hr/employees', newEmp({ user: { username: 'Ab', role: 'wh' } }))).status).toBe(400);
     expect((await owner.post('/api/hr/employees', newEmp({ user: { username: 'x', role: 'owner' } }))).status).toBe(400);
+  });
+
+  it('salary account: bank from the list, number and account name; an unknown bank code is refused; changes are audited without the number', async () => {
+    const e = (await owner.get(`/api/hr/employees/${id}`)).body;
+    expect(e).toMatchObject({ bank: 'KBANK', bankAccount: '111-1-11111-1', bankAccountName: 'นายสมชาย ใจดี' });
+    expect((await owner.patch(`/api/hr/employees/${id}`, { bank: 'XYZ' })).status).toBe(400);
+    const u = await owner.patch(`/api/hr/employees/${id}`, { bank: 'SCB', bankAccount: '404-9-99999-9' });
+    expect(u.body).toMatchObject({ bank: 'SCB', bankAccount: '404-9-99999-9' });
+    const a = await env.pool.query(`select detail from audit_log where tenant_id = $1 and ref = 'EMP006' order by chain_seq desc limit 1`, [env.seed.tenantId]);
+    expect(a.rows[0].detail).toMatch(/ธนาคาร/);
+    expect(a.rows[0].detail).not.toMatch(/404-9/);
+    await owner.patch(`/api/hr/employees/${id}`, { bank: 'KBANK', bankAccount: '111-1-11111-1' });
   });
 
   it('rejects a national id with a wrong check digit', async () => {
@@ -171,7 +183,7 @@ describe('payroll (REQ-M17-02/03/06)', () => {
     const all = await owner.get('/api/hr/payroll/2026-10/slips');
     expect(all.body.items.length).toBe(5); // EMP001-004 + EMP006 (rehired, started 1 Oct)
     const s = all.body.items.find((x: { employee: { code: string } }) => x.employee.code === 'EMP001');
-    expect(s).toMatchObject({ periodLabel: 'ต.ค. 2569', payDate: '2026-10-31', employee: { bankAccount: 'กสิกร 012-3-11111-1' } });
+    expect(s).toMatchObject({ periodLabel: 'ต.ค. 2569', payDate: '2026-10-31', employee: { bankAccount: 'ธนาคารกสิกรไทย 012-3-11111-1 (คุณสุดา ศรีสุข)' } });
     expect(s.netText).toMatch(/บาท/);
     const ded = s.deductions.reduce((n: number, x: { amount: string }) => n + Number(x.amount), 0);
     expect((Number(s.gross) - ded).toFixed(2)).toBe(s.net);

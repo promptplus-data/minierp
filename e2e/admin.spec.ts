@@ -68,7 +68,13 @@ test.describe.serial('HR, payroll and leave (M17)', () => {
     await page.getByTestId('emp-name').fill(`พนักงานทดสอบ ${uniq}`);
     await page.getByTestId('emp-position').fill('พนักงานขาย');
     await page.getByTestId('emp-salary').fill('13000');
+    await page.getByTestId('emp-bank-account').fill('4241171840');
     await page.getByTestId('emp-username').fill(user);
+    await page.getByTestId('emp-save').click();
+    await expect(page.getByTestId('emp-bank')).toHaveAttribute('aria-invalid', 'true');
+    await page.getByTestId('emp-bank').selectOption('KBANK');
+    await page.getByTestId('emp-bank-name').fill(`พนักงานทดสอบ ${uniq}`);
+    await both(page, 'hr-employee-bank');
     await page.getByTestId('emp-save').click();
     await expect(page.getByTestId('temp-password')).toHaveText(/\S{8,}/);
     await page.getByRole('button', { name: 'จดแล้ว ปิด' }).click();
@@ -76,6 +82,10 @@ test.describe.serial('HR, payroll and leave (M17)', () => {
     const row = page.getByTestId('emp-table').locator('tbody tr', { hasText: user });
     await expect(row).toBeVisible();
     await expect(row.getByRole('button', { name: 'แก้ไข' })).toBeVisible();
+    await row.getByRole('button', { name: 'แก้ไข' }).click();
+    await expect(page.getByTestId('emp-bank')).toHaveValue('KBANK');
+    await expect(page.getByTestId('emp-bank-account')).toHaveValue('4241171840');
+    await page.getByRole('button', { name: 'ยกเลิก' }).click();
     await expect(page.getByRole('button', { name: 'ลบ', exact: true })).toHaveCount(0);
     await row.getByRole('button', { name: 'ลาออก' }).click();
     await page.getByTestId('resign-ok').click();

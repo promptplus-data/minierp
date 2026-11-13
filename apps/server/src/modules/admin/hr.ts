@@ -11,6 +11,7 @@ import type {
   HrEmployee, HrEmployeeCreate, HrEmployeeQuery, HrEmployeeUpdate, HrLeave, HrLeaveCreate, HrLeaveQuery, HrPayrollLine, HrPayrollLineUpdate,
   HrPayrollRun, HrPayslip, HrSettingsUpdate, HrLeaveEnt,
 } from '@erp/contracts';
+import { bankLine } from '@erp/contracts';
 import {
   bahtText, d, deductibleDays, defaultEntitlement, leaveBalances, leaveDays, money, overEntitlement, payRow, periodRange, periodTH,
   sum, thaiIdValid, maskThaiId, type LeaveKind, type LeaveRecord, type PayrollConfig,
@@ -53,11 +54,11 @@ export async function updateHrSettings(tx: Tx, ctx: Ctx, body: In<typeof HrSetti
 // ---------------------------------------------------------------- employees
 interface EmpRow {
   id: string; code: string; name: string; position: string; emp_type: HrEmployee['type']; start_date: string; salary: string; daily_rate: string;
-  commission_pct: string; sso: boolean; bank_account: string; national_id: string; phone: string; leave_ent: HrLeaveEnt; status: 'active' | 'resigned';
+  commission_pct: string; sso: boolean; bank: string; bank_account: string; bank_account_name: string; national_id: string; phone: string; leave_ent: HrLeaveEnt; status: 'active' | 'resigned';
   resigned_at: string | null; resign_reason: string | null; user_id: string | null; u_username: string | null; u_role: HrEmployee['user'] extends infer U ? U extends { role: infer R } ? R : never : never; u_status: string | null;
 }
 const EMP_SELECT = `select e.id, e.code, e.name, e.position, e.emp_type, e.start_date, e.salary::text, e.daily_rate::text, e.commission_pct::text, e.sso,
-  e.bank_account, e.national_id, e.phone, e.leave_ent, e.status, e.resigned_at, e.resign_reason, e.user_id,
+  e.bank, e.bank_account, e.bank_account_name, e.national_id, e.phone, e.leave_ent, e.status, e.resigned_at, e.resign_reason, e.user_id,
   u.username u_username, u.role u_role, u.status u_status
   from employees e left join users u on u.id = e.user_id`;
 
@@ -66,7 +67,7 @@ function toEmployee(r: EmpRow, ctx: Ctx): HrEmployee {
   return {
     id: r.id, code: r.code, name: r.name, position: r.position, type: r.emp_type, startDate: r.start_date,
     salary: pay ? money(r.salary) : null, dailyRate: pay ? money(r.daily_rate) : null, commissionPct: pay ? d(r.commission_pct).toString() : null,
-    sso: r.sso, bankAccount: r.bank_account, nationalId: pay ? r.national_id : maskThaiId(r.national_id), phone: r.phone, leaveEnt: r.leave_ent,
+    sso: r.sso, bank: r.bank, bankAccount: r.bank_account, bankAccountName: r.bank_account_name, nationalId: pay ? r.national_id : maskThaiId(r.national_id), phone: r.phone, leaveEnt: r.leave_ent,
     status: r.status, resignedAt: r.resigned_at, resignReason: r.resign_reason,
     user: r.user_id ? { id: r.user_id, username: r.u_username!, role: r.u_role, status: r.u_status! } : null,
   };
@@ -149,10 +150,10 @@ export async function createEmployee(tx: Tx, ctx: Ctx, body: In<typeof HrEmploye
     userId = u.rows[0]!.id;
   }
   const r = await tx.query<{ id: string }>(
-    `insert into employees (tenant_id, code, name, position, emp_type, start_date, salary, daily_rate, commission_pct, sso, bank_account, national_id, phone, leave_ent, user_id, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning id`,
+    `insert into employees (tenant_id, code, name, position, emp_type, start_date, salary, daily_rate, commission_pct, sso, bank_account, national_id, phone, leave_ent, user_id, created_by, bank, bank_account_name)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning id`,
     [ctx.tenantId, code, body.name, body.position, body.type, body.startDate, pay ? body.salary : '0', pay ? body.dailyRate : '0', pay ? body.commissionPct : '0',
-      body.sso, body.bankAccount, body.nationalId.replace(/[\s-]/g, ''), body.phone, JSON.stringify(ent), userId, ctx.userId],
+      body.sso, body.bankAccount, body.nationalId.replace(/[\s-]/g, ''), body.phone, JSON.stringify(ent), userId, ctx.userId, body.bank, body.bankAccountName],
   );
   const e = await loadEmp(tx, r.rows[0]!.id);
   await writeAudit(tx, ctx, [{
@@ -187,7 +188,9 @@ export async function updateEmployee(tx: Tx, ctx: Ctx, id: string, body: In<type
   if (body.dailyRate !== undefined && !d(body.dailyRate).eq(e.daily_rate)) col('daily_rate', body.dailyRate, 'แก้ค่าจ้างรายวัน', e.daily_rate, true);
   if (body.commissionPct !== undefined && !d(body.commissionPct).eq(e.commission_pct)) col('commission_pct', body.commissionPct, 'แก้คอมมิชชัน', e.commission_pct, true);
   col('sso', body.sso, 'ประกันสังคม', e.sso);
-  col('bank_account', body.bankAccount, 'บัญชีธนาคาร', e.bank_account, true);
+  col('bank', body.bank, 'ธนาคาร', e.bank, true);
+  col('bank_account', body.bankAccount, 'เลขที่บัญชี', e.bank_account, true);
+  col('bank_account_name', body.bankAccountName, 'ชื่อบัญชี', e.bank_account_name, true);
   if (body.nationalId !== undefined) col('national_id', body.nationalId.replace(/[\s-]/g, ''), 'แก้เลขบัตรประชาชน', e.national_id, true);
   col('phone', body.phone, 'โทร', e.phone);
   if (body.leaveEnt && JSON.stringify(body.leaveEnt) !== JSON.stringify(e.leave_ent)) {
@@ -466,13 +469,13 @@ export async function listRuns(tx: Tx, ctx: Ctx, q: { limit: number; cursor?: st
   }));
 }
 
-interface PayEmp { id: string; code: string; name: string; position: string; emp_type: HrEmployee['type']; bank_account: string; salary: string; daily_rate: string; commission_pct: string; sso: boolean; user_id: string | null }
+interface PayEmp { id: string; code: string; name: string; position: string; emp_type: HrEmployee['type']; bank: string; bank_account: string; bank_account_name: string; salary: string; daily_rate: string; commission_pct: string; sso: boolean; user_id: string | null }
 
 /** Line values that come from the employee record, the leave register and the sales docs (refreshed by recalc). */
 async function derived(tx: Tx, e: PayEmp, period: string) {
   const { from, to } = periodRange(period);
   return {
-    emp_code: e.code, emp_name: e.name, emp_position: e.position, emp_type: e.emp_type, bank_account: e.bank_account,
+    emp_code: e.code, emp_name: e.name, emp_position: e.position, emp_type: e.emp_type, bank_account: bankLine({ bank: e.bank, bankAccount: e.bank_account, bankAccountName: e.bank_account_name }),
     pay: (isDaily(e.emp_type) ? 'daily' : 'monthly') as 'daily' | 'monthly', rate: isDaily(e.emp_type) ? e.daily_rate : e.salary,
     commission_pct: e.commission_pct, sso_enrolled: e.sso,
     unpaid_days: await unpaidDays(tx, e.id, from, to), commission_base: await commissionBase(tx, e.user_id, from, to),
@@ -505,7 +508,7 @@ async function writeLine(tx: Tx, ctx: Ctx, runId: string, cfg: PayrollConfig, e:
   }
 }
 
-const PAY_EMP = `select id, code, name, position, emp_type, bank_account, salary::text, daily_rate::text, commission_pct::text, sso, user_id from employees`;
+const PAY_EMP = `select id, code, name, position, emp_type, bank, bank_account, bank_account_name, salary::text, daily_rate::text, commission_pct::text, sso, user_id from employees`;
 
 export async function createRun(tx: Tx, ctx: Ctx, period: string, note = ''): Promise<HrPayrollRun> {
   requirePerm(ctx, 'hr.salary');
