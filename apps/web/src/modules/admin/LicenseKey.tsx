@@ -10,6 +10,7 @@ import { useAuth } from '../../auth';
 import { th, thTime, useToast } from '../../ui';
 import { LICENSE_STATE, admErr } from './common';
 import { useLicense } from './Gate';
+import { IS_CLOUD } from '../../cloud';
 
 export default function LicenseKey() {
   const qc = useQueryClient();
@@ -48,7 +49,9 @@ export default function LicenseKey() {
             </>}
           </div>
         )}
-        <p className="small muted">คีย์ผูกกับชื่อร้านและเลขผู้เสียภาษี เซ็นดิจิทัลโดย SCG ตรวจได้ในเครื่องโดยไม่ต้องต่อเน็ต · ระบบเตือนก่อนหมดอายุ 30 วัน · หมดอายุแล้วดูข้อมูล พิมพ์ และส่งออกได้ แต่ออกเอกสารใหม่ไม่ได้</p>
+        <p className="small muted">{IS_CLOUD
+          ? 'คีย์ผูกกับชื่อร้านและเลขผู้เสียภาษี SCG ออกให้ที่หน้าผู้ดูแล · แบบตลอดชีพใช้ได้จนกว่า SCG ยกเลิก · ไม่มีคีย์ หมดอายุ หรือถูกยกเลิก ร้านดูข้อมูล พิมพ์ และส่งออกได้ แต่บันทึกรายการใหม่ไม่ได้'
+          : 'คีย์ผูกกับชื่อร้านและเลขผู้เสียภาษี เซ็นดิจิทัลโดย SCG ตรวจได้ในเครื่องโดยไม่ต้องต่อเน็ต · ระบบเตือนก่อนหมดอายุ 30 วัน · หมดอายุแล้วดูข้อมูล พิมพ์ และส่งออกได้ แต่ออกเอกสารใหม่ไม่ได้'}</p>
       </div>
       <div>
         <h4 className="sec">ใส่คีย์ใหม่ / ต่ออายุ</h4>

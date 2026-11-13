@@ -309,6 +309,13 @@ test.describe('SCG Admin console (M14)', () => {
     await both(page, 'scg-licenses');
   });
 
+  test('cloud shops enter their license key on the terms page', async ({ page }) => {
+    await login(page, 'charoen');
+    await page.goto('/terms');
+    await expect(page.locator('#license').getByTestId('license-key')).toBeVisible();
+    await both(page, 'terms-license', () => page.locator('#license').scrollIntoViewIfNeeded());
+  });
+
   test('menu switches per shop: SCG turns POS off, the shop loses the menu and the route, then all back on', async ({ page, browser }) => {
     await page.goto('/scg');
     await page.getByLabel('ชื่อผู้ใช้').fill('scg.admin');
