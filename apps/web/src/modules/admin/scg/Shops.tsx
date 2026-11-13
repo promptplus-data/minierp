@@ -6,7 +6,8 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { AdmImportResult, AdmSupportView, AdmTenant } from '@erp/contracts';
+import { AdmImportResult, AdmSupportView, AdmTenant, FEATURE_KEYS, type FeatureKey } from '@erp/contracts';
+import { FeaturePicker, featureSummary } from './FeaturePicker';
 import { ROLE_TH } from '../../../auth';
 import { Modal, Pill, SkeletonRows, fmt, th, thTime, useDebounced, useToast } from '../../../ui';
 import { LoadMore } from '../../../ui/lists';
@@ -24,7 +25,7 @@ export default function Shops() {
   const [status, setStatus] = useState<'' | 'active' | 'suspended'>('');
   const dq = useDebounced(q.trim(), 300);
   const list = useAdmLoadMore(['scg', 'tenants'], '/api/adm/tenants', AdmTenant, { q: dq, status: status || undefined });
-  const [modal, setModal] = useState<null | { kind: 'new' } | { kind: 'import' } | { kind: 'status'; t: AdmTenant } | { kind: 'support'; t: AdmTenant }>(null);
+  const [modal, setModal] = useState<null | { kind: 'new' } | { kind: 'import' } | { kind: 'status'; t: AdmTenant } | { kind: 'support'; t: AdmTenant } | { kind: 'features'; t: AdmTenant }>(null);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['scg'] }); };
   const loading = list.isLoading;
   const write = admCan(admin, 'shopsWrite');
@@ -52,12 +53,13 @@ export default function Shops() {
                 <td className="mono small">{t.code}</td>
                 <td>{t.name}<div className="small muted">{t.taxId}{t.vatRegistered ? ' · จด VAT' : ''}{t.customerCode ? ` · ลูกค้า ${t.customerCode}` : ''}</div></td>
                 <td className="small">{t.region || '-'}<div><Link to={`/scg/licenses?q=${encodeURIComponent(t.taxId)}`} data-testid={`shop-license-${t.code}`}>ใบอนุญาต (license)</Link></div></td>
-                <td><span className={`ed ${t.edition}`}>{t.edition === 'cloud' ? 'Cloud' : 'On-premise'}</span></td>
+                <td><span className={`ed ${t.edition}`}>{t.edition === 'cloud' ? 'Cloud' : 'On-premise'}</span><div className="small muted" data-testid={`shop-features-${t.code}`}>{featureSummary(t.features)}</div></td>
                 <td>{t.status === 'active' ? <Pill k="ok">ใช้งาน</Pill> : <span title={t.statusReason ?? ''}><Pill k="bad">ระงับ</Pill></span>}</td>
                 <td className="n">{t.users}</td><td className="n">{t.bills30d}</td><td className="n">{fmt(t.salesMonth)}</td>
                 <td className="small">{t.lastBillAt ? thTime(t.lastBillAt) : '-'}</td>
                 <td>
                   <div className="row">
+                    {write && t.edition === 'cloud' && <button className="btn sm" onClick={() => setModal({ kind: 'features', t })} data-testid={`shop-menus-${t.code}`}>สิทธิ์เมนู</button>}
                     {write && <button className={`btn sm${t.status === 'active' ? ' bad' : ''}`} onClick={() => setModal({ kind: 'status', t })} data-testid={`shop-status-${t.code}`}>{t.status === 'active' ? 'ระงับ' : 'เปิดกลับ'}</button>}
                     {admCan(admin, 'support') && <button className="btn sm" onClick={() => setModal({ kind: 'support', t })}>ดูแบบ support</button>}
                   </div>
@@ -74,6 +76,7 @@ export default function Shops() {
       {modal?.kind === 'import' && <ImportShop onClose={() => setModal(null)} onDone={refresh} />}
       {modal?.kind === 'status' && <StatusModal t={modal.t} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
       {modal?.kind === 'support' && <SupportModal t={modal.t} onClose={() => setModal(null)} />}
+      {modal?.kind === 'features' && <FeaturesModal t={modal.t} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
     </div>
   );
 }
@@ -133,6 +136,36 @@ function NewShop({ onClose, onDone }: { onClose: () => void; onDone: () => void 
       <p className="small muted" style={{ margin: 0 }}>ระบบสร้างร้าน คลังหน้าร้าน (POS) และเจ้าของร้าน · เจ้าของร้านต้องลงนามสัญญาการใช้งานตอนเข้าระบบครั้งแรกก่อนใช้เมนูอื่น</p>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy} onClick={() => void save()} data-testid="ns-save">เปิดร้าน</button></div>
+    </Modal>
+  );
+}
+
+/** Cloud shop menus apply at once (the shop's next page load); on-prem shops get theirs inside the license key. */
+function FeaturesModal({ t, onClose, onDone }: { t: AdmTenant; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [value, setValue] = useState<FeatureKey[]>(t.features ?? [...FEATURE_KEYS]);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      await admApi('POST', `/api/adm/tenants/${t.id}/features`, { body: { features: value.length === FEATURE_KEYS.length ? null : value }, schema: AdmTenant });
+      toast(`บันทึกสิทธิ์เมนูของ ${t.name} แล้ว (${featureSummary(value)})`);
+      onDone();
+    } catch (e) {
+      setErr(admErr(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={onClose} wide label="สิทธิ์เมนูของร้าน">
+      <h3>สิทธิ์เมนู · {t.name}</h3>
+      <div className="note small">มีผลทันทีกับร้านนี้ เมนูที่ปิดจะหายจากหน้าร้านและเรียกใช้ไม่ได้ บันทึกใน log ของร้านและของ SCG</div>
+      <FeaturePicker value={value} onChange={setValue} />
+      {err && <div className="err" role="alert">{err}</div>}
+      <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy} onClick={() => void save()} data-testid="features-save">บันทึก</button></div>
     </Modal>
   );
 }

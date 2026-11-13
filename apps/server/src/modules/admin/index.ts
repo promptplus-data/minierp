@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import {
-  AdmAuditEntry, AdmCentralPriceReq, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
+  AdmAuditEntry, AdmCentralPriceReq, AdmFeaturesSet, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
   AdmTenantImport, AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
   HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate, HrPayrollUpdate, HrPayslipPeriodQuery,
   HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall, ShareRange, ShopExportReq, SupportGrantCreate, TermsAccept, pageQuery,
@@ -21,7 +21,7 @@ import * as adm from './adm';
 import { getBackupConfig, listBackupFiles, listBackupRuns, oauthPoll, oauthStart, requireOwner, restoreBackup, restoreFiles, runBackup, saveBackupConfig, startBackupScheduler } from './backup';
 import { deriveKey, sealBox } from './box';
 import * as hr from './hr';
-import { installLicense, licenseGuard, licenseStatus } from './license';
+import { featureGuard, installLicense, licenseGuard, licenseStatus, shopFeatures } from './license';
 import { bootstrapAdmin, createAdmin, listAdmins, updateAdmin, admLogin, makeAdmAuthed, toAdmUser } from './platform';
 import { buildSharePayload, sendShare, shareConfig, shareHistory } from './share';
 import { createGrant, listGrants, revokeGrant } from './support';
@@ -36,7 +36,7 @@ const RO_OK = { config: { readOnlyOk: true } };
 
 export const adminModule: ErpModule = async (app, { deps, authed }) => {
   deps.tenantGuards.push(shopStatusGuard);
-  if (deps.edition === 'onprem') deps.tenantGuards.push(licenseGuard(deps));
+  deps.tenantGuards.push(licenseGuard(deps), featureGuard(deps));
 
   // ================================================================ M17 HR (both editions)
   app.get('/api/hr/me', authed(async (tx, ctx) => ({ employee: await hr.myEmployee(tx, ctx), canManage: can(ctx, 'hr.manage') === 1 })));
@@ -89,14 +89,17 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/terms', authed(async (tx, ctx) => termsStatus(tx, ctx)));
   app.post('/api/terms/accept', RO_OK, authed(async (tx, ctx, req) => acceptTerms(tx, ctx, TermsAccept.parse(req.body), req.ip ?? null)));
 
-  // ================================================================ on-prem: license, export, backup, sales summary
+  // ================================================================ license key and menus (both editions)
+  app.get('/api/license', RO_OK, authed(async (tx) => licenseStatus(tx, deps.edition, deps.today())));
+  app.post('/api/license', RO_OK, authed(async (tx, ctx, req) => {
+    requireOwner(ctx, 'enter the license key');
+    await installLicense(tx, ctx, deps.edition, LicenseInstall.parse(req.body).key);
+    return licenseStatus(tx, deps.edition, deps.today());
+  }));
+  app.get('/api/entitlements', authed(async (tx, ctx) => ({ features: [...await shopFeatures(tx, deps.edition, ctx.tenantId)] })));
+
+  // ================================================================ on-prem: export, backup, sales summary
   if (deps.edition === 'onprem') {
-    app.get('/api/license', authed(async (tx) => licenseStatus(tx, deps.today())));
-    app.post('/api/license', RO_OK, authed(async (tx, ctx, req) => {
-      requireOwner(ctx, 'enter the license key');
-      await installLicense(tx, ctx, LicenseInstall.parse(req.body).key);
-      return licenseStatus(tx, deps.today());
-    }));
 
     // REQ-M19-07: whole shop as one passphrase-encrypted file (owner only: it contains every record of the shop).
     app.post('/api/system/export', RO_OK, authed(async (tx, ctx, req, reply) => {
@@ -214,6 +217,7 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
         return adm.createTenant(deps.pool, a, AdmTenantCreate.parse(req.body));
       }));
       app.post('/api/adm/tenants/:id/suspend', admAuthed(async (_tx, a, req) => adm.setTenantStatus(deps.pool, a, id(req), 'suspended', AdmReason.parse(req.body).reason)));
+      app.post('/api/adm/tenants/:id/features', admAuthed(async (_tx, a, req) => adm.setTenantFeatures(deps.pool, a, id(req), AdmFeaturesSet.parse(req.body).features)));
       app.post('/api/adm/tenants/:id/resume', admAuthed(async (_tx, a, req) => adm.setTenantStatus(deps.pool, a, id(req), 'active', AdmReason.parse(req.body).reason)));
       app.post('/api/adm/tenants/import', { bodyLimit: 512 * 1024 * 1024 }, admAuthed(async (_tx, a, req, reply) => {
         reply.status(201);

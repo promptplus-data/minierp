@@ -1,7 +1,8 @@
 /**
  * WebModule.Wrap of the admin module, around every signed-in screen:
  * - BR-15: a shop flagged by SCG Admin shows only the terms until the owner signs (the server refuses the rest anyway);
- * - REQ-M19-11 (on-prem): license banner 30 days before expiry, and the read-only notice after expiry.
+ * - REQ-M19-11 (both editions): license banner 30 days before expiry, and the read-only notice after expiry or
+ *   while a required key is missing (cloud shops need a key once the server issues them).
  */
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,7 +17,7 @@ import { TermsSign, useTerms } from './Terms';
 export const useLicense = () => {
   const { user } = useAuth();
   return useQuery({
-    queryKey: ['license', user?.id], enabled: !IS_CLOUD && !!user, staleTime: 5 * 60_000,
+    queryKey: ['license', user?.id], enabled: !!user, staleTime: 5 * 60_000,
     queryFn: () => api('GET', '/api/license', { schema: LicenseStatus }),
   });
 };
@@ -27,7 +28,7 @@ function LicenseBanner() {
   const s = lic.data;
   if (!s || (s.state !== 'expiring' && s.state !== 'expired' && !(s.state === 'none' && s.required))) return null;
   const owner = can('sys.settings') === 1;
-  const link = owner ? <Link className="btn sm" to="/system">ใส่ license key</Link> : <span className="small">แจ้งเจ้าของร้าน</span>;
+  const link = owner ? <Link className="btn sm" to={IS_CLOUD ? '/terms' : '/system'}>ใส่ license key</Link> : <span className="small">แจ้งเจ้าของร้าน</span>;
   if (s.state === 'expiring') {
     return (
       <div className="adm-banner" role="status" data-testid="license-banner">
@@ -51,7 +52,7 @@ export default function AdminWrap({ children }: { children: ReactNode }) {
   if (terms.data?.required && !terms.data.accepted) return <TermsSign st={terms.data} gate />;
   return (
     <>
-      {!IS_CLOUD && <LicenseBanner />}
+      <LicenseBanner />
       {children}
     </>
   );

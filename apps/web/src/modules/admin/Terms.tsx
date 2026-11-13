@@ -11,6 +11,7 @@ import { SupportGrant, TermsStatus, type TermsAcceptance } from '@erp/contracts'
 import { api } from '../../api';
 import { useAuth } from '../../auth';
 import { IS_CLOUD } from '../../cloud';
+import LicenseKey from './LicenseKey';
 import { useMeta } from '../../data';
 import { Pill, thTime, useToast } from '../../ui';
 import { admErr, usePrintA4 } from './common';
@@ -103,6 +104,12 @@ export default function Terms() {
         </div>
         <p className="small muted">เมื่อ SCG เผยแพร่สัญญาเวอร์ชันใหม่ ผู้มีอำนาจต้องลงนามอีกครั้งก่อนใช้งานต่อ · ทุกเวอร์ชันเก็บไว้ในประวัติ</p>
       </div>
+      {IS_CLOUD && (
+        <div className="card" id="license">
+          <h2>License key</h2>
+          <LicenseKey />
+        </div>
+      )}
       {IS_CLOUD && <SupportAccess />}
     </>
   );

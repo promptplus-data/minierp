@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { ArDueSoon, ReportDashboard } from '@erp/contracts';
 import { d } from '@erp/core';
 import { api, errText } from '../../api';
+import { useMenuOn } from '../../data';
 import { useAuth } from '../../auth';
 import { fmt, fq, th } from '../../ui';
 import { DocLink, RouteLink } from '../../doclink';
@@ -18,8 +19,10 @@ const useDash = () => useQuery({ queryKey: ['rp', 'dashboard'], queryFn: () => a
 /** Receivables due in 7 days and overdue: the sales module's own endpoint (M10). */
 function ArDueCard() {
   const { can } = useAuth();
-  const q = useQuery({ queryKey: ['ar', 'due-soon'], queryFn: () => api('GET', '/api/ar/due-soon', { query: { days: 7 }, schema: ArDueSoon }), enabled: !!can('fin.ar'), staleTime: 30_000 });
-  if (!can('fin.ar') || !q.data) return null;
+  const menuOn = useMenuOn();
+  const on = !!can('fin.ar') && menuOn('/ar');
+  const q = useQuery({ queryKey: ['ar', 'due-soon'], queryFn: () => api('GET', '/api/ar/due-soon', { query: { days: 7 }, schema: ArDueSoon }), enabled: on, staleTime: 30_000 });
+  if (!on || !q.data) return null;
   const { dueSoon, overdue } = q.data;
   return (
     <Link className="card kpi" to="/ar?tab=inv" data-testid="ar-due-card" style={{ '--k': 'var(--c-sale)' } as CSSProperties}>
@@ -58,6 +61,7 @@ function Chart({ rows }: { rows: { date: string; total: string }[] }) {
 export default function Home() {
   const { user, can } = useAuth();
   const q = useDash();
+  const menuOn = useMenuOn();
   const dash = q.data;
   const k = (c: string) => ({ '--k': `var(--c-${c})` }) as CSSProperties;
   if (q.isError) return <ErrorBanner error={q.error} onRetry={() => void q.refetch()} retrying={q.isFetching} />;
@@ -68,9 +72,9 @@ export default function Home() {
       <GrAlertBanner />
       <div className="muted small" style={{ marginBottom: 8 }}>สวัสดี {user?.name} · วันนี้ {th(dash.today)}</div>
       <div className="hm-quick">
-        {!!can('pos.sell') && <Link className="btn pri" to="/pos">เปิดหน้าขาย</Link>}
-        {!!can('inv.receive') && <Link className="btn" to="/purchasing">รับของ</Link>}
-        {!!can('rep.view') && <Link className="btn" to="/reports">รายงาน</Link>}
+        {!!can('pos.sell') && menuOn('/pos') && <Link className="btn pri" to="/pos">เปิดหน้าขาย</Link>}
+        {!!can('inv.receive') && menuOn('/purchasing') && <Link className="btn" to="/purchasing">รับของ</Link>}
+        {!!can('rep.view') && menuOn('/reports') && <Link className="btn" to="/reports">รายงาน</Link>}
       </div>
       <div className="hm-grid" data-testid="home-cards">
         {dash.salesToday && (
@@ -122,7 +126,7 @@ export default function Home() {
                 </>
               ) : <tr><td colSpan={2} className="small muted">ต้นทุนและกำไรแสดงเฉพาะบทบาทที่มีสิทธิ์ดูต้นทุน</td></tr>}
             </tbody></table></div>
-            {!!can('rep.view') && <div style={{ marginTop: 8 }}><Link className="btn sm" to="/reports">ดูรายงานทั้งหมด</Link></div>}
+            {!!can('rep.view') && menuOn('/reports') && <div style={{ marginTop: 8 }}><Link className="btn sm" to="/reports">ดูรายงานทั้งหมด</Link></div>}
           </div>
         )}
         {dash.lowStock && dash.lowStock.items.length > 0 && (

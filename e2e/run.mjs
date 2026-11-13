@@ -35,6 +35,8 @@ if (!env.LICENSE_SIGNING_KEY || !env.ERP_LICENSE_TEST_PUBKEY) {
   env.LICENSE_SIGNING_KEY = k.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   env.ERP_LICENSE_TEST_PUBKEY = k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
 }
+// With a signing key the cloud server requires shop keys; the e2e shops run without one (server tests cover it).
+env.LICENSE_REQUIRED ??= '0';
 
 function run(cmd, args, opts = {}) {
   console.log(`\n$ ${cmd} ${args.join(' ')}`);

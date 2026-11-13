@@ -5,10 +5,10 @@
 import { Suspense, type ReactNode } from 'react';
 import { Navigate, type RouteObject } from 'react-router-dom';
 import type { PermKey, PermValue } from '@erp/core';
-import type { Capabilities } from '@erp/contracts';
+import { featureForNavPath, type Capabilities, type FeatureKey } from '@erp/contracts';
 import { useAuth } from '../auth';
 import { IS_CLOUD } from '../cloud';
-import { useMeta } from '../data';
+import { useFeatures, useMeta } from '../data';
 import { adminModule } from './admin';
 import { coreModule } from './core';
 import { purchasingModule } from './purchasing';
@@ -24,7 +24,9 @@ export const NAV: readonly NavItem[] = MODULES.flatMap((m) => m.nav).sort(
   (a, b) => sectionOrder.indexOf(a.section) - sectionOrder.indexOf(b.section) || (a.order ?? 100) - (b.order ?? 100),
 );
 
-export function navVisible(item: NavItem, can: (k: PermKey) => PermValue, caps: Partial<Capabilities>): boolean {
+export function navVisible(item: NavItem, can: (k: PermKey) => PermValue, caps: Partial<Capabilities>, features?: ReadonlySet<FeatureKey> | null): boolean {
+  const feature = featureForNavPath(item.path);
+  if (feature && features && !features.has(feature)) return false;
   if (item.edition && item.edition !== (IS_CLOUD ? 'cloud' : 'onprem')) return false;
   if (item.capability && !caps[item.capability]) return false;
   if (item.perm !== undefined) {
@@ -38,8 +40,9 @@ export function navVisible(item: NavItem, can: (k: PermKey) => PermValue, caps: 
 export function useVisibleNav(): NavItem[] {
   const { can } = useAuth();
   const meta = useMeta();
+  const features = useFeatures();
   const caps = meta.data?.capabilities ?? {};
-  return NAV.filter((v) => navVisible(v, can, caps));
+  return NAV.filter((v) => navVisible(v, can, caps, features));
 }
 
 /** The nav item owning a path: the one with the longest path prefix (segment-aligned). */

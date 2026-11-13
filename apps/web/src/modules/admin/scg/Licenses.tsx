@@ -6,7 +6,8 @@ import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { AdmLicense, AdmShare, page } from '@erp/contracts';
+import { AdmLicense, AdmShare, FEATURE_KEYS, page, type FeatureKey } from '@erp/contracts';
+import { FeaturePicker, featureSummary } from './FeaturePicker';
 import { addDays } from '@erp/core';
 import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useDebounced, useToast } from '../../../ui';
 import { LoadMore } from '../../../ui/lists';
@@ -49,7 +50,7 @@ export default function Licenses() {
                   <tr key={l.licenseId} className={l.revokedAt ? 'off' : ''}>
                     <td className="mono small">{l.licenseId}</td>
                     <td><Link to={`/scg/shops?q=${encodeURIComponent(l.taxId)}`}>{l.shopName}</Link><div className="small muted">{l.taxId}{l.region ? ` · ${l.region}` : ''}</div></td>
-                    <td className="small">{l.type === 'lifetime' ? 'ตลอดชีพ' : 'มีวันหมดอายุ'}</td>
+                    <td className="small">{l.type === 'lifetime' ? 'ตลอดชีพ' : 'มีวันหมดอายุ'}<div className="muted">{l.edition === 'cloud' ? 'Cloud' : `On-premise · ${featureSummary(l.features)}`}</div></td>
                     <td className="small">{l.expiresAt ? th(l.expiresAt) : '-'}</td>
                     <td className="small">{thTime(l.issuedAt)}<div className="muted">{l.issuedBy}</div></td>
                     <td className="small">{l.lastShareAt ? thTime(l.lastShareAt) : '-'}</td>
@@ -78,7 +79,8 @@ const fetchLicensedShops = (q: string, cursor: string | undefined, limit: number
 
 function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
   const [from, setFrom] = useState<Lic | null>(null);
-  const [f, setF] = useState({ shopName: '', taxId: '', type: 'expiring' as 'expiring' | 'lifetime', expiresAt: addDays(todayYmd(), 365), region: '', note: '' });
+  const [f, setF] = useState({ shopName: '', taxId: '', edition: 'onprem' as 'onprem' | 'cloud', type: 'expiring' as 'expiring' | 'lifetime', expiresAt: addDays(todayYmd(), 365), region: '', note: '' });
+  const [features, setFeatures] = useState<FeatureKey[]>([...FEATURE_KEYS]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const go = async () => {
@@ -86,7 +88,9 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
     setBusy(true);
     setErr('');
     try {
-      const l = await admApi('POST', '/api/adm/licenses', { body: { ...f, shopName: f.shopName.trim(), expiresAt: f.type === 'lifetime' ? null : f.expiresAt }, schema: AdmLicense });
+      const body = { ...f, shopName: f.shopName.trim(), expiresAt: f.type === 'lifetime' ? null : f.expiresAt,
+        features: f.edition === 'onprem' && features.length < FEATURE_KEYS.length ? features : null };
+      const l = await admApi('POST', '/api/adm/licenses', { body, schema: AdmLicense });
       setF({ ...f, shopName: '', taxId: '', note: '' });
       setFrom(null);
       onIssued(l);
@@ -98,13 +102,23 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
   };
   return (
     <div className="card">
-      <h2>ออก license key ให้ร้าน On-premise</h2>
+      <h2>ออก license key</h2>
       <div className="fgrid">
         <label className="f" style={{ gridColumn: '1/-1' }}>ต่ออายุให้ร้านเดิม (ไม่บังคับ)
           <SearchSelect<Lic> value={from?.licenseId ?? null} selected={from} fetchPage={fetchLicensedShops} queryKey={['scg', 'pick-licensed']}
             getId={(l) => l.licenseId} getLabel={(l) => l.shopName} getSub={(l) => `${l.taxId}${l.region ? ` · ${l.region}` : ''} · ${l.licenseId}${l.expiresAt ? ` · หมดอายุ ${th(l.expiresAt)}` : ' · ตลอดชีพ'}`}
             emptyLabel="— ร้านใหม่ (กรอกเอง) —" placeholder="ค้นชื่อร้าน / เลขผู้เสียภาษี / เลขที่ license" testId="lic-from" ariaLabel="ต่ออายุให้ร้านเดิม"
-            onChange={(_, l) => { setFrom(l); if (l) setF((x) => ({ ...x, shopName: l.shopName, taxId: l.taxId, region: l.region ?? '' })); }} />
+            onChange={(_, l) => {
+              setFrom(l);
+              if (!l) return;
+              setF((x) => ({ ...x, shopName: l.shopName, taxId: l.taxId, region: l.region ?? '', edition: l.edition === 'cloud' ? 'cloud' : 'onprem' }));
+              setFeatures(l.features ?? [...FEATURE_KEYS]);
+            }} />
+        </label>
+        <label className="f">รุ่นของร้าน
+          <select value={f.edition} onChange={(e) => setF({ ...f, edition: e.target.value as typeof f.edition })} data-testid="lic-edition">
+            <option value="onprem">On-premise (ติดตั้งในร้าน)</option><option value="cloud">Cloud</option>
+          </select>
         </label>
         <label className="f">ชื่อร้าน (ตรงกับในโปรแกรมของร้าน) *<input type="text" name="shopName" value={f.shopName} onChange={(e) => setF({ ...f, shopName: e.target.value })} data-testid="lic-shop" /></label>
         <label className="f">เลขผู้เสียภาษี *<input type="text" inputMode="numeric" maxLength={13} name="taxId" value={f.taxId} onChange={(e) => setF({ ...f, taxId: e.target.value.replace(/\D/g, '') })} data-testid="lic-tax" /></label>
@@ -117,9 +131,15 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
         <label className="f">ภาค / เขตขาย<select value={f.region} onChange={(e) => setF({ ...f, region: e.target.value })}>{REGIONS.map((r) => <option key={r} value={r}>{r || 'ไม่ระบุ'}</option>)}</select></label>
         <label className="f">หมายเหตุ<input type="text" value={f.note} placeholder="เช่น เลขที่ใบสั่งซื้อ" onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
       </div>
+      {f.edition === 'onprem' ? (
+        <>
+          <h4 className="sec" style={{ marginTop: 12 }}>เมนูที่เปิดให้ร้านนี้ (ฝังอยู่ในคีย์)</h4>
+          <FeaturePicker value={features} onChange={setFeatures} />
+        </>
+      ) : <div className="note small" style={{ marginTop: 10 }}>ร้าน Cloud ตั้งสิทธิ์เมนูที่หน้า "ร้านค้า" ปุ่ม "สิทธิ์เมนู" มีผลทันทีโดยไม่ต้องออกคีย์ใหม่</div>}
       {err && <div className="err" role="alert" style={{ marginTop: 6 }} data-testid="lic-error">{err}</div>}
       <button className="btn pri" style={{ marginTop: 10 }} disabled={busy} onClick={() => void go()} data-testid="lic-issue">ออกคีย์</button>
-      <p className="small muted">คีย์ผูกชื่อร้าน + เลขผู้เสียภาษี และเซ็นดิจิทัลด้วยกุญแจของ SCG (เก็บเฉพาะบนเซิร์ฟเวอร์ Cloud) · ร้านใส่คีย์ในหน้า "ระบบและข้อมูลร้าน" · เตือนก่อนหมดอายุ 30 วัน</p>
+      <p className="small muted">คีย์ผูกชื่อร้าน + เลขผู้เสียภาษี และเซ็นดิจิทัลด้วยกุญแจของ SCG (เก็บเฉพาะบนเซิร์ฟเวอร์ Cloud) · ร้าน On-premise ใส่คีย์ในหน้า "ระบบและข้อมูลร้าน" ร้าน Cloud ใส่ในหน้า "สัญญาและการยินยอม" · ตลอดชีพใช้ได้จนกว่าจะยกเลิก · เตือนก่อนหมดอายุ 30 วัน · เปลี่ยนเมนูของร้าน On-premise = ออกคีย์ใหม่ให้ร้านใส่แทน</p>
     </div>
   );
 }

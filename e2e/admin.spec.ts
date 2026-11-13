@@ -15,7 +15,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createPrivateKey } from 'node:crypto';
-import { signLicense } from '../apps/server/src/modules/admin/license';
+import { encodeLicenseKey } from '../packages/db/src/licenseKey';
 import { EDITION, login, pickIndex } from './helpers';
 
 const DIR = path.join(__dirname, 'screenshots');
@@ -157,7 +157,7 @@ test.describe('on-prem system screens (M19)', () => {
     await expect(page.getByTestId('license-status')).toBeVisible();
     const shop = await page.evaluate(async () => (await (await fetch('/api/meta')).json()).shop?.name ?? '');
     const raw = process.env.LICENSE_SIGNING_KEY!;
-    const key = signLicense({
+    const key = encodeLicenseKey({
       v: 1, licenseId: `LIC-E2E-${uniq}`, edition: 'onprem', type: 'expiring', shopName: shop, taxId: '0000000000000',
       expiresAt: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10), issuedAt: new Date().toISOString(),
     }, createPrivateKey(raw.includes('BEGIN') ? raw.replace(/\\n/g, '\n') : Buffer.from(raw, 'base64').toString('utf8')));
@@ -297,6 +297,39 @@ test.describe('SCG Admin console (M14)', () => {
       await expect(page.getByRole('dialog')).toHaveCount(0);
     }
     await both(page, 'scg-licenses');
+  });
+
+  test('menu switches per shop: SCG turns POS off, the shop loses the menu and the route, then all back on', async ({ page, browser }) => {
+    await page.goto('/scg');
+    await page.getByLabel('ชื่อผู้ใช้').fill('scg.admin');
+    await page.getByLabel('รหัสผ่าน').fill('1234');
+    await page.getByRole('button', { name: 'เข้าสู่ระบบ' }).click();
+    await expect(page.getByTestId('adm-who')).toBeVisible();
+    await page.goto('/scg/shops');
+    const setMenus = async (change: () => Promise<void>, summary: RegExp) => {
+      await page.getByTestId('shop-menus-charoen').click();
+      await expect(page.getByTestId('feature-picker')).toBeVisible();
+      await change();
+      await page.getByTestId('features-save').click();
+      await expect(page.getByTestId('shop-features-charoen')).toHaveText(summary);
+    };
+    const shop = await browser.newPage();
+    try {
+      await setMenus(async () => {
+        await page.getByTestId('feat-pos').uncheck();
+        await expect(page.getByTestId('feat-group-sale')).not.toBeChecked();
+        await both(page, 'scg-shop-menus');
+      }, /22\/23/);
+      await login(shop, 'charoen');
+      await expect(shop.getByTestId('home-cards')).toBeVisible();
+      await expect(shop.locator('a[href="/products"]').first()).toBeVisible();
+      await expect(shop.locator('a[href="/pos"]')).toHaveCount(0);
+      await shop.goto('/pos');
+      await expect(shop).toHaveURL(/\/$/);
+    } finally {
+      await setMenus(() => page.getByTestId('feat-pkg-all').click(), /ทุกเมนู/);
+      await shop.close();
+    }
   });
 
   test('admin accounts: edit, deactivate (login refused with a red message), reactivate, not for yourself', async ({ page, browser }) => {

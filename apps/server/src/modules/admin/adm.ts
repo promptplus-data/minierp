@@ -12,7 +12,7 @@ import type {
   AdmCentralPriceReq, AdmCentralProduct, AdmCentralUpsert, AdmKpi, AdmLicenseIssue, AdmPushReq, AdmTenant, AdmTenantCreate, AdmTenantImport,
   AdmTenantQuery, LicensePayload, SharePayload,
 } from '@erp/contracts';
-import { SharePayload as SharePayloadSchema } from '@erp/contracts';
+import { FEATURE_KEYS, SharePayload as SharePayloadSchema, enabledFeatures, type FeatureKey } from '@erp/contracts';
 import { d, money, type Role , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { E, isUuid } from '../../lib/errors';
@@ -29,11 +29,13 @@ const shopWho = (a: AdmCtx, label = 'SCG Admin') => ({ userId: null, name: `${la
 interface OverviewRow {
   id: string; code: string; name: string; tax_id: string; vat_registered: boolean; edition: 'cloud' | 'onprem'; region: string; customer_code: string;
   status: 'active' | 'suspended'; status_reason: string | null; created_at: Date; users: number; bills_30d: number; last_bill_at: Date | null; sales_month: string;
+  features: string[] | null;
 }
 const toTenant = (r: OverviewRow): AdmTenant => ({
   id: r.id, code: r.code, name: r.name, taxId: r.tax_id, vatRegistered: r.vat_registered, edition: r.edition, region: r.region, customerCode: r.customer_code,
   status: r.status, statusReason: r.status_reason, createdAt: r.created_at.toISOString(), users: r.users, bills30d: r.bills_30d,
   lastBillAt: r.last_bill_at?.toISOString() ?? null, salesMonth: money(r.sales_month),
+  features: r.features === null ? null : [...enabledFeatures(r.features)],
 });
 
 export async function listTenants(tx: Tx, q: In<typeof AdmTenantQuery>) {
@@ -111,6 +113,22 @@ export async function setTenantStatus(pool: Pool, a: AdmCtx, id: string, status:
   return tenantById(pool, id);
 }
 
+/** Cloud shop menus: SCG switches them live; null = every menu. Recorded in both the shop's and SCG's audit log. */
+export async function setTenantFeatures(pool: Pool, a: AdmCtx, id: string, features: readonly FeatureKey[] | null): Promise<AdmTenant> {
+  requireAdm(a, ADM_CAN.shopsWrite);
+  if (!isUuid(id)) throw E.notFound('Shop not found');
+  const stored = features === null || features.length === FEATURE_KEYS.length ? null : FEATURE_KEYS.filter((k) => features.includes(k));
+  const detail = stored === null ? 'ทุกเมนู' : `${stored.length}/${FEATURE_KEYS.length} เมนู: ${stored.join(', ')}`;
+  const code = await withTenant(pool, id, async (tx) => {
+    const t = (await tx.query<{ code: string }>(`update tenants set adm_features = $2 where id = $1 returning code`, [id, stored])).rows[0];
+    if (!t) throw E.notFound('Shop not found');
+    await writeAudit(tx, { tenantId: id, ...shopWho(a) }, [{ action: 'update', object: 'features', ref: t.code, detail }]);
+    return t.code;
+  });
+  await withPlatform(pool, (tx) => admAudit(tx, a, 'update', 'features', code, detail));
+  return tenantById(pool, id);
+}
+
 /** REQ-M19-07: decrypt the on-prem export and load it into a NEW cloud shop (verified totals, transfer.ts). */
 export async function importTenant(pool: Pool, a: AdmCtx, body: In<typeof AdmTenantImport>) {
   requireAdm(a, ADM_CAN.shopsWrite);
@@ -168,7 +186,7 @@ export async function kpi(tx: Tx, today: string): Promise<AdmKpi> {
   const onprem = (await tx.query<{ tax_id: string; region: string; first: Date; active: boolean }>(
     `select l.tax_id, (array_agg(l.region order by l.issued_at))[1] region, min(l.issued_at) first,
             exists (select 1 from sales_share_inbox i where i.tax_id = l.tax_id and i.received_at >= now() - interval '30 days') active
-       from license_registry l where l.revoked_at is null group by l.tax_id`)).rows;
+       from license_registry l where l.revoked_at is null and l.edition = 'onprem' group by l.tax_id`)).rows;
   const months: string[] = [];
   const [y, m] = today.split('-').map(Number) as [number, number];
   for (let i = 11; i >= 0; i--) {
@@ -349,12 +367,12 @@ export async function listPushes(tx: Tx, q: { limit: number; cursor?: string }) 
 // ---------------------------------------------------------------- licenses (REQ-M19-11 issuing side)
 interface RegRow {
   license_id: string; license_key: string; shop_name: string; tax_id: string; edition: string; key_type: 'expiring' | 'lifetime'; expires_at: string | null;
-  issued_at: Date; region: string; note: string; issued_by: string; revoked_at: Date | null; last_share: Date | null;
+  issued_at: Date; region: string; note: string; issued_by: string; revoked_at: Date | null; last_share: Date | null; features: string[] | null;
 }
 const toReg = (r: RegRow) => ({
   licenseId: r.license_id, key: r.license_key, shopName: r.shop_name, taxId: r.tax_id, edition: r.edition, type: r.key_type, expiresAt: r.expires_at,
   issuedAt: r.issued_at.toISOString(), region: r.region, note: r.note, issuedBy: r.issued_by, revokedAt: r.revoked_at?.toISOString() ?? null,
-  lastShareAt: r.last_share?.toISOString() ?? null,
+  lastShareAt: r.last_share?.toISOString() ?? null, features: r.features === null ? null : [...enabledFeatures(r.features)],
 });
 const REG_SELECT = `select l.*, (select max(i.received_at) from sales_share_inbox i where i.license_id = l.license_id) last_share from license_registry l`;
 
@@ -385,15 +403,25 @@ export async function issueLicense(tx: Tx, a: AdmCtx, today: string, body: In<ty
   if (!key) throw E.validation('LICENSE_SIGNING_KEY is not configured on this server', { reason: 'SIGNING_KEY_MISSING' });
   const now = new Date();
   const payload: LicensePayload = {
-    v: 1, licenseId: newLicenseId(now), shopName: body.shopName.trim(), taxId: body.taxId, edition: 'onprem', type: body.type,
+    v: 1, licenseId: newLicenseId(now), shopName: body.shopName.trim(), taxId: body.taxId, edition: body.edition, type: body.type,
     expiresAt: body.type === 'lifetime' ? null : body.expiresAt, issuedAt: now.toISOString(),
   };
+  // On-prem shops have no live link to SCG, so their menus ride in the key; a full list is the same as none.
+  const features = body.edition === 'onprem' && body.features && body.features.length < FEATURE_KEYS.length
+    ? FEATURE_KEYS.filter((k) => body.features!.includes(k)) : null;
+  if (features) payload.features = features;
   const lk = signLicense(payload, key);
+  try {
+    parseLicenseKey(lk);
+  } catch {
+    throw E.validation('LICENSE_SIGNING_KEY does not match the public key built into the program', { reason: 'SIGNING_KEY_MISMATCH' });
+  }
   await tx.query(
-    `insert into license_registry (license_id, license_key, shop_name, tax_id, edition, key_type, expires_at, issued_at, region, note, issued_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-    [payload.licenseId, lk, payload.shopName, payload.taxId, payload.edition, payload.type, payload.expiresAt, payload.issuedAt, body.region, body.note, a.name]);
-  await admAudit(tx, a, 'issue', 'license', payload.licenseId, `${payload.shopName} · ${payload.taxId} · ${payload.expiresAt ?? 'ตลอดชีพ'}`);
+    `insert into license_registry (license_id, license_key, shop_name, tax_id, edition, key_type, expires_at, issued_at, region, note, issued_by, features)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    [payload.licenseId, lk, payload.shopName, payload.taxId, payload.edition, payload.type, payload.expiresAt, payload.issuedAt, body.region, body.note, a.name, features]);
+  await admAudit(tx, a, 'issue', 'license', payload.licenseId,
+    `${payload.edition} · ${payload.shopName} · ${payload.taxId} · ${payload.expiresAt ?? 'ตลอดชีพ'}${features ? ` · ${features.length} เมนู` : ''}`);
   return toReg((await tx.query<RegRow>(`${REG_SELECT} where l.license_id = $1`, [payload.licenseId])).rows[0]!);
 }
 
@@ -411,6 +439,7 @@ export async function revokeLicense(tx: Tx, a: AdmCtx, id: string, reason: strin
 export async function receiveShare(pool: Pool, body: { key?: unknown; payload?: unknown }): Promise<{ receiptId: string }> {
   if (typeof body.key !== 'string') throw E.validation('License key required', { reason: 'LICENSE_INVALID' });
   const lic = parseLicenseKey(body.key);
+  if (lic.edition !== 'onprem') throw E.validation('Only on-premise shops send sales summaries', { reason: 'LICENSE_EDITION' });
   const payload = SharePayloadSchema.parse(body.payload);
   if (payload.shop.taxId.replace(/\D/g, '') !== lic.taxId) throw E.validation('The summary is for another tax id than the key', { reason: 'SHOP_MISMATCH' });
   return withTenant(pool, null, async (tx) => {

@@ -19,7 +19,7 @@ const NAV = [
   { to: '/scg', label: 'ภาพรวม · ร้านที่ลงทะเบียน', code: 'M14-03', icon: 'admMonitor', show: () => true },
   { to: '/scg/shops', label: 'ร้านค้า', code: 'M14-01', icon: 'admShops', show: () => true },
   { to: '/scg/master', label: 'สินค้า SCG กลาง', code: 'M14-02', icon: 'admMaster', show: () => true },
-  { to: '/scg/licenses', label: 'License On-premise', code: 'M19-11', icon: '<rect x="3" y="10" width="18" height="11" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>', show: () => true },
+  { to: '/scg/licenses', label: 'License key', code: 'M19-11', icon: '<rect x="3" y="10" width="18" height="11" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>', show: () => true },
   { to: '/scg/shares', label: 'สรุปยอดขายที่ร้านส่ง', code: 'M19-10', icon: 'reports', show: () => true },
   { to: '/scg/admins', label: 'ผู้ดูแลและ log', code: 'M14', icon: 'admUsers', show: (a: Parameters<typeof admCan>[0]) => admCan(a, 'admins') },
 ] as const;

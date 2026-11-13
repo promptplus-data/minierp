@@ -4,6 +4,7 @@
  * Keep the cloud-integration names of the other team out of this file (scripts/check-onprem.mjs).
  */
 import { z } from 'zod';
+import { FeatureKey, FeatureList } from '../features';
 import { Dec, DecNN, Role, pageQuery, type RouteEditions } from '../core';
 
 const YMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
@@ -131,6 +132,8 @@ export const LicenseType = z.enum(['expiring', 'lifetime']);
 export const LicensePayload = z.object({
   v: z.literal(1), licenseId: z.string(), shopName: z.string(), taxId: z.string(), edition: z.enum(['onprem', 'cloud']),
   type: LicenseType, expiresAt: YMD.nullable(), issuedAt: z.string(),
+  /** On-prem keys: the menus SCG enabled for this shop (see ../features.ts); absent = every menu. Cloud keys omit it. */
+  features: FeatureList.optional(),
 });
 export type LicensePayload = z.infer<typeof LicensePayload>;
 export const LicenseStatus = z.object({
@@ -244,6 +247,8 @@ export const AdmTenant = z.object({
   id: z.string(), code: z.string(), name: z.string(), taxId: z.string(), vatRegistered: z.boolean(), edition: z.enum(['cloud', 'onprem']),
   region: z.string(), customerCode: z.string(), status: z.enum(['active', 'suspended']), statusReason: z.string().nullable(),
   createdAt: z.string(), users: z.number(), bills30d: z.number(), lastBillAt: z.string().nullable(), salesMonth: Dec,
+  /** Menus SCG enabled for this cloud shop; null = every menu. */
+  features: z.array(FeatureKey).nullable().default(null),
 });
 export type AdmTenant = z.infer<typeof AdmTenant>;
 export const AdmTenantQuery = pageQuery.extend({ status: z.enum(['active', 'suspended']).optional() });
@@ -303,12 +308,15 @@ export const AdmPush = z.object({ id: z.string(), at: z.string(), what: z.string
 
 export const AdmLicenseIssue = z.object({
   shopName: z.string().min(1), taxId: z.string().regex(/^\d{13}$/, '13 digits'), type: LicenseType,
+  edition: z.enum(['onprem', 'cloud']).default('onprem'),
+  /** On-prem keys only (cloud shops get their menus live from the shop's settings); null = every menu. */
+  features: z.array(FeatureKey).nullable().default(null),
   expiresAt: YMD.nullable().default(null), region: z.string().default(''), note: z.string().default(''),
 });
 export const AdmLicense = z.object({
   licenseId: z.string(), key: z.string(), shopName: z.string(), taxId: z.string(), edition: z.string(), type: LicenseType,
   expiresAt: z.string().nullable(), issuedAt: z.string(), region: z.string(), note: z.string(), issuedBy: z.string(),
-  revokedAt: z.string().nullable(), lastShareAt: z.string().nullable(),
+  revokedAt: z.string().nullable(), lastShareAt: z.string().nullable(), features: z.array(FeatureKey).nullable().default(null),
 });
 export const AdmShare = z.object({ id: z.string(), licenseId: z.string(), shopName: z.string(), taxId: z.string(), from: z.string(), to: z.string(), total: Dec, receivedAt: z.string(), payload: SharePayload });
 export const AdmShareQuery = pageQuery.extend({ licenseId: z.string().optional() });
@@ -328,7 +336,7 @@ export const adminRoutes = {
   hrPayrollApprove: 'POST /api/hr/payroll/:period/approve', hrPayrollReopen: 'POST /api/hr/payroll/:period/reopen', hrPayrollPay: 'POST /api/hr/payroll/:period/pay',
   hrPayslips: 'GET /api/hr/payroll/:period/slips', hrLabourCost: 'GET /api/hr/labour-cost',
   // M19-11 / 07 / 09 / 10 (on-prem shop side)
-  licenseStatus: 'GET /api/license', licenseInstall: 'POST /api/license',
+  licenseStatus: 'GET /api/license', licenseInstall: 'POST /api/license', entitlements: 'GET /api/entitlements',
   shopExport: 'POST /api/system/export',
   backupConfig: 'GET /api/backup/config', backupConfigSave: 'POST /api/backup/config', backupOauthStart: 'POST /api/backup/oauth/start',
   backupOauthPoll: 'POST /api/backup/oauth/poll', backupRun: 'POST /api/backup/run', backupRuns: 'GET /api/backup/runs', backupFiles: 'GET /api/backup/files',
@@ -340,7 +348,7 @@ export const adminRoutes = {
   shareReceive: 'POST /api/scg/sales-summary',
   supportGrants: 'GET /api/support-grants', supportGrantCreate: 'POST /api/support-grants', supportGrantRevoke: 'POST /api/support-grants/:id/revoke',
   admLogin: 'POST /api/adm/auth/login', admMe: 'GET /api/adm/auth/me', admAdmins: 'GET /api/adm/admins', admAdminCreate: 'POST /api/adm/admins', admAdminUpdate: 'PATCH /api/adm/admins/:id',
-  admTenants: 'GET /api/adm/tenants', admTenantCreate: 'POST /api/adm/tenants', admTenantSuspend: 'POST /api/adm/tenants/:id/suspend',
+  admTenants: 'GET /api/adm/tenants', admTenantCreate: 'POST /api/adm/tenants', admTenantSuspend: 'POST /api/adm/tenants/:id/suspend', admTenantFeatures: 'POST /api/adm/tenants/:id/features',
   admTenantResume: 'POST /api/adm/tenants/:id/resume', admTenantImport: 'POST /api/adm/tenants/import', admTenantSupport: 'POST /api/adm/tenants/:id/support',
   admKpi: 'GET /api/adm/kpi',
   admCentral: 'GET /api/adm/central-products', admCentralCreate: 'POST /api/adm/central-products', admCentralUpdate: 'PATCH /api/adm/central-products/:id',
@@ -353,12 +361,12 @@ const onprem = 'onprem' as const;
 const cloud = 'cloud' as const;
 /** Routes registered on one edition only. Unlisted routes (M17) exist on both. */
 export const adminRouteEditions: RouteEditions<typeof adminRoutes> = {
-  licenseStatus: onprem, licenseInstall: onprem, shopExport: onprem,
+  shopExport: onprem,
   backupConfig: onprem, backupConfigSave: onprem, backupOauthStart: onprem, backupOauthPoll: onprem, backupRun: onprem, backupRuns: onprem,
   backupFiles: onprem, backupRestoreFiles: onprem, backupRestore: onprem,
   shareConfig: onprem, sharePreview: onprem, shareSend: onprem, shareHistory: onprem,
   shareReceive: cloud, supportGrants: cloud, supportGrantCreate: cloud, supportGrantRevoke: cloud,
-  admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admAdminUpdate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud,
+  admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admAdminUpdate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud, admTenantFeatures: cloud,
   admTenantResume: cloud, admTenantImport: cloud, admTenantSupport: cloud, admKpi: cloud, admCentral: cloud, admCentralCreate: cloud,
   admCentralUpdate: cloud, admCentralPrice: cloud, admCentralPush: cloud, admCentralPushes: cloud, admLicenses: cloud, admLicenseIssue: cloud,
   admLicenseRevoke: cloud, admShares: cloud, admAudit: cloud,

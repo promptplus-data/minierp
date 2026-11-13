@@ -8,4 +8,4 @@
  * Tests and e2e sign with a throw-away keypair and point the verifier at it with ERP_LICENSE_TEST_PUBKEY
  * (ignored when NODE_ENV is production).
  */
-export const LICENSE_PUBLIC_KEY_SPKI_B64 = 'MCowBQYDK2VwAyEAL6dtEQRzWg8wD2aZrcuD3FhQeWumGTCk5xGlrykJQsE=';
+export const LICENSE_PUBLIC_KEY_SPKI_B64 = 'MCowBQYDK2VwAyEAeAbydx2MN7amOjvreKgWs38acaSajs00l82mJ4oDVm0=';

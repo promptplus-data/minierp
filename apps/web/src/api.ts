@@ -101,6 +101,7 @@ const APPROVAL_REASON: Record<string, string> = {
 const FORBIDDEN_REASON: Record<string, string> = {
   LICENSE_READ_ONLY: 'ไลเซนส์หมดอายุ (หรือยังไม่ได้ใส่คีย์) ร้านอยู่ในโหมดอ่านอย่างเดียว ดู พิมพ์ และส่งออกได้ แต่ทำรายการใหม่ไม่ได้',
   SHOP_SUSPENDED: 'ร้านนี้ถูก SCG ระงับการใช้งานชั่วคราว ติดต่อ SCG',
+  FEATURE_DISABLED: 'เมนูนี้ยังไม่ได้เปิดให้ร้านนี้ใช้ ติดต่อ SCG',
   TERMS_REQUIRED: 'เจ้าของร้านต้องลงนามสัญญาการใช้งานก่อนใช้ระบบ',
   OWNER_ONLY: 'เฉพาะเจ้าของร้านเท่านั้นที่ทำรายการนี้ได้',
 };

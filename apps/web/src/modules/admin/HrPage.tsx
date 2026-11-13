@@ -1,6 +1,7 @@
 /** M17 HR screen (mockup VIEWS.hr): employees and users, payroll / slips, labour cost, payroll settings. */
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth';
+import { useFeatures } from '../../data';
 import Employees from './Employees';
 import Payroll, { LabourCost, PaySettings } from './Payroll';
 
@@ -11,12 +12,15 @@ export default function HrPage() {
   const { can } = useAuth();
   const sal = can('hr.salary') === 1;
   const [sp, setSp] = useSearchParams();
-  const tab = (TABS.some(([k]) => k === sp.get('tab')) ? sp.get('tab') : 'emp') as Tab;
+  // SCG may switch payroll off for the shop; user management (the first tab) always stays.
+  const features = useFeatures();
+  const tabs = features && !features.has('payroll') ? TABS.filter(([k]) => k === 'emp') : TABS;
+  const tab = (tabs.some(([k]) => k === sp.get('tab')) ? sp.get('tab') : 'emp') as Tab;
   const owner = (body: JSX.Element) => (sal ? body : <div className="empty">ดูได้เฉพาะเจ้าของร้าน (สิทธิ์ "ดูและจ่ายเงินเดือน")</div>);
   return (
     <div className="card">
       <div className="tabs" role="tablist">
-        {TABS.map(([k, l]) => (
+        {tabs.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setSp(k === 'emp' ? {} : { tab: k }, { replace: true })}>{l}</button>
         ))}
       </div>

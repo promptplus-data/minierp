@@ -74,3 +74,11 @@ input.qty.w56{width:56px}input.qty.w74{width:74px}
 /* payslip button before the payroll run is published: the wrapper carries the tooltip (disabled buttons get no hover) */
 .adm-slip-wait{display:inline-flex;cursor:not-allowed}
 .adm-slip-wait .btn[disabled]{pointer-events:none}
+/* SCG Admin menu switches (scg/FeaturePicker.tsx) */
+.feat .chk{display:flex;align-items:center;gap:8px;cursor:pointer;min-height:36px}
+.feat .chk input{width:18px;height:18px;flex:none}
+.feat-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:10px;margin-top:10px}
+.feat-group{border:1px solid var(--line);border-radius:10px;padding:4px 12px 8px;margin:0;min-width:0}
+.feat-group legend{padding:0 4px}
+.feat-item{font-size:13.5px}
+.feat-item span:first-of-type{flex:1}

@@ -3,16 +3,23 @@
  * The payload binds shop name + tax id + edition + type + expiresAt|null + issuedAt + licenseId. SCG Admin (cloud)
  * signs with LICENSE_SIGNING_KEY; the on-prem server verifies offline with the embedded public key.
  * After expiry the shop is read-only: licenseGuard() refuses every mutating authed request (one central place).
+ *
+ * Cloud shops enter a cloud key the same way; there the key is also checked against the registry, so a revoked
+ * key stops counting at once. Cloud requires a key once the server can issue them (LICENSE_SIGNING_KEY set),
+ * unless LICENSE_REQUIRED says otherwise; on-prem requires one only with LICENSE_REQUIRED=1.
+ *
+ * Menus (packages/contracts/src/features.ts): cloud reads tenants.adm_features (set live by SCG Admin), on-prem
+ * reads the features inside the installed key. featureGuard() refuses requests to a switched-off menu's API.
  */
-import { createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
-import type { Tx } from '@erp/db';
-import { LicensePayload, type LicenseStatus } from '@erp/contracts';
+import { createPublicKey, verify, type KeyObject } from 'node:crypto';
+import { LICENSE_KEY_PREFIX, encodeLicenseKey, signingKeyFrom, type Tx } from '@erp/db';
+import { LicensePayload, apiAllowed, enabledFeatures, type Edition, type FeatureKey, type LicenseStatus } from '@erp/contracts';
 import { writeAudit } from '../../lib/audit';
 import type { Ctx, Deps, TenantGuard } from '../../lib/context';
 import { E } from '../../lib/errors';
 import { LICENSE_PUBLIC_KEY_SPKI_B64 } from './license-pubkey';
 
-export const KEY_PREFIX = 'SCG1';
+export const KEY_PREFIX = LICENSE_KEY_PREFIX;
 export const WARN_DAYS = 30;
 
 const pubCache = new Map<string, KeyObject>();
@@ -25,17 +32,9 @@ export function embeddedPublicKey(): KeyObject {
 }
 
 /** LICENSE_SIGNING_KEY: the Ed25519 private key as PKCS#8 PEM, or that PEM base64-encoded (cloud only). */
-export function signingKeyFromEnv(env: NodeJS.ProcessEnv = process.env): KeyObject | null {
-  const raw = env.LICENSE_SIGNING_KEY?.trim();
-  if (!raw) return null;
-  const pem = raw.includes('BEGIN') ? raw : Buffer.from(raw, 'base64').toString('utf8');
-  return createPrivateKey(pem);
-}
+export const signingKeyFromEnv = (env: NodeJS.ProcessEnv = process.env): KeyObject | null => signingKeyFrom(env.LICENSE_SIGNING_KEY);
 
-export function signLicense(payload: LicensePayload, privateKey: KeyObject): string {
-  const body = `${KEY_PREFIX}.${Buffer.from(JSON.stringify(LicensePayload.parse(payload))).toString('base64url')}`;
-  return `${body}.${sign(null, Buffer.from(body), privateKey).toString('base64url')}`;
-}
+export const signLicense = (payload: LicensePayload, privateKey: KeyObject): string => encodeLicenseKey(LicensePayload.parse(payload), privateKey);
 
 /** Verifies the signature and shape; throws VALIDATION with details.reason = LICENSE_INVALID. */
 export function parseLicenseKey(key: string, publicKey: KeyObject = embeddedPublicKey()): LicensePayload {
@@ -66,13 +65,17 @@ const norm = (s: string) => s.normalize('NFC').replace(/\s+/g, ' ').trim().toLow
 export const sameShop = (a: { shopName: string; taxId: string }, b: { name: string; taxId: string }) =>
   a.taxId.replace(/\D/g, '') === b.taxId.replace(/\D/g, '') && norm(a.shopName) === norm(b.name);
 
-export const licenseRequired = (env: NodeJS.ProcessEnv = process.env) => /^(1|true)$/i.test(env.LICENSE_REQUIRED ?? '');
+export function licenseRequired(edition: Edition, env: NodeJS.ProcessEnv = process.env): boolean {
+  const set = env.LICENSE_REQUIRED?.trim();
+  if (set) return /^(1|true)$/i.test(set);
+  return edition === 'cloud' && !!env.LICENSE_SIGNING_KEY?.trim();
+}
 
 /** Days from today until the expiry date (inclusive of the last valid day); negative after expiry. */
 const daysUntil = (today: string, expiresAt: string): number =>
   Math.round((Date.parse(`${expiresAt}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
 
-export function licenseState(lic: LicensePayload | null, today: string, required = licenseRequired()): Omit<LicenseStatus, 'installedAt'> {
+export function licenseState(lic: LicensePayload | null, today: string, required: boolean): Omit<LicenseStatus, 'installedAt'> {
   if (!lic) return { state: 'none', readOnly: required, required, daysLeft: null, license: null };
   if (lic.expiresAt === null) return { state: 'valid', readOnly: false, required, daysLeft: null, license: lic };
   const left = daysUntil(today, lic.expiresAt);
@@ -81,27 +84,45 @@ export function licenseState(lic: LicensePayload | null, today: string, required
 }
 
 interface LicRow { license_key: string; installed_at: Date }
-export async function currentLicense(tx: Tx): Promise<{ payload: LicensePayload; installedAt: string } | null> {
+export async function currentLicense(tx: Tx, edition: Edition): Promise<{ payload: LicensePayload; installedAt: string } | null> {
   const r = await tx.query<LicRow>(`select license_key, installed_at from licenses order by installed_at desc, id desc limit 1`);
   const row = r.rows[0];
   if (!row) return null;
   // Re-verify on every read: a key edited in the database stops counting.
+  let payload: LicensePayload;
   try {
-    return { payload: parseLicenseKey(row.license_key), installedAt: row.installed_at.toISOString() };
+    payload = parseLicenseKey(row.license_key);
   } catch {
     return null;
   }
+  if (payload.edition !== edition) return null;
+  if (edition === 'cloud' && (await tx.query<{ r: boolean }>(`select license_revoked($1) r`, [payload.licenseId])).rows[0]?.r) return null;
+  return { payload, installedAt: row.installed_at.toISOString() };
 }
 
-export async function licenseStatus(tx: Tx, today: string): Promise<LicenseStatus> {
-  const cur = await currentLicense(tx);
-  return { ...licenseState(cur?.payload ?? null, today), installedAt: cur?.installedAt ?? null };
+export async function licenseStatus(tx: Tx, edition: Edition, today: string): Promise<LicenseStatus> {
+  const cur = await currentLicense(tx, edition);
+  return { ...licenseState(cur?.payload ?? null, today, licenseRequired(edition)), installedAt: cur?.installedAt ?? null };
+}
+
+/** The shop's enabled menus: live setting on cloud, the installed key's list on-prem (no key = every menu). */
+export async function shopFeatures(tx: Tx, edition: Edition, tenantId: string): Promise<ReadonlySet<FeatureKey>> {
+  if (edition === 'cloud') {
+    const r = await tx.query<{ f: string[] | null }>(`select adm_features f from tenants where id = $1`, [tenantId]);
+    return enabledFeatures(r.rows[0]?.f ?? null);
+  }
+  return enabledFeatures((await currentLicense(tx, edition))?.payload.features ?? null);
 }
 
 /** Installs (or replaces) the shop's key after checking signature, edition and that it names this shop. */
-export async function installLicense(tx: Tx, ctx: Ctx, key: string, opts: { auditLast?: boolean } = {}): Promise<LicensePayload> {
+export async function installLicense(tx: Tx, ctx: Ctx, edition: Edition, key: string, opts: { auditLast?: boolean } = {}): Promise<LicensePayload> {
   const p = parseLicenseKey(key);
-  if (p.edition !== 'onprem') throw E.validation('This key is not for the on-premise edition', { reason: 'LICENSE_EDITION' });
+  if (p.edition !== edition) {
+    throw E.validation(edition === 'cloud' ? 'This key is for the on-premise edition, not cloud' : 'This key is not for the on-premise edition', { reason: 'LICENSE_EDITION' });
+  }
+  if (edition === 'cloud' && (await tx.query<{ r: boolean }>(`select license_revoked($1) r`, [p.licenseId])).rows[0]?.r) {
+    throw E.validation('This key was revoked by SCG', { reason: 'LICENSE_REVOKED' });
+  }
   const shop = (await tx.query<{ name: string; tax_id: string }>(`select name, tax_id from tenants where id = $1`, [ctx.tenantId])).rows[0];
   if (!shop) throw E.notFound('Shop not found');
   if (!sameShop(p, { name: shop.name, taxId: shop.tax_id })) {
@@ -121,19 +142,29 @@ export async function installLicense(tx: Tx, ctx: Ctx, key: string, opts: { audi
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
- * On-prem: after expiry (or with LICENSE_REQUIRED=1 and no key) every mutating authed request is refused, except
+ * After expiry (or with a key required and none installed) every mutating authed request is refused, except
  * routes that declare `config: { readOnlyOk: true }` (license entry, export, backup, sales-summary share).
  * Viewing, printing and exporting keep working.
  */
 export function licenseGuard(deps: Deps): TenantGuard {
   return async (tx, info) => {
     if (info.phase !== 'request' || READ_METHODS.has(info.method) || info.config.readOnlyOk === true) return;
-    const st = licenseState((await currentLicense(tx))?.payload ?? null, deps.today());
+    const st = licenseState((await currentLicense(tx, deps.edition))?.payload ?? null, deps.today(), licenseRequired(deps.edition));
     if (st.readOnly) {
       throw E.forbidden(
         st.state === 'none' ? 'A license key is required before creating documents' : 'The license has expired: the shop is read-only',
         { reason: 'LICENSE_READ_ONLY', state: st.state },
       );
     }
+  };
+}
+
+/** Refuses any request to the API of a menu SCG switched off for this shop (reads included). */
+export function featureGuard(deps: Deps): TenantGuard {
+  return async (tx, info) => {
+    if (info.phase !== 'request') return;
+    const route = info.route.split('?')[0]!;
+    if (apiAllowed(route, await shopFeatures(tx, deps.edition, info.tenantId))) return;
+    throw E.forbidden('This menu is not enabled for the shop', { reason: 'FEATURE_DISABLED' });
   };
 }

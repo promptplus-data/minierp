@@ -1,4 +1,5 @@
 /** Shared bits of the admin module screens: labels, dates, error text, A4 print mode, the payslip paper. */
+import { IS_CLOUD } from '../../cloud';
 import { useEffect, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -32,7 +33,9 @@ const REASONS: Record<string, string> = {
   LAST_SUPER: 'ต้องมี Super admin ที่ใช้งานอยู่อย่างน้อย 1 คน ปิดใช้งานหรือลดบทบาทคนสุดท้ายไม่ได้',
   ADM_SELF: 'ปิดใช้งานหรือลดบทบาทบัญชีของตัวเองไม่ได้ ให้ Super admin คนอื่นทำให้',
   LICENSE_INVALID: 'license key ไม่ถูกต้อง (ลายเซ็นไม่ตรง หรือคัดลอกไม่ครบ)',
-  LICENSE_EDITION: 'คีย์นี้ไม่ใช่ของรุ่น On-premise',
+  LICENSE_EDITION: IS_CLOUD ? 'คีย์นี้เป็นของรุ่น On-premise ใช้กับร้านบน Cloud ไม่ได้ ขอคีย์รุ่น Cloud จาก SCG' : 'คีย์นี้ไม่ใช่ของรุ่น On-premise',
+  LICENSE_REVOKED: 'คีย์นี้ถูก SCG ยกเลิกแล้ว ติดต่อ SCG เพื่อขอคีย์ใหม่',
+  FEATURE_DISABLED: 'เมนูนี้ยังไม่ได้เปิดให้ร้านนี้ใช้ ติดต่อ SCG',
   LICENSE_SHOP_MISMATCH: 'คีย์นี้ออกให้ร้านอื่น (ชื่อร้านหรือเลขผู้เสียภาษีไม่ตรงกับร้านนี้)',
   LICENSE_READ_ONLY: 'ไลเซนส์หมดอายุ (หรือยังไม่ได้ใส่คีย์) ร้านอยู่ในโหมดอ่านอย่างเดียว ดู พิมพ์ และส่งออกได้ แต่ทำรายการใหม่ไม่ได้',
   TERMS_REQUIRED: 'เจ้าของร้านต้องลงนามสัญญาการใช้งานก่อน',
@@ -47,6 +50,7 @@ const REASONS: Record<string, string> = {
   NO_EMPLOYEE: 'ผู้ใช้นี้ยังไม่ได้ผูกกับพนักงาน',
   CONSENT_REQUIRED: 'ต้องติ๊กยินยอมทุกข้อที่บังคับ',
   SIGNING_KEY_MISSING: 'เซิร์ฟเวอร์ยังไม่ได้ตั้ง LICENSE_SIGNING_KEY ออกคีย์ไม่ได้',
+  SIGNING_KEY_MISMATCH: 'LICENSE_SIGNING_KEY บนเซิร์ฟเวอร์ไม่ตรงกับ public key ในโปรแกรม ออกคีย์ไม่ได้ ติดต่อทีมพัฒนา',
   RATE_LIMITED: 'ลองผิดหลายครั้งเกินไป รอ 10 นาทีแล้วลองใหม่',
   SHARE_URL_MISSING: 'ยังไม่ได้ตั้งปลายทางของ SCG (SCG_SHARE_URL) ในเครื่องหลัก',
   LICENSE_REQUIRED: 'ต้องใส่ license key ก่อน (คีย์ใช้ยืนยันกับ SCG ว่าเป็นร้านนี้)',

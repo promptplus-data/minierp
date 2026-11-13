@@ -19,6 +19,7 @@ export * from './modules/purchasing';
 export * from './modules/retail';
 export * from './modules/admin';
 export * from './modules/reports';
+export * from './features';
 
 /** Route table — the single source of truth both apps import. Duplicate keys or endpoints throw at import time. */
 // @__PURE__ lets bundlers drop the table (and its cloud-only paths) when nothing reads it, as in the on-prem server.

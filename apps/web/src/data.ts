@@ -2,7 +2,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
-import { Approver, Customer, Product, Shift, StockBalance, Vendor, Warehouse, page, type Page } from '@erp/contracts';
+import { Entitlements, featureForNavPath, type FeatureKey, Approver, Customer, Product, Shift, StockBalance, Vendor, Warehouse, page, type Page } from '@erp/contracts';
 import { api } from './api';
 import { useAuth } from './auth';
 
@@ -34,6 +34,28 @@ export function useBelowCostRule() {
 export function useMeta() {
   const { user } = useAuth();
   return useQuery({ queryKey: ['meta', user?.id ?? null], queryFn: () => api('GET', '/api/meta', { schema: MetaLite }), staleTime: 5 * 60_000 });
+}
+
+/**
+ * Menus SCG enabled for this shop (cloud: set live in SCG Admin; on-prem: inside the license key). While loading,
+ * every menu counts as on, so the nav does not flash empty; the server refuses a switched-off menu either way.
+ */
+export function useFeatures(): ReadonlySet<FeatureKey> | null {
+  const { user } = useAuth();
+  const q = useQuery({
+    queryKey: ['entitlements', user?.id ?? null], enabled: !!user, staleTime: 5 * 60_000,
+    queryFn: () => api('GET', '/api/entitlements', { schema: Entitlements }),
+  });
+  return q.data ? new Set(q.data.features) : null;
+}
+
+/** Is the menu behind this in-app link switched on for the shop? For shortcuts outside the nav (home buttons, cards). */
+export function useMenuOn(): (to: string) => boolean {
+  const features = useFeatures();
+  return (to) => {
+    const owner = featureForNavPath(`/${to.split(/[/?#]/)[1] ?? ''}`);
+    return !owner || !features || features.has(owner);
+  };
 }
 
 /** Loads every page of a small list (lookups for selects and names). */

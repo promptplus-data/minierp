@@ -25,7 +25,7 @@ function checkRange(from: string, to: string, today: string) {
 
 export async function shareConfig(tx: Tx, ctx: Ctx) {
   requirePerm(ctx, 'sys.settings');
-  const lic = await currentLicense(tx);
+  const lic = await currentLicense(tx, 'onprem');
   return { receiverUrl: shareUrl(), licensed: !!lic, licenseId: lic?.payload.licenseId ?? null };
 }
 
@@ -75,7 +75,7 @@ export async function sendShare(tx: Tx, ctx: Ctx, from: string, to: string, toda
   if (ctx.role !== 'owner') throw E.forbidden('Only the shop owner can send the sales summary', { reason: 'OWNER_ONLY' });
   const url = shareUrl();
   if (!url) throw E.validation('SCG_SHARE_URL is not configured on this machine', { reason: 'SHARE_URL_MISSING' });
-  const lic = await currentLicense(tx);
+  const lic = await currentLicense(tx, 'onprem');
   if (!lic) throw E.validation('A license key is needed to identify the shop to SCG', { reason: 'LICENSE_REQUIRED' });
   const payload = await buildSharePayload(tx, ctx, from, to, today);
   let status: 'sent' | 'failed' = 'sent';

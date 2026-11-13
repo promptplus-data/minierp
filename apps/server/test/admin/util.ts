@@ -12,6 +12,9 @@ const pair = generateKeyPairSync('ed25519');
 export const DEV_PRIVATE_PEM = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 export const devKey = () => pair.privateKey;
 process.env.ERP_LICENSE_TEST_PUBKEY = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+// Cloud requires a key once a signing key is configured; the existing suites test shops without one, so opt out here.
+// license-cloud.test.ts covers the required path.
+process.env.LICENSE_REQUIRED ??= '0';
 
 export function makeKey(p: Partial<LicensePayload> & { shopName: string; taxId: string }): string {
   return signLicense({
