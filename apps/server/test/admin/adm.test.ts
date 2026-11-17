@@ -116,7 +116,7 @@ describe('shops (REQ-M14-01/04) and terms (M02, BR-15)', () => {
 });
 
 describe('KPI (REQ-M14-03): registered shops, new per month, active 30 days by region', () => {
-  it('counts cloud shops and licensed on-prem shops; active = a bill in 30 days', async () => {
+  it('counts cloud shops and licensed on-prem customers; active = a cloud shop with a bill in 30 days', async () => {
     await env.pool.query(`update tenants set adm_region = 'ภาคกลาง', created_at = '2026-09-15' where id = $1`, [env.seed.tenantId]);
     const prae = await login(cloud, 'prae');
     const shift = (await prae.post('/api/shifts/open', { float: '0.00', deviceId: 'POS-1' })).body.id;
@@ -193,7 +193,7 @@ describe('support access with the shop consent (REQ-M14-05)', () => {
   });
 });
 
-describe('license issuing (REQ-M19-11) and the sales summary receiver (REQ-M19-10)', () => {
+describe('license issuing (REQ-M19-11)', () => {
   it('issues expiring and lifetime keys bound to shop name + tax id; validates dates', async () => {
     expect((await scg.post('/api/adm/licenses', { shopName: 'x', taxId: '0105566001122', type: 'expiring' })).status).toBe(400);
     expect((await scg.post('/api/adm/licenses', { shopName: 'x', taxId: '0105566001122', type: 'expiring', expiresAt: '2026-01-01' })).status).toBe(400);
@@ -203,21 +203,12 @@ describe('license issuing (REQ-M19-11) and the sales summary receiver (REQ-M19-1
     expect(list.body.items).toHaveLength(1);
   });
 
-  it('receiver accepts a summary signed by a registered key, refuses unknown, revoked or mismatched ones', async () => {
+  it('on-prem customers send nothing back: no sales-summary receiver and no shop import; revoking a key still works', async () => {
     const lic = (await scg.post('/api/adm/licenses', { shopName: 'ร้านบ้านสวน', taxId: '0505561007777', type: 'lifetime' })).body;
-    const payload = { v: 1, shop: { name: 'ร้านบ้านสวน', taxId: '0505561007777' }, from: '2026-10-01', to: '2026-10-01',
-      days: [{ date: '2026-10-01', scg: [{ sku: 'SCG-CEM-T50', name: 'ปูน', unit: 'ถุง', qty: '10', amount: '1450.00' }], otherAmount: '200.00', total: '1650.00' }],
-      totals: { scgQty: '10', scgAmount: '1450.00', otherAmount: '200.00', total: '1650.00' } };
-    const ok = await client(cloud).post('/api/scg/sales-summary', { key: lic.key, payload });
-    expect(ok.status).toBe(201);
-    expect((await client(cloud).post('/api/scg/sales-summary', { key: lic.key, payload: { ...payload, shop: { name: 'x', taxId: '0105500000001' } } })).body.details.reason).toBe('SHOP_MISMATCH');
-    const { makeKey } = await import('./util');
-    expect((await client(cloud).post('/api/scg/sales-summary', { key: makeKey({ shopName: 'ร้านบ้านสวน', taxId: '0505561007777' }), payload })).body.details.reason).toBe('LICENSE_UNKNOWN');
-    await scg.post(`/api/adm/licenses/${lic.licenseId}/revoke`, { reason: 'ร้านเลิกกิจการ' });
-    expect((await client(cloud).post('/api/scg/sales-summary', { key: lic.key, payload })).body.details.reason).toBe('LICENSE_REVOKED');
-    const inbox = await scg.get(`/api/adm/sales-shares?licenseId=${lic.licenseId}`);
-    expect(inbox.body.items).toHaveLength(1);
-    expect(inbox.body.items[0]).toMatchObject({ total: '1650.00', payload: { totals: { scgQty: '10' } } });
+    expect((await client(cloud).post('/api/scg/sales-summary', { key: lic.key, payload: {} })).status).toBe(404);
+    expect((await scg.get('/api/adm/sales-shares')).status).toBe(404);
+    expect((await scg.post('/api/adm/tenants/import', { code: 'moved', passphrase: 'correct horse', file: 'x'.repeat(20) })).status).toBe(404);
+    expect((await scg.post(`/api/adm/licenses/${lic.licenseId}/revoke`, { reason: 'ร้านเลิกกิจการ' })).status).toBe(200);
   });
 
   it('every SCG Admin action is in the platform audit (super only)', async () => {

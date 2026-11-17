@@ -1,16 +1,15 @@
 /**
- * "admin" module group (Agent D): M17 HR/payroll/leave, M02 terms, M19-11 license, M19-07 export, M19-09 cloud backup,
- * M19-10 sales-summary share (on-prem) and M14 SCG Admin + the summary receiver and support consent (cloud).
+ * "admin" module group (Agent D): M17 HR/payroll/leave, M02 terms, M19-11 license, M19-09 backup and restore (on-prem),
+ * M14 SCG Admin and support consent (cloud). The on-prem edition sends nothing to SCG.
  * Routes: packages/contracts/src/modules/admin.ts. Rules and tests: ./README.md.
  */
 import { z } from 'zod';
 import {
-  AdmAuditEntry, AdmCentralPriceReq, AdmFeaturesSet, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
-  AdmTenantImport, AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
+  AdmAuditEntry, AdmCentralPriceReq, AdmFeaturesSet, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmTenantCreate,
+  AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
   HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate, HrPayrollUpdate, HrPayslipPeriodQuery,
   HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall,  SupportGrantCreate, TermsAccept, pageQuery,
 } from '@erp/contracts';
-import { writeAudit } from '../../lib/audit';
 import { can, requirePerm } from '../../lib/context';
 import { E } from '../../lib/errors';
 import { FailureLimiter } from '../../lib/limiter';
@@ -138,22 +137,9 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
     }
   }
 
-  // ================================================================ cloud: receiver, support consent, SCG Admin
+  // ================================================================ cloud: support consent, SCG Admin
   if (process.env.EDITION === 'cloud') {
     if (deps.edition === 'cloud') {
-      const receiveLimiter = new FailureLimiter({ max: 30, windowMs: 10 * 60_000, maxEntries: 10_000 });
-      app.post('/api/scg/sales-summary', { bodyLimit: 5 * 1024 * 1024 }, async (req, reply) => {
-        if (receiveLimiter.blocked(req.ip)) throw E.forbidden('Too many failed attempts', { reason: 'RATE_LIMITED' });
-        try {
-          const out = await adm.receiveShare(deps.pool, (req.body ?? {}) as { key?: unknown; payload?: unknown });
-          reply.status(201);
-          return out;
-        } catch (err) {
-          receiveLimiter.fail(req.ip);
-          throw err;
-        }
-      });
-
       app.get('/api/support-grants', authed(async (tx, ctx) => listGrants(tx, ctx)));
       app.post('/api/support-grants', authed(async (tx, ctx, req, reply) => {
         reply.status(201);
@@ -191,10 +177,6 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
       app.post('/api/adm/tenants/:id/suspend', admAuthed(async (_tx, a, req) => adm.setTenantStatus(deps.pool, a, id(req), 'suspended', AdmReason.parse(req.body).reason)));
       app.post('/api/adm/tenants/:id/features', admAuthed(async (_tx, a, req) => adm.setTenantFeatures(deps.pool, a, id(req), AdmFeaturesSet.parse(req.body).features)));
       app.post('/api/adm/tenants/:id/resume', admAuthed(async (_tx, a, req) => adm.setTenantStatus(deps.pool, a, id(req), 'active', AdmReason.parse(req.body).reason)));
-      app.post('/api/adm/tenants/import', { bodyLimit: 512 * 1024 * 1024 }, admAuthed(async (_tx, a, req, reply) => {
-        reply.status(201);
-        return adm.importTenant(deps.pool, a, AdmTenantImport.parse(req.body));
-      }));
       app.post('/api/adm/tenants/:id/support', admAuthed(async (_tx, a, req) => adm.supportView(deps.pool, a, id(req))));
       app.get('/api/adm/kpi', admAuthed(async (tx) => adm.kpi(tx, deps.today())));
 
@@ -214,7 +196,6 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
         return adm.issueLicense(tx, a, deps.today(), AdmLicenseIssue.parse(req.body));
       }));
       app.post('/api/adm/licenses/:id/revoke', admAuthed(async (tx, a, req) => adm.revokeLicense(tx, a, id(req), AdmReason.parse(req.body).reason)));
-      app.get('/api/adm/sales-shares', admAuthed(async (tx, _a, req) => adm.listShares(tx, AdmShareQuery.parse(req.query))));
       app.get('/api/adm/audit', admAuthed(async (tx, a, req) => {
         const out = await adm.listAdmAudit(tx, a, pageQuery.parse(req.query));
         return { ...out, items: out.items.map((x) => AdmAuditEntry.parse(x)) };

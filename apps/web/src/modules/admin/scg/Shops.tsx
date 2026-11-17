@@ -1,12 +1,11 @@
 /**
  * REQ-M14-01 open a shop (owner user + employee together), REQ-M14-04 suspend / resume with a reason,
- * REQ-M14-05 read-only support view (needs the shop's grant), REQ-M19-07 import an on-prem export as a new shop.
+ * REQ-M14-05 read-only support view (needs the shop's grant).
  */
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { z } from 'zod';
-import { AdmImportResult, AdmSupportView, AdmTenant, FEATURE_KEYS, type FeatureKey } from '@erp/contracts';
+import { AdmSupportView, AdmTenant, FEATURE_KEYS, type FeatureKey } from '@erp/contracts';
 import { FeaturePicker, featureSummary } from './FeaturePicker';
 import { ROLE_TH } from '../../../auth';
 import { Modal, Pill, SkeletonRows, fmt, th, thTime, useDebounced, useToast } from '../../../ui';
@@ -25,7 +24,7 @@ export default function Shops() {
   const [status, setStatus] = useState<'' | 'active' | 'suspended'>('');
   const dq = useDebounced(q.trim(), 300);
   const list = useAdmLoadMore(['scg', 'tenants'], '/api/adm/tenants', AdmTenant, { q: dq, status: status || undefined });
-  const [modal, setModal] = useState<null | { kind: 'new' } | { kind: 'import' } | { kind: 'status'; t: AdmTenant } | { kind: 'support'; t: AdmTenant } | { kind: 'features'; t: AdmTenant }>(null);
+  const [modal, setModal] = useState<null | { kind: 'new' } | { kind: 'status'; t: AdmTenant } | { kind: 'support'; t: AdmTenant } | { kind: 'features'; t: AdmTenant }>(null);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['scg'] }); };
   const loading = list.isLoading;
   const write = admCan(admin, 'shopsWrite');
@@ -35,7 +34,6 @@ export default function Shops() {
       <h2>
         ร้านค้าที่ใช้ระบบ
         <span className="row">
-          {write && <button className="btn sm" onClick={() => setModal({ kind: 'import' })} data-testid="shop-import">นำเข้าร้านจาก On-premise</button>}
           {write && <button className="btn sm pri" onClick={() => setModal({ kind: 'new' })} data-testid="shop-new">+ เปิดร้านใหม่</button>}
         </span>
       </h2>
@@ -73,7 +71,6 @@ export default function Shops() {
       <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
       <p className="small muted">ยอดขายเป็นยอดรวมของร้าน ไม่แสดงข้อมูลส่วนบุคคลของลูกค้าร้าน · การเข้าดูแบบ support ต้องได้รับอนุญาตจากเจ้าของร้านและบันทึกใน log ของร้าน</p>
       {modal?.kind === 'new' && <NewShop onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
-      {modal?.kind === 'import' && <ImportShop onClose={() => setModal(null)} onDone={refresh} />}
       {modal?.kind === 'status' && <StatusModal t={modal.t} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
       {modal?.kind === 'support' && <SupportModal t={modal.t} onClose={() => setModal(null)} />}
       {modal?.kind === 'features' && <FeaturesModal t={modal.t} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} />}
@@ -221,55 +218,3 @@ function SupportModal({ t, onClose }: { t: AdmTenant; onClose: () => void }) {
 }
 
 /** REQ-M19-07: the encrypted file exported by an on-prem shop becomes a new cloud shop; totals are verified. */
-function ImportShop({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [code, setCode] = useState('');
-  const [region, setRegion] = useState(REGIONS[0]!);
-  const [pass, setPass] = useState('');
-  const [file, setFile] = useState<{ name: string; text: string } | null>(null);
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [res, setRes] = useState<z.infer<typeof AdmImportResult> | null>(null);
-  const go = async () => {
-    if (!/^[a-z0-9-]{3,30}$/.test(code)) return setErr('รหัสร้านใหม่ a–z 0–9 - 3–30 ตัว');
-    if (!file) return setErr('เลือกไฟล์ .scgshop');
-    if (pass.length < 8) return setErr('รหัสผ่านไฟล์อย่างน้อย 8 ตัว');
-    setBusy(true);
-    setErr('');
-    try {
-      setRes(await admApi('POST', '/api/adm/tenants/import', { body: { code, region, passphrase: pass, file: file.text }, schema: AdmImportResult }));
-      onDone();
-    } catch (e) {
-      setErr(admErr(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal onClose={onClose} label="นำเข้าร้านจาก On-premise">
-      <h3>นำเข้าร้านจาก On-premise</h3>
-      {res ? (
-        <>
-          <div className="note small" data-testid="import-result">
-            นำเข้า <b>{res.tenant.name}</b> เป็นร้าน Cloud รหัส <span className="mono">{res.tenant.code}</span> แล้ว · ตรวจแล้ว {res.verified.tables} ตาราง {res.verified.rows} แถว
-            ผลรวม {res.verified.numericColumns} คอลัมน์ตัวเลขตรงกับไฟล์ · log {res.verified.auditChainOk ? 'ต่อเนื่องครบถ้วน' : 'ไม่ครบ'}
-          </div>
-          <div className="act"><button className="btn pri" onClick={onClose}>ปิด</button></div>
-        </>
-      ) : (
-        <>
-          <div className="fgrid">
-            <label className="f">รหัสร้านใหม่บน Cloud *<input type="text" value={code} onChange={(e) => setCode(e.target.value.toLowerCase())} /></label>
-            <label className="f">ภาค / เขตขาย<select value={region} onChange={(e) => setRegion(e.target.value)}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></label>
-            <label className="f" style={{ gridColumn: '1/-1' }}>ไฟล์ส่งออกจากร้าน (.scgshop)
-              <input type="file" accept=".scgshop,application/json" onChange={(e) => { const fl = e.target.files?.[0]; if (fl) void fl.text().then((text) => setFile({ name: fl.name, text })); }} />
-            </label>
-            <label className="f" style={{ gridColumn: '1/-1' }}>รหัสผ่านไฟล์ (ร้านแจ้งแยกช่องทาง)<input type="password" value={pass} onChange={(e) => setPass(e.target.value)} /></label>
-          </div>
-          <p className="small muted" style={{ margin: 0 }}>หลังนำเข้า ระบบตรวจจำนวนแถวทุกตาราง ผลรวมทุกคอลัมน์ตัวเลข และ log ต้องตรงกับไฟล์ 100% ไม่ตรงจะยกเลิกทั้งหมด</p>
-          {err && <div className="err" role="alert">{err}</div>}
-          <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy} onClick={() => void go()}>{busy ? 'กำลังนำเข้า…' : 'นำเข้า'}</button></div>
-        </>
-      )}
-    </Modal>
-  );
-}

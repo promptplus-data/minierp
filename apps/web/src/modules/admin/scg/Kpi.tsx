@@ -28,13 +28,13 @@ export default function Kpi() {
         </div>
         <div className="card kpi">
           <span className="ki">{I(iconSvg('admMonitor'))}</span>
-          <div className="l">ใช้งานใน 30 วัน (มีบิล ≥ 1 ใบ)</div><div className="v">{x.active30}</div>
-          <div className="s">Cloud {x.active30ByEdition.cloud} · On-premise {x.active30ByEdition.onprem}</div>
+          <div className="l">ร้าน Cloud ที่ใช้งานใน 30 วัน (มีบิล ≥ 1 ใบ)</div><div className="v">{x.active30}</div>
+          <div className="s">On-premise ไม่ส่งข้อมูลการใช้งานกลับมา</div>
         </div>
         <div className="card kpi">
           <span className="ki">{I(iconSvg('admUsers'))}</span>
-          <div className="l">อัตราใช้งาน</div><div className="v">{x.total ? Math.round((x.active30 / x.total) * 100) : 0}%</div>
-          <div className="s">ร้านที่ active ÷ ร้านที่ลงทะเบียน</div>
+          <div className="l">อัตราใช้งาน (Cloud)</div><div className="v">{x.byEdition.cloud ? Math.round((x.active30 / x.byEdition.cloud) * 100) : 0}%</div>
+          <div className="s">ร้าน Cloud ที่ active ÷ ร้าน Cloud ทั้งหมด</div>
         </div>
         <div className="card kpi" style={{ ['--k' as string]: 'var(--bad)' }}>
           <span className="ki">{I(iconSvg('admShops'))}</span>

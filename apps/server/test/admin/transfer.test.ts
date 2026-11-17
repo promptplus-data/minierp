@@ -1,22 +1,18 @@
 /**
- * SCG Admin import of an encrypted shop file into a new cloud shop, M19-09 encrypted backup and restore on a new
- * machine. The on-prem edition keeps its data in the shop: it has no export-to-cloud and no sales summary to SCG.
+ * M19-09 encrypted backup and restore on a new machine. The on-prem edition keeps its data in the shop: it has no
+ * export-to-cloud and no sales summary to SCG.
  */
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resetData, withTenant } from '@erp/db';
 import { seedAdmin } from '@erp/db/src/seedAdmin';
 import { buildApp } from '../../src/app';
 import { S3Client, signV4 } from '../../src/modules/admin/s3';
-import { deriveKey, sealBox } from '../../src/modules/admin/box';
-import { exportShop } from '../../src/modules/admin/transfer';
 import { client, login, openShift, saleBody, setupEnv, TODAY, type Client, type Env } from '../helpers';
-import { DEV_PRIVATE_PEM, admLogin, buildCloud } from './util';
+import { DEV_PRIVATE_PEM } from './util';
 
 let env: Env;
-let cloud: FastifyInstance;
 let owner: Client;
 let suda: Client;
 let s3: Server;
@@ -60,9 +56,8 @@ beforeAll(async () => {
   env = await setupEnv();
   await seedAdmin(env.pool, env.seed.tenantId);
   process.env.LICENSE_SIGNING_KEY = DEV_PRIVATE_PEM;
-  cloud = await buildCloud(env.pool);
   owner = await login(env.app, 'charoen');
-  suda = await login(env.app, 'suda'); // before the import duplicates the usernames into a second shop
+  suda = await login(env.app, 'suda');
   // some activity: a sale (stock lots consumed FIFO, doc counter moves, audit rows)
   const prae = await login(env.app, 'prae');
   const shift = await openShift(prae);
@@ -71,9 +66,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   delete process.env.LICENSE_SIGNING_KEY;
-  delete process.env.SCG_SHARE_URL;
   s3.close();
-  await cloud.close();
   await env.close();
 });
 
@@ -96,57 +89,11 @@ describe('S3 SigV4', () => {
   });
 });
 
-describe('shop file import into a new cloud shop (SCG Admin)', () => {
-  let file: string;
-  it('the on-prem edition no longer exports the shop or sends a sales summary', async () => {
+describe('the on-prem edition keeps its data in the shop', () => {
+  it('has no export-to-cloud and no sales summary to SCG', async () => {
     const auth = { authorization: await ownerAuth() };
     expect((await env.app.inject({ method: 'POST', url: '/api/system/export', payload: { passphrase: 'correct horse' }, headers: auth })).statusCode).toBe(404);
     expect((await env.app.inject({ method: 'GET', url: '/api/share/config', headers: auth })).statusCode).toBe(404);
-    const data = await withTenant(env.pool, env.seed.tenantId, (tx) => exportShop(tx, env.seed.tenantId));
-    file = sealBox('shop-export', { shopName: data.source.name, taxId: data.source.taxId, createdAt: new Date().toISOString() }, data, deriveKey('correct horse'));
-    expect(file).not.toContain('น้องแพร');
-  });
-
-  it('wrong passphrase or a modified file is refused; nothing is created', async () => {
-    const scg = await admLogin(cloud);
-    expect((await scg.post('/api/adm/tenants/import', { code: 'moved', passphrase: 'wrong-pass', file })).body.details.reason).toBe('BOX_DECRYPT');
-    const f = JSON.parse(file);
-    f.meta.shopName = 'อื่น';
-    expect((await scg.post('/api/adm/tenants/import', { code: 'moved', passphrase: 'correct horse', file: JSON.stringify(f) })).body.details.reason).toBe('BOX_DECRYPT');
-    const n = await env.pool.query(`select count(*)::int n from tenants where code = 'moved'`);
-    expect(n.rows[0].n).toBe(0);
-  });
-
-  it('imports with stock lots, balances, doc counters and the audit log matching 100%', async () => {
-    const scg = await admLogin(cloud);
-    const r = await scg.post('/api/adm/tenants/import', { code: 'moved', region: 'ภาคกลาง', passphrase: 'correct horse', file });
-    expect(r.status).toBe(201);
-    expect(r.body.verified).toMatchObject({ auditChainOk: true });
-    expect(r.body.verified.numericColumns).toBeGreaterThan(20);
-    const src = env.seed.tenantId;
-    const dst = r.body.tenant.id as string;
-    const q = async (sql: string, t: string) => (await env.pool.query(sql, [t])).rows;
-    const lots = `select p.sku, l.received_at, l.qty_in::text, l.remaining::text, l.unit_cost::text, l.ref from stock_lots l join products p on p.id = l.product_id where l.tenant_id = $1 order by 1,2,4`;
-    const l1 = await q(lots, src);
-    const l2 = await q(lots, dst);
-    expect(l2).toEqual(l1);
-    const ctr = `select type, period, device, seq from doc_counters where tenant_id = $1 order by 1,2,3`;
-    expect(await q(ctr, dst)).toEqual(await q(ctr, src));
-    const ar = `select coalesce(sum(ar_balance),0)::text s, count(*)::int n from docs where tenant_id = $1`;
-    expect(await q(ar, dst)).toEqual(await q(ar, src));
-    const audit = `select at, user_name, action, object, ref, detail from audit_log where tenant_id = $1 order by chain_seq`;
-    const a1 = await q(audit, src);
-    const a2 = await q(audit, dst);
-    // the file is a snapshot: every source entry is replayed with its original time and author
-    expect(a2.slice(0, -1)).toEqual(a1.slice(0, a2.length - 1));
-    expect(a2.at(-1)).toMatchObject({ action: 'import', ref: 'moved' });
-    // employees keep their user links; staff sign in to the new shop with their old passwords (shop code picks the tenant)
-    const lg = await client(cloud).post('/api/auth/login', { username: 'prae', password: '1234', tenant: 'moved' });
-    expect(lg.status).toBe(200);
-    const e = await q(`select e.code, u.username from employees e left join users u on u.id = e.user_id where e.tenant_id = $1 order by 1`, dst);
-    expect(e.find((x) => x.code === 'EMP002')?.username).toBe('prae');
-    // the moved shop is a cloud shop now: the owner accepts the SCG terms first
-    expect((await client(cloud, lg.body.token).get('/api/products')).body.details.reason).toBe('TERMS_REQUIRED');
   });
 });
 

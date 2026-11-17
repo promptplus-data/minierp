@@ -186,8 +186,20 @@ describe('product images (REQ-M07-11)', () => {
     expect((await prae.get('/api/product-images')).body.items).toHaveLength(1);
   });
 
-  it('refuses SCG products, a type that does not match the bytes, and files over 256 KB', async () => {
-    expect((await owner.post(`/api/product-images/${P('p1')}`, { mime: 'image/png', data: PNG })).status).toBe(400);
+  it('SCG products keep the SCG master image on the cloud only; on-prem (Prompt OS) every product is the shop\'s own', async () => {
+    const { buildCloud } = await import('../admin/util');
+    const cloud = await buildCloud(env.pool);
+    try {
+      const cloudOwner = await login(cloud, 'charoen');
+      expect((await cloudOwner.post(`/api/product-images/${P('p1')}`, { mime: 'image/png', data: PNG })).status).toBe(400);
+    } finally {
+      await cloud.close();
+    }
+    expect((await owner.post(`/api/product-images/${P('p1')}`, { mime: 'image/png', data: PNG })).status).toBe(200);
+    expect((await owner.post(`/api/product-images/${P('p1')}/remove`)).status).toBe(200);
+  });
+
+  it('refuses a type that does not match the bytes, and files over 256 KB', async () => {
     expect((await owner.post(`/api/product-images/${P('p6')}`, { mime: 'image/jpeg', data: PNG })).status).toBe(400);
     expect((await owner.post(`/api/product-images/${P('p6')}`, { mime: 'image/png', data: Buffer.from('hello world').toString('base64') })).status).toBe(400);
     const big = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(262_200)]).toString('base64');

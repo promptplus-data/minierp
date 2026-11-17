@@ -161,11 +161,6 @@ export type LicenseStatus = z.infer<typeof LicenseStatus>;
 export const LicenseInstall = z.object({ key: z.string().min(20) });
 
 // =====================================================================================================
-// M19-07 export (on-prem) / import (SCG Admin)
-// =====================================================================================================
-export const ShopExportReq = z.object({ passphrase: z.string().min(8) });
-
-// =====================================================================================================
 // M19-09 cloud backup (on-prem)
 // =====================================================================================================
 export const BackupProvider = z.enum(['s3', 'gdrive', 'onedrive']);
@@ -197,26 +192,6 @@ export const BackupFile = z.object({ name: z.string(), size: z.number().nullable
 /** Restore on a new machine (setup screen only): pick a destination, list its backups, restore one. */
 export const BackupRestoreTarget = z.object({ provider: z.literal('s3'), s3: BackupS3Settings.required({ secretAccessKey: true }) });
 export const BackupRestoreReq = BackupRestoreTarget.extend({ file: z.string().min(1), passphrase: z.string().min(8) });
-
-// =====================================================================================================
-// M19-10 sales summary share (on-prem sender, cloud receiver)
-// =====================================================================================================
-export const ShareRange = z.object({ from: YMD, to: YMD });
-export const ShareDay = z.object({
-  date: z.string(),
-  scg: z.array(z.object({ sku: z.string(), name: z.string(), unit: z.string(), qty: Dec, amount: Dec })),
-  otherAmount: Dec, total: Dec,
-});
-/** Exactly what leaves the shop: no customer, user or document data. */
-export const SharePayload = z.object({
-  v: z.literal(1), shop: z.object({ name: z.string(), taxId: z.string() }), from: z.string(), to: z.string(),
-  days: z.array(ShareDay), totals: z.object({ scgQty: Dec, scgAmount: Dec, otherAmount: Dec, total: Dec }),
-});
-export type SharePayload = z.infer<typeof SharePayload>;
-/** Destination comes from the server environment (SCG_SHARE_URL); the license key identifies the shop to SCG. */
-export const ShareConfig = z.object({ receiverUrl: z.string().nullable(), licensed: z.boolean(), licenseId: z.string().nullable() });
-export const ShareSent = z.object({ id: z.string(), from: z.string(), to: z.string(), status: z.enum(['sent', 'failed']), error: z.string().nullable(), receiptId: z.string().nullable(), sentAt: z.string(), sentBy: z.string(), total: Dec });
-export const ShareReceived = z.object({ receiptId: z.string() });
 
 // =====================================================================================================
 // M14-05 support access consent (cloud shop side)
@@ -276,15 +251,6 @@ export const AdmTenantCreate = z.object({
   owner: z.object({ username: z.string().regex(/^[a-z0-9._]{3,20}$/), name: z.string().min(1), password: z.string().min(6), pin: z.string().regex(/^\d{4,6}$/) }),
 });
 export const AdmReason = z.object({ reason: z.string().min(1) });
-export const AdmTenantImport = z.object({
-  code: z.string().regex(/^[a-z0-9-]{3,30}$/), region: z.string().default(''), passphrase: z.string().min(8),
-  file: z.string().min(10), // the exported file's text
-});
-/** After import every table's row count and the sum of every numeric column match the file, and the audit chain verifies. */
-export const AdmImportResult = z.object({
-  tenant: AdmTenant, tables: z.record(z.number()),
-  verified: z.object({ tables: z.number(), rows: z.number(), numericColumns: z.number(), auditChainOk: z.boolean() }),
-});
 export const AdmSupportView = z.object({
   shop: z.object({ code: z.string(), name: z.string(), taxId: z.string(), vatRegistered: z.boolean() }),
   grant: z.object({ expiresAt: z.string(), grantedBy: z.string() }),
@@ -297,7 +263,8 @@ export const AdmSupportView = z.object({
 export const AdmKpi = z.object({
   asOf: z.string(),
   total: z.number(), byEdition: z.object({ cloud: z.number(), onprem: z.number() }),
-  active30: z.number(), active30ByEdition: z.object({ cloud: z.number(), onprem: z.number() }),
+  /** Cloud shops with a bill in 30 days; on-prem customers send nothing back. */
+  active30: z.number(),
   newPerMonth: z.array(z.object({ month: z.string(), cloud: z.number(), onprem: z.number() })),
   byRegion: z.array(z.object({ region: z.string(), total: z.number(), active30: z.number() })),
   suspended: z.number(),
@@ -332,10 +299,8 @@ export const AdmLicenseIssue = z.object({
 export const AdmLicense = z.object({
   licenseId: z.string(), key: z.string(), shopName: z.string(), taxId: z.string(), edition: z.string(), type: LicenseType,
   expiresAt: z.string().nullable(), issuedAt: z.string(), region: z.string(), note: z.string(), issuedBy: z.string(),
-  revokedAt: z.string().nullable(), lastShareAt: z.string().nullable(), features: z.array(FeatureKey).nullable().default(null),
+  revokedAt: z.string().nullable(), features: z.array(FeatureKey).nullable().default(null),
 });
-export const AdmShare = z.object({ id: z.string(), licenseId: z.string(), shopName: z.string(), taxId: z.string(), from: z.string(), to: z.string(), total: Dec, receivedAt: z.string(), payload: SharePayload });
-export const AdmShareQuery = pageQuery.extend({ licenseId: z.string().optional() });
 export const AdmAuditEntry = z.object({ id: z.string(), at: z.string(), admin: z.string(), action: z.string(), object: z.string(), ref: z.string().nullable(), detail: z.string() });
 
 // =====================================================================================================
@@ -358,17 +323,16 @@ export const adminRoutes = {
   backupRestoreFiles: 'POST /api/backup/restore/files', backupRestore: 'POST /api/backup/restore',
   // M02 (both editions; enforced only for shops flagged by SCG Admin)
   termsStatus: 'GET /api/terms', termsAccept: 'POST /api/terms/accept',
-  // cloud: receiver, support consent, SCG Admin
-  shareReceive: 'POST /api/scg/sales-summary',
+  // cloud: support consent, SCG Admin
   supportGrants: 'GET /api/support-grants', supportGrantCreate: 'POST /api/support-grants', supportGrantRevoke: 'POST /api/support-grants/:id/revoke',
   admLogin: 'POST /api/adm/auth/login', admMe: 'GET /api/adm/auth/me', admAdmins: 'GET /api/adm/admins', admAdminCreate: 'POST /api/adm/admins', admAdminUpdate: 'PATCH /api/adm/admins/:id',
   admTenants: 'GET /api/adm/tenants', admTenantCreate: 'POST /api/adm/tenants', admTenantSuspend: 'POST /api/adm/tenants/:id/suspend', admTenantFeatures: 'POST /api/adm/tenants/:id/features',
-  admTenantResume: 'POST /api/adm/tenants/:id/resume', admTenantImport: 'POST /api/adm/tenants/import', admTenantSupport: 'POST /api/adm/tenants/:id/support',
+  admTenantResume: 'POST /api/adm/tenants/:id/resume', admTenantSupport: 'POST /api/adm/tenants/:id/support',
   admKpi: 'GET /api/adm/kpi',
   admCentral: 'GET /api/adm/central-products', admCentralCreate: 'POST /api/adm/central-products', admCentralUpdate: 'PATCH /api/adm/central-products/:id',
   admCentralPrice: 'POST /api/adm/central-products/:id/prices', admCentralPush: 'POST /api/adm/central-push', admCentralPushes: 'GET /api/adm/central-push',
   admLicenses: 'GET /api/adm/licenses', admLicenseIssue: 'POST /api/adm/licenses', admLicenseRevoke: 'POST /api/adm/licenses/:id/revoke',
-  admShares: 'GET /api/adm/sales-shares', admAudit: 'GET /api/adm/audit',
+  admAudit: 'GET /api/adm/audit',
 } as const;
 
 const onprem = 'onprem' as const;
@@ -377,9 +341,9 @@ const cloud = 'cloud' as const;
 export const adminRouteEditions: RouteEditions<typeof adminRoutes> = {
   backupConfig: onprem, backupConfigSave: onprem, backupOauthStart: onprem, backupOauthPoll: onprem, backupRun: onprem, backupRuns: onprem,
   backupFiles: onprem, backupRestoreFiles: onprem, backupRestore: onprem,
-  shareReceive: cloud, supportGrants: cloud, supportGrantCreate: cloud, supportGrantRevoke: cloud,
+  supportGrants: cloud, supportGrantCreate: cloud, supportGrantRevoke: cloud,
   admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admAdminUpdate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud, admTenantFeatures: cloud,
-  admTenantResume: cloud, admTenantImport: cloud, admTenantSupport: cloud, admKpi: cloud, admCentral: cloud, admCentralCreate: cloud,
+  admTenantResume: cloud, admTenantSupport: cloud, admKpi: cloud, admCentral: cloud, admCentralCreate: cloud,
   admCentralUpdate: cloud, admCentralPrice: cloud, admCentralPush: cloud, admCentralPushes: cloud, admLicenses: cloud, admLicenseIssue: cloud,
-  admLicenseRevoke: cloud, admShares: cloud, admAudit: cloud,
+  admLicenseRevoke: cloud, admAudit: cloud,
 };

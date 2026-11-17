@@ -2,7 +2,7 @@
  * Drizzle table definitions for the "admin" module group (Agent D): M17 HR/payroll/leave, M02 terms, M14 SCG Admin,
  * M19-07/09/10/11. Typing only: the tables are created by migrations 0400–0404 (keep in sync). Shop tables carry
  * tenant_id and are secured with erp_secure_table(); the platform tables (platform_admins, platform_audit,
- * central_*, license_registry, sales_share_inbox) are global and readable only in SCG Admin context (0401/0402).
+ * central_*, license_registry) are global and readable only in SCG Admin context (0401/0402).
  * Columns added to core tables: tenants.adm_status, adm_status_reason, adm_edition, adm_region, adm_customer_code,
  * adm_terms_required; products.adm_central_id, adm_srp, adm_price_custom.
  */
@@ -70,11 +70,6 @@ export const licenses = pgTable('licenses', {
   issuedAt: ts('issued_at').notNull(), installedAt: ts('installed_at').notNull().defaultNow(), installedBy: uuid('installed_by'),
 });
 
-export const salesShares = pgTable('sales_shares', {
-  id: id(), tenantId: tenantId(), fromDate: date('from_date').notNull(), toDate: date('to_date').notNull(), payload: jsonb('payload').notNull(),
-  status: text('status').notNull(), error: text('error'), receiptId: text('receipt_id'), sentBy: uuid('sent_by').notNull(), sentAt: ts('sent_at').notNull().defaultNow(),
-});
-
 export const backupConfig = pgTable('backup_config', {
   tenantId: uuid('tenant_id').primaryKey(), enabled: boolean('enabled').notNull().default(false), provider: text('provider'),
   settings: jsonb('settings').notNull(), keySalt: text('key_salt'), derivedKey: text('derived_key'), schedule: text('schedule').notNull().default('daily'),
@@ -125,10 +120,4 @@ export const licenseRegistry = pgTable('license_registry', {
   edition: text('edition').notNull(), keyType: text('key_type').notNull(), expiresAt: date('expires_at'), issuedAt: ts('issued_at').notNull(),
   region: text('region').notNull().default(''), note: text('note').notNull().default(''), issuedBy: text('issued_by').notNull(),
   revokedAt: ts('revoked_at'), revokedBy: text('revoked_by'),
-});
-
-export const salesShareInbox = pgTable('sales_share_inbox', {
-  id: id(), licenseId: text('license_id').notNull(), shopName: text('shop_name').notNull(), taxId: text('tax_id').notNull(),
-  fromDate: date('from_date').notNull(), toDate: date('to_date').notNull(), payload: jsonb('payload').notNull(), total: money('total').notNull(),
-  receivedAt: ts('received_at').notNull().defaultNow(),
 });

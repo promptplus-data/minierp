@@ -1,15 +1,15 @@
 /**
  * REQ-M19-11 issue on-prem license keys (expiring / lifetime, bound to shop name + tax id, signed by the cloud
- * server's private key) and the key registry; REQ-M19-10 the sales summaries shops chose to send.
+ * server's private key) and the key registry.
  */
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { AdmLicense, AdmShare, FEATURE_KEYS, page, type FeatureKey } from '@erp/contracts';
+import { AdmLicense, FEATURE_KEYS, page, type FeatureKey } from '@erp/contracts';
 import { FeaturePicker, featureSummary } from './FeaturePicker';
 import { addDays } from '@erp/core';
-import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useDebounced, useToast } from '../../../ui';
+import { Modal, Pill, SkeletonRows, th, thTime, useDebounced, useToast } from '../../../ui';
 import { LoadMore } from '../../../ui/lists';
 import { SearchSelect, type RemotePage } from '../../../ui/SearchSelect';
 import { admErr, todayYmd } from '../common';
@@ -41,7 +41,7 @@ export default function Licenses() {
         <input type="search" style={{ width: '100%', marginBottom: 10 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อร้าน เลขผู้เสียภาษี เลขที่ license หรือภาค" aria-label="ค้นหา license" />
         <div className="tw">
           <table data-testid="license-table">
-            <thead><tr><th>เลขที่</th><th>ร้าน</th><th>ประเภท</th><th>หมดอายุ</th><th>ออกเมื่อ / โดย</th><th>ส่งยอดล่าสุด</th><th>สถานะ</th><th /></tr></thead>
+            <thead><tr><th>เลขที่</th><th>ร้าน</th><th>ประเภท</th><th>หมดอายุ</th><th>ออกเมื่อ / โดย</th><th>สถานะ</th><th /></tr></thead>
             <tbody>
               {loading ? <SkeletonRows cols={8} /> : list.rows.map((l) => {
                 const expired = !!l.expiresAt && l.expiresAt < today;
@@ -53,7 +53,6 @@ export default function Licenses() {
                     <td className="small">{l.type === 'lifetime' ? 'ตลอดชีพ' : 'มีวันหมดอายุ'}<div className="muted">{l.edition === 'cloud' ? 'Cloud' : `On-premise · ${featureSummary(l.features)}`}</div></td>
                     <td className="small">{l.expiresAt ? th(l.expiresAt) : '-'}</td>
                     <td className="small">{thTime(l.issuedAt)}<div className="muted">{l.issuedBy}</div></td>
-                    <td className="small">{l.lastShareAt ? thTime(l.lastShareAt) : '-'}</td>
                     <td>{l.revokedAt ? <Pill k="mut">ยกเลิกแล้ว</Pill> : expired ? <Pill k="bad">หมดอายุ</Pill> : soon ? <Pill k="warn">ใกล้หมดอายุ</Pill> : <Pill k="ok">ใช้งาน</Pill>}</td>
                     <td><div className="row"><button className="btn sm" onClick={() => setShow(l)}>ดูคีย์</button>{write && !l.revokedAt && <button className="btn sm bad" onClick={() => setRevoke(l)}>ยกเลิก</button>}</div></td>
                   </tr>
@@ -64,7 +63,7 @@ export default function Licenses() {
           </table>
         </div>
         <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
-        <p className="small muted">คีย์ตรวจในเครื่องของร้านโดยไม่ต่อเน็ต การยกเลิกจึงไม่ปิดเครื่องของร้าน แต่ SCG จะไม่รับสรุปยอดขายจากคีย์ที่ยกเลิก · ต่ออายุ = ออกคีย์ใหม่ให้ร้านใส่แทน</p>
+        <p className="small muted">ร้าน Cloud: ยกเลิกแล้วร้านดูได้อย่างเดียวทันที · On-premise (Prompt OS) ตรวจคีย์ในเครื่องโดยไม่ต่อเน็ต การยกเลิกจึงไม่มีผลกับเครื่องลูกค้า ใช้คีย์แบบมีวันหมดอายุถ้าต้องการหยุดสิทธิ์ · ต่ออายุ = ออกคีย์ใหม่ให้ร้านใส่แทน</p>
       </div>
       {(issued ?? show) && <KeyModal l={(issued ?? show)!} fresh={!!issued} onClose={() => { setIssued(null); setShow(null); }} />}
       {revoke && <RevokeModal l={revoke} onClose={() => setRevoke(null)} onDone={() => { setRevoke(null); refresh(); }} />}
@@ -117,7 +116,7 @@ function IssueForm({ onIssued }: { onIssued: (l: Lic) => void }) {
         </label>
         <label className="f">รุ่นของร้าน
           <select value={f.edition} onChange={(e) => setF({ ...f, edition: e.target.value as typeof f.edition })} data-testid="lic-edition">
-            <option value="onprem">On-premise (ติดตั้งในร้าน)</option><option value="cloud">Cloud</option>
+            <option value="onprem">On-premise (Prompt OS)</option><option value="cloud">Cloud</option>
           </select>
         </label>
         <label className="f">ชื่อร้าน (ตรงกับในโปรแกรมของร้าน) *<input type="text" name="shopName" value={f.shopName} onChange={(e) => setF({ ...f, shopName: e.target.value })} data-testid="lic-shop" /></label>
@@ -183,53 +182,5 @@ function RevokeModal({ l, onClose, onDone }: { l: Lic; onClose: () => void; onDo
       {err && <div className="err">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ไม่ยกเลิก</button><button className="btn bad" onClick={() => void go()}>ยืนยันยกเลิก</button></div>
     </Modal>
-  );
-}
-
-export function Shares() {
-  const [q, setQ] = useState('');
-  const dq = useDebounced(q.trim(), 300);
-  const list = useAdmLoadMore(['scg', 'shares'], '/api/adm/sales-shares', AdmShare, { q: dq });
-  const [open, setOpen] = useState<z.infer<typeof AdmShare> | null>(null);
-  const loading = list.isLoading;
-  return (
-    <div className="card">
-      <h2>สรุปยอดขายที่ร้าน On-premise ส่งให้ SCG</h2>
-      <input type="search" style={{ width: '100%', marginBottom: 10 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อร้าน เลขผู้เสียภาษี หรือเลขที่ license" aria-label="ค้นหา" />
-      <div className="tw">
-        <table data-testid="shares-table">
-          <thead><tr><th>รับเมื่อ</th><th>ร้าน</th><th>license</th><th>ช่วงข้อมูล</th><th className="n">ยอดรวม</th><th /></tr></thead>
-          <tbody>
-            {loading ? <SkeletonRows cols={6} /> : list.rows.map((s) => (
-              <tr key={s.id}>
-                <td className="small">{thTime(s.receivedAt)}</td><td>{s.shopName}<div className="small muted">{s.taxId}</div></td><td className="mono small">{s.licenseId}</td>
-                <td className="small">{th(s.from)} – {th(s.to)}</td><td className="n">{fmt(s.total)}</td><td><button className="btn sm" onClick={() => setOpen(s)}>ดูรายละเอียด</button></td>
-              </tr>
-            ))}
-            {!loading && list.data && !list.rows.length && <tr><td colSpan={6} className="empty">ยังไม่มีร้านส่งสรุปยอดขาย</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} count={list.rows.length} />
-      <p className="small muted">ร้านเลือกส่งเองและกดส่งเอง · มีเฉพาะยอดขายรายวันต่อสินค้า SCG และยอดรวมสินค้าอื่น ไม่มีข้อมูลลูกค้า</p>
-      {open && (
-        <Modal onClose={() => setOpen(null)} wide label="สรุปยอดขาย">
-          <h3>{open.shopName} · {th(open.from)} – {th(open.to)}</h3>
-          <div className="tw">
-            <table>
-              <thead><tr><th>วันที่</th><th>สินค้า SCG</th><th className="n">จำนวน</th><th className="n">มูลค่า</th></tr></thead>
-              <tbody>
-                {open.payload.days.map((dd) => [
-                  ...dd.scg.map((x, i) => <tr key={dd.date + x.sku}><td className="small">{i === 0 ? th(dd.date) : ''}</td><td>{x.name}<div className="small muted mono">{x.sku}</div></td><td className="n">{fq(x.qty)} {x.unit}</td><td className="n">{fmt(x.amount)}</td></tr>),
-                  <tr key={`${dd.date}o`}><td className="small">{dd.scg.length ? '' : th(dd.date)}</td><td className="muted">สินค้าอื่นรวม</td><td /><td className="n">{fmt(dd.otherAmount)}</td></tr>,
-                ])}
-                <tr><td /><td><b>รวม</b></td><td className="n">{fq(open.payload.totals.scgQty)}</td><td className="n"><b>{fmt(open.payload.totals.total)}</b></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div className="act"><button className="btn pri" onClick={() => setOpen(null)}>ปิด</button></div>
-        </Modal>
-      )}
-    </div>
   );
 }

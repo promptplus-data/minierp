@@ -4,23 +4,21 @@
  * license issuing (REQ-M19-11), sales summaries received from on-prem shops (REQ-M19-10) and whole-shop import
  * (REQ-M19-07). Every action is written to platform_audit; effects inside a shop are also in that shop's audit_log.
  */
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import type { z } from 'zod';
 import { withTenant, type Pool, type Tx } from '@erp/db';
 import type {
-  AdmCentralPriceReq, AdmCentralProduct, AdmCentralUpsert, AdmKpi, AdmLicenseIssue, AdmPushReq, AdmTenant, AdmTenantCreate, AdmTenantImport,
-  AdmTenantQuery, LicensePayload, SharePayload,
+  AdmCentralPriceReq, AdmCentralProduct, AdmCentralUpsert, AdmKpi, AdmLicenseIssue, AdmPushReq, AdmTenant, AdmTenantCreate,
+  AdmTenantQuery, LicensePayload,
 } from '@erp/contracts';
-import { FEATURE_KEYS, SharePayload as SharePayloadSchema, enabledFeatures, type FeatureKey } from '@erp/contracts';
+import { FEATURE_KEYS, enabledFeatures, type FeatureKey } from '@erp/contracts';
 import { d, money, type Role , searchTokens } from '@erp/core';
 import { writeAudit } from '../../lib/audit';
 import { E, isUuid } from '../../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../../lib/paging';
-import { openBox } from './box';
 import { parseLicenseKey, signLicense, signingKeyFromEnv } from './license';
 import { ADM_CAN, admAudit, requireAdm, withPlatform, type AdmCtx } from './platform';
-import { importShop, type ShopExport } from './transfer';
 
 type In<T extends z.ZodTypeAny> = z.output<T>;
 const shopWho = (a: AdmCtx, label = 'SCG Admin') => ({ userId: null, name: `${label}: ${a.name}` });
@@ -129,22 +127,6 @@ export async function setTenantFeatures(pool: Pool, a: AdmCtx, id: string, featu
   return tenantById(pool, id);
 }
 
-/** REQ-M19-07: decrypt the on-prem export and load it into a NEW cloud shop (verified totals, transfer.ts). */
-export async function importTenant(pool: Pool, a: AdmCtx, body: In<typeof AdmTenantImport>) {
-  requireAdm(a, ADM_CAN.shopsWrite);
-  const { payload, meta } = openBox<ShopExport>(body.file, body.passphrase, 'shop-export');
-  if (await withPlatform(pool, async (tx) => (await tx.query<{ t: boolean }>(`select adm_tenant_code_taken($1) t`, [body.code])).rows[0]!.t)) {
-    throw E.conflict(`Shop code ${body.code} is already used`, { reason: 'CODE_TAKEN' });
-  }
-  const res = await importShop(pool, payload, {
-    code: body.code, edition: 'cloud', region: body.region, who: shopWho(a), termsRequired: true,
-    detail: `ย้ายจาก On-premise ขึ้น Cloud · ไฟล์ ${meta.createdAt} · ร้านเดิม ${payload.source.code}`,
-  });
-  await withPlatform(pool, (tx) => admAudit(tx, a, 'import', 'tenant', body.code,
-    `${meta.shopName} · ${res.verified.rows} แถว ${res.verified.tables} ตาราง · ยอดตรงกันทุกตาราง`));
-  return { tenant: await tenantById(pool, res.tenantId), tables: res.tables, verified: res.verified };
-}
-
 /** REQ-M14-05: read-only look at a shop, only while the shop's own grant is active; the shop sees it in its log. */
 export async function supportView(pool: Pool, a: AdmCtx, id: string) {
   requireAdm(a, ADM_CAN.support);
@@ -182,10 +164,10 @@ export async function supportView(pool: Pool, a: AdmCtx, id: string) {
 // ---------------------------------------------------------------- KPI (REQ-M14-03, OQ-07: KPI = registered shops)
 export async function kpi(tx: Tx, today: string): Promise<AdmKpi> {
   const shops = (await tx.query<OverviewRow>(`select * from adm_tenant_overview()`)).rows;
-  // On-prem shops are counted from the license registry (one per tax id), active = sent a sales summary in 30 days.
-  const onprem = (await tx.query<{ tax_id: string; region: string; first: Date; active: boolean }>(
-    `select l.tax_id, (array_agg(l.region order by l.issued_at))[1] region, min(l.issued_at) first,
-            exists (select 1 from sales_share_inbox i where i.tax_id = l.tax_id and i.received_at >= now() - interval '30 days') active
+  // On-prem customers are counted from the license registry (one per tax id). They send nothing back, so activity is
+  // known for cloud shops only.
+  const onprem = (await tx.query<{ tax_id: string; region: string; first: Date }>(
+    `select l.tax_id, (array_agg(l.region order by l.issued_at))[1] region, min(l.issued_at) first
        from license_registry l where l.revoked_at is null and l.edition = 'onprem' group by l.tax_id`)).rows;
   const months: string[] = [];
   const [y, m] = today.split('-').map(Number) as [number, number];
@@ -204,13 +186,11 @@ export async function kpi(tx: Tx, today: string): Promise<AdmKpi> {
     regions.set(k, v);
   };
   shops.forEach((s) => bump(s.region, active(s)));
-  onprem.forEach((s) => bump(s.region, s.active));
-  const cloudActive = shops.filter(active).length;
-  const onpremActive = onprem.filter((s) => s.active).length;
+  onprem.forEach((s) => bump(s.region, false));
   return {
     asOf: today,
     total: shops.length + onprem.length, byEdition: { cloud: shops.length, onprem: onprem.length },
-    active30: cloudActive + onpremActive, active30ByEdition: { cloud: cloudActive, onprem: onpremActive },
+    active30: shops.filter(active).length,
     newPerMonth: months.map((mo) => ({ month: mo, cloud: shops.filter((s) => ym(s.created_at) === mo).length, onprem: onprem.filter((s) => ym(s.first) === mo).length })),
     byRegion: [...regions.entries()].map(([region, v]) => ({ region, ...v })).sort((p, q) => q.total - p.total || p.region.localeCompare(q.region)),
     suspended: shops.filter((s) => s.status === 'suspended').length,
@@ -367,14 +347,14 @@ export async function listPushes(tx: Tx, q: { limit: number; cursor?: string }) 
 // ---------------------------------------------------------------- licenses (REQ-M19-11 issuing side)
 interface RegRow {
   license_id: string; license_key: string; shop_name: string; tax_id: string; edition: string; key_type: 'expiring' | 'lifetime'; expires_at: string | null;
-  issued_at: Date; region: string; note: string; issued_by: string; revoked_at: Date | null; last_share: Date | null; features: string[] | null;
+  issued_at: Date; region: string; note: string; issued_by: string; revoked_at: Date | null; features: string[] | null;
 }
 const toReg = (r: RegRow) => ({
   licenseId: r.license_id, key: r.license_key, shopName: r.shop_name, taxId: r.tax_id, edition: r.edition, type: r.key_type, expiresAt: r.expires_at,
   issuedAt: r.issued_at.toISOString(), region: r.region, note: r.note, issuedBy: r.issued_by, revokedAt: r.revoked_at?.toISOString() ?? null,
-  lastShareAt: r.last_share?.toISOString() ?? null, features: r.features === null ? null : [...enabledFeatures(r.features)],
+  features: r.features === null ? null : [...enabledFeatures(r.features)],
 });
-const REG_SELECT = `select l.*, (select max(i.received_at) from sales_share_inbox i where i.license_id = l.license_id) last_share from license_registry l`;
+const REG_SELECT = `select l.* from license_registry l`;
 
 export async function listLicenses(tx: Tx, q: { q?: string; limit: number; cursor?: string }) {
   const cur = decodeCursor(q.cursor, 2);
@@ -436,51 +416,6 @@ export async function revokeLicense(tx: Tx, a: AdmCtx, id: string, reason: strin
 
 // ---------------------------------------------------------------- sales summaries (REQ-M19-10 receiving side)
 /** Public receiver: the sender proves who it is with its signed license key; nothing else is accepted. */
-export async function receiveShare(pool: Pool, body: { key?: unknown; payload?: unknown }): Promise<{ receiptId: string }> {
-  if (typeof body.key !== 'string') throw E.validation('License key required', { reason: 'LICENSE_INVALID' });
-  const lic = parseLicenseKey(body.key);
-  if (lic.edition !== 'onprem') throw E.validation('Only on-premise shops send sales summaries', { reason: 'LICENSE_EDITION' });
-  const payload = SharePayloadSchema.parse(body.payload);
-  if (payload.shop.taxId.replace(/\D/g, '') !== lic.taxId) throw E.validation('The summary is for another tax id than the key', { reason: 'SHOP_MISMATCH' });
-  return withTenant(pool, null, async (tx) => {
-    await tx.query(`select set_config('app.share_receiver', 'on', true)`);
-    const reg = (await tx.query<{ revoked_at: Date | null }>(`select revoked_at from license_registry where license_id = $1`, [lic.licenseId])).rows[0];
-    if (!reg) throw E.forbidden('This license key is not registered with SCG', { reason: 'LICENSE_UNKNOWN' });
-    if (reg.revoked_at) throw E.forbidden('This license key was revoked', { reason: 'LICENSE_REVOKED' });
-    // No RETURNING: the receiver may insert into the inbox but not read it (RLS).
-    const receiptId = randomUUID();
-    await tx.query(
-      `insert into sales_share_inbox (id, license_id, shop_name, tax_id, from_date, to_date, payload, total) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-      [receiptId, lic.licenseId, payload.shop.name, lic.taxId, payload.from, payload.to, JSON.stringify(payload), payload.totals.total]);
-    return { receiptId };
-  });
-}
-
-export async function listShares(tx: Tx, q: { q?: string; licenseId?: string; limit: number; cursor?: string }) {
-  const cur = decodeCursor(q.cursor, 2);
-  const params: unknown[] = [];
-  const where: string[] = [];
-  if (q.licenseId) {
-    params.push(q.licenseId);
-    where.push(`license_id = $${params.length}`);
-  }
-  for (const w of searchTokens(q.q)) {
-    params.push(`%${likeEscape(w)}%`);
-    where.push(`(shop_name ilike $${params.length} or tax_id ilike $${params.length} or license_id ilike $${params.length})`);
-  }
-  if (cur) {
-    params.push(cur[0], cur[1]);
-    where.push(`(received_at, id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
-  }
-  params.push(q.limit + 1);
-  const r = await tx.query<{ id: string; license_id: string; shop_name: string; tax_id: string; from_date: string; to_date: string; total: string; received_at: Date; payload: SharePayload }>(
-    `select * from sales_share_inbox ${where.length ? 'where ' + where.join(' and ') : ''} order by received_at desc, id desc limit $${params.length}`, params);
-  return pageOf(r.rows, q.limit, (x) => [x.received_at.toISOString(), x.id], (x) => ({
-    id: x.id, licenseId: x.license_id, shopName: x.shop_name, taxId: x.tax_id, from: x.from_date, to: x.to_date, total: money(x.total),
-    receivedAt: x.received_at.toISOString(), payload: x.payload,
-  }));
-}
-
 export async function listAdmAudit(tx: Tx, a: AdmCtx, q: { q?: string; limit: number; cursor?: string }) {
   requireAdm(a, ADM_CAN.audit);
   const cur = decodeCursor(q.cursor, 1);
