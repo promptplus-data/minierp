@@ -13,6 +13,7 @@ import { ApDueCard, GrAlertBanner } from '../purchasing/shared';
 import { monthTh } from './shared';
 import './reports.css';
 import { ErrorBanner } from '../../errors';
+import { IS_CLOUD } from '../../cloud';
 
 const useDash = () => useQuery({ queryKey: ['rp', 'dashboard'], queryFn: () => api('GET', '/api/reports/dashboard', { schema: ReportDashboard }), staleTime: 30_000 });
 
@@ -134,7 +135,7 @@ export default function Home() {
             <h2>ใกล้หมดสต็อก</h2>
             <ul className="hm-list">
               {dash.lowStock.items.map((x) => (
-                <li key={x.productId}><span><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(x.productId)}`}>{x.name}</RouteLink>{x.isScg && <span className="pill p-acc" style={{ marginLeft: 6 }}>SCG</span>}</span><span className="n">{fq(x.qty)} / {fq(x.reorderPoint)} {x.unit}</span></li>
+                <li key={x.productId}><span><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(x.productId)}`}>{x.name}</RouteLink>{IS_CLOUD && x.isScg && <span className="pill p-acc" style={{ marginLeft: 6 }}>SCG</span>}</span><span className="n">{fq(x.qty)} / {fq(x.reorderPoint)} {x.unit}</span></li>
               ))}
             </ul>
           </div>

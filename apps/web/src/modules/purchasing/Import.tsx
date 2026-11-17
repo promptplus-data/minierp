@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { IMPORT_KINDS, ImportBatch, ImportPreview, ImportProfile, ProductAlias, type ImportKind } from '@erp/contracts';
 import { ApiFail, api, errText, getToken } from '../../api';
 import { useAuth } from '../../auth';
+import { IS_CLOUD } from '../../cloud';
 import { Modal, Pill, SkeletonRows, thTime, useDebounced, useToast } from '../../ui';
 import { LoadMore, useLoadMore } from '../../ui/lists';
 import { NoteField } from '../../ui/NoteField';
@@ -114,7 +115,7 @@ function Wizard({ kinds }: { kinds: ImportKind[] }) {
             {kind === 'opening_stock' ? 'สต็อกเปิดนำเข้าเป็นล็อต: สินค้า 1 รหัสใส่ได้หลายแถวต่างวันที่ (yyyymmdd แบบเดียวกับ template PEAK) ระบบใช้วันที่ล็อตตัด FIFO'
               : kind === 'opening_ar' || kind === 'opening_ap' ? 'ยอดคงค้าง ณ วันเริ่มใช้ระบบ ใส่เลขที่เอกสารเดิม วันที่ วันครบกำหนด (เว้นว่างได้ ระบบคิดจากเงื่อนไขชำระ) · ไม่ออกใบกำกับภาษีใหม่'
                 : kind === 'customers' || kind === 'vendors' ? 'ช่องผู้ติดต่อตาม template PEAK (ประเภทกิจการ ที่อยู่ ธนาคาร ฯลฯ) · ผู้ติดต่อที่มีอยู่แล้ว (รหัส เลขภาษี หรือชื่อตรง) จะแสดงเป็น "มีอยู่แล้ว" เลือกข้ามหรืออัปเดตได้'
-                  : 'สินค้า SCG ไม่ต้องนำเข้า ระบบซิงก์ให้แล้ว · บาร์โค้ดที่ตรงกับสินค้าในระบบจะผูกรหัสเดิมเข้ากับสินค้านั้นแทนการสร้างซ้ำ'}
+                  : (IS_CLOUD ? 'สินค้า SCG ไม่ต้องนำเข้า ระบบซิงก์ให้แล้ว · ' : '') + 'บาร์โค้ดที่ตรงกับสินค้าในระบบจะผูกรหัสเดิมเข้ากับสินค้านั้นแทนการสร้างซ้ำ'}
             {' · '}ทีม onboarding นำเข้าแทนร้านได้ ทุกการนำเข้าบันทึกชื่อผู้ทำใน log
           </div>
         </>

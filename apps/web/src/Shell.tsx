@@ -12,6 +12,8 @@ import { navFor, useVisibleNav } from './modules';
 import { iconSvg } from './modules/icons';
 import { SECTIONS, type Section } from './modules/types';
 import { TouchToggle } from './touch';
+import { BrandMark } from './ui/Brand';
+import { PRODUCT } from './cloud';
 
 const I = (svg: string) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} />
@@ -39,8 +41,8 @@ export function Shell({ children }: { children: ReactNode }) {
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
       <aside className={`side${open ? ' open' : ''}`} aria-label="เมนู">
         <div className="brand">
-          <div className="logo">{(shop?.name ?? 'S').slice(0, 2)}</div>
-          <div><b>{shop?.name ?? 'SCG Shop ERP'}</b><small>{shop ? `สาขา${shop.branch || 'สำนักงานใหญ่'}` : ''}</small></div>
+          <BrandMark initials={(shop?.name ?? 'S').slice(0, 2)} />
+          <div><b>{shop?.name ?? PRODUCT}</b><small>{shop ? `สาขา${shop.branch || 'สำนักงานใหญ่'}` : ''}</small></div>
         </div>
         <nav className="nav">
           {groups.map(([g, vs]) => (
@@ -65,7 +67,7 @@ export function Shell({ children }: { children: ReactNode }) {
         <header className="top">
           <button className="btn sm menu-btn" aria-label="เปิดเมนู" onClick={() => setOpen(true)}>☰ เมนู</button>
           <div>
-            <h1>{cur?.label ?? 'SCG Shop ERP'}</h1>
+            <h1>{cur?.label ?? PRODUCT}</h1>
             <div className="mcode"><span className="crumb">{SECTIONS[grp]}</span><span className="mono">Module {cur?.code ?? '-'}</span></div>
           </div>
           <div className="sp" />

@@ -14,7 +14,7 @@ foreach ($id in 'scgerp-server', 'scgerp-postgres') {
     if (Test-Path $exe) { & $exe uninstall } else { sc.exe delete $id | Out-Null }
   }
 }
-Remove-NetFirewallRule -Name 'SCGShopERP-HTTPS', 'SCGShopERP-mDNS' -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName 'SCG Shop ERP nightly backup' -Confirm:$false -ErrorAction SilentlyContinue
-Write-Host "Services removed. Data kept in $env:ProgramData\SCG Shop ERP"
+Remove-NetFirewallRule -Name 'PromptOS-HTTPS', 'PromptOS-mDNS' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Prompt OS nightly backup' -Confirm:$false -ErrorAction SilentlyContinue
+Write-Host "Services removed. Data kept in $env:ProgramData\Prompt OS"
 exit 0

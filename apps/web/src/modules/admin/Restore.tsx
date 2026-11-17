@@ -10,6 +10,8 @@ import { api } from '../../api';
 import { useMeta } from '../../data';
 import { fq, thTime } from '../../ui';
 import { admErr } from './common';
+import { BrandMark } from '../../ui/Brand';
+import { PRODUCT } from '../../cloud';
 
 const RestoreResult = z.object({ shop: z.string(), tables: z.record(z.number()), verified: z.object({ tables: z.number(), rows: z.number(), numericColumns: z.number(), auditChainOk: z.boolean() }) });
 
@@ -56,8 +58,8 @@ export default function Restore() {
     <div className="lg">
       <div className="card lgcard" style={{ width: 'min(560px,100%)' }}>
         <div className="row" style={{ gap: 10 }}>
-          <div className="logo">S</div>
-          <div><b>กู้คืนข้อมูลร้านจากข้อมูลสำรอง</b><div className="small muted">SCG Shop ERP · <span className="ed onprem">On-premise</span></div></div>
+          <BrandMark initials="S" />
+          <div><b>กู้คืนข้อมูลร้านจากข้อมูลสำรอง</b><div className="small muted">{PRODUCT} · <span className="ed onprem">On-premise</span></div></div>
         </div>
         <div className="steps" style={{ margin: '14px 0' }}>
           {['ปลายทาง', 'เลือกไฟล์และรหัส', 'เสร็จ'].map((s, i) => <span key={s} className={i + 1 === step ? 'on' : i + 1 < step ? 'done' : ''}>{i + 1}. {s}</span>)}
@@ -72,7 +74,7 @@ export default function Restore() {
             <label className="f">Access key ID<input type="text" value={s3.accessKeyId} onChange={(e) => setS3({ ...s3, accessKeyId: e.target.value })} /></label>
             <label className="f" style={{ gridColumn: '1/-1' }}>Secret access key<input type="password" value={s3.secretAccessKey} onChange={(e) => setS3({ ...s3, secretAccessKey: e.target.value })} /></label>
             <label className="row small"><input type="checkbox" checked={s3.forcePathStyle} onChange={(e) => setS3({ ...s3, forcePathStyle: e.target.checked })} /> path-style URL</label>
-            <p className="small muted" style={{ gridColumn: '1/-1', margin: 0 }}>Google Drive / OneDrive: กู้คืนผ่านหน้านี้ได้เมื่อ SCG เปิดใช้ปลายทางนั้น (ตอนนี้ดาวน์โหลดไฟล์ .scgbackup แล้วอัปโหลดขึ้น S3 ของร้านก่อน)</p>
+            <p className="small muted" style={{ gridColumn: '1/-1', margin: 0 }}>Google Drive / OneDrive: กู้คืนผ่านหน้านี้ได้เมื่อผู้ให้บริการเปิดใช้ปลายทางนั้น (ตอนนี้ดาวน์โหลดไฟล์ .scgbackup แล้วอัปโหลดขึ้น S3 ของร้านก่อน)</p>
           </div>
         )}
         {step === 2 && files && (

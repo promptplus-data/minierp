@@ -351,13 +351,11 @@ export const adminRoutes = {
   hrPayrollLine: 'PATCH /api/hr/payroll/:period/lines/:lineId', hrPayrollRecalc: 'POST /api/hr/payroll/:period/recalc',
   hrPayrollApprove: 'POST /api/hr/payroll/:period/approve', hrPayrollReopen: 'POST /api/hr/payroll/:period/reopen', hrPayrollPay: 'POST /api/hr/payroll/:period/pay',
   hrPayslips: 'GET /api/hr/payroll/:period/slips', hrLabourCost: 'GET /api/hr/labour-cost',
-  // M19-11 / 07 / 09 / 10 (on-prem shop side)
+  // M19-11 / 09 (on-prem shop side; the shop's data never leaves it)
   licenseStatus: 'GET /api/license', licenseInstall: 'POST /api/license', entitlements: 'GET /api/entitlements',
-  shopExport: 'POST /api/system/export',
   backupConfig: 'GET /api/backup/config', backupConfigSave: 'POST /api/backup/config', backupOauthStart: 'POST /api/backup/oauth/start',
   backupOauthPoll: 'POST /api/backup/oauth/poll', backupRun: 'POST /api/backup/run', backupRuns: 'GET /api/backup/runs', backupFiles: 'GET /api/backup/files',
   backupRestoreFiles: 'POST /api/backup/restore/files', backupRestore: 'POST /api/backup/restore',
-  shareConfig: 'GET /api/share/config', sharePreview: 'GET /api/share/preview', shareSend: 'POST /api/share/send', shareHistory: 'GET /api/share/history',
   // M02 (both editions; enforced only for shops flagged by SCG Admin)
   termsStatus: 'GET /api/terms', termsAccept: 'POST /api/terms/accept',
   // cloud: receiver, support consent, SCG Admin
@@ -377,10 +375,8 @@ const onprem = 'onprem' as const;
 const cloud = 'cloud' as const;
 /** Routes registered on one edition only. Unlisted routes (M17) exist on both. */
 export const adminRouteEditions: RouteEditions<typeof adminRoutes> = {
-  shopExport: onprem,
   backupConfig: onprem, backupConfigSave: onprem, backupOauthStart: onprem, backupOauthPoll: onprem, backupRun: onprem, backupRuns: onprem,
   backupFiles: onprem, backupRestoreFiles: onprem, backupRestore: onprem,
-  shareConfig: onprem, sharePreview: onprem, shareSend: onprem, shareHistory: onprem,
   shareReceive: cloud, supportGrants: cloud, supportGrantCreate: cloud, supportGrantRevoke: cloud,
   admLogin: cloud, admMe: cloud, admAdmins: cloud, admAdminCreate: cloud, admAdminUpdate: cloud, admTenants: cloud, admTenantCreate: cloud, admTenantSuspend: cloud, admTenantFeatures: cloud,
   admTenantResume: cloud, admTenantImport: cloud, admTenantSupport: cloud, admKpi: cloud, admCentral: cloud, admCentralCreate: cloud,

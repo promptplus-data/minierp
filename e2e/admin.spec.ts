@@ -230,33 +230,19 @@ test.describe('on-prem system screens (M19)', () => {
     }
   });
 
-  test('sales summary: preview then manual send needs confirmation', async ({ page }) => {
+  test('a general business system: Prompt OS name, nothing sent out, no SCG contract', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('img', { name: 'Prompt OS' }).first()).toBeVisible();
+    await expect(page).toHaveTitle('Prompt OS');
+    await both(page, 'promptos-login');
     await login(page, 'charoen');
-    await page.goto('/system?tab=share');
-    await page.getByTestId('share-preview').click();
-    await expect(page.getByTestId('share-table')).toBeVisible();
-    await expect(page.getByTestId('share-total')).toBeVisible();
-    await both(page, 'share');
-    await page.getByTestId('share-send').click();
-    await expect(page.getByTestId('share-confirm')).toBeVisible();
-    await page.keyboard.press('Escape');
-  });
-
-  test('export the shop for the cloud', async ({ page }) => {
-    await login(page, 'charoen');
-    await page.goto('/system?tab=export');
-    await page.getByTestId('export-pass').fill('e2e-export-pass');
-    await page.getByTestId('export-pass2').fill('e2e-export-pass');
-    const dl = page.waitForEvent('download', { timeout: 30_000 });
-    await page.getByTestId('export-go').click();
-    expect((await dl).suggestedFilename()).toMatch(/\.|erp|shop/i);
-    await both(page, 'export');
-  });
-
-  test('terms page and nav', async ({ page }) => {
-    await login(page, 'charoen');
+    await page.goto('/system');
+    await expect(page.getByRole('tab')).toHaveText(['License key', 'สำรองข้อมูลขึ้น cloud']);
+    await expect(page.locator('a[href="/terms"]')).toHaveCount(0);
     await page.goto('/terms');
-    await expect(page.getByTestId('terms-history').or(page.getByTestId('terms-paper'))).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await page.goto('/products');
+    await expect(page.getByText('สินค้า SCG', { exact: true })).toHaveCount(0);
   });
 });
 

@@ -22,7 +22,7 @@ pub fn print_raw(printer_name: &str, bytes: &[u8]) -> Result<(), String> {
     let last_error = || std::io::Error::last_os_error().to_string();
 
     let name = wide(printer_name);
-    let mut doc_name = wide("SCG Shop ERP receipt");
+    let mut doc_name = wide("Prompt OS receipt");
     let mut datatype = wide("RAW");
 
     // SAFETY: all pointers point to live, NUL-terminated buffers owned by this frame,

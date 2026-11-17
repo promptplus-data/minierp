@@ -1,25 +1,23 @@
 /**
- * On-premise system screen (owner): M19-11 license key, M19-09 optional cloud backup, M19-10 manual sales-summary
- * share with SCG, M19-07 whole-shop export for moving to the cloud edition.
+ * On-premise system screen (owner): M19-11 license key and M19-09 optional backup to the shop's own cloud storage.
+ * The shop's data stays on its main machine: nothing is sent to SCG or anyone else.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
-  BackupConfig, BackupOauthPolled, BackupOauthStarted, BackupRun, LicenseStatus, ShareConfig, SharePayload, ShareSent,
+  BackupConfig, BackupOauthPolled, BackupOauthStarted, BackupRun,
   type BackupProvider,
 } from '@erp/contracts';
-import { addDays } from '@erp/core';
-import { api, getToken } from '../../api';
-import { useAuth } from '../../auth';
-import { Modal, Pill, SkeletonRows, fmt, fq, th, thTime, useToast } from '../../ui';
+import { api } from '../../api';
+import { Modal, Pill, SkeletonRows, fq, thTime, useToast } from '../../ui';
 import { LoadMore, useLoadMore } from '../../ui/lists';
-import { LICENSE_STATE, admErr, todayYmd } from './common';
+import { admErr } from './common';
 import LicenseKey from './LicenseKey';
 import { ErrorBanner } from '../../errors';
 
-const TABS = [['license', 'License key'], ['backup', 'สำรองข้อมูลขึ้น cloud'], ['share', 'ส่งสรุปยอดขายให้ SCG'], ['export', 'ย้ายร้านไป Cloud']] as const;
+const TABS = [['license', 'License key'], ['backup', 'สำรองข้อมูลขึ้น cloud']] as const;
 type Tab = (typeof TABS)[number][0];
 
 export default function System() {
@@ -33,8 +31,6 @@ export default function System() {
       <div style={{ marginTop: 14 }}>
         {tab === 'license' && <LicenseKey />}
         {tab === 'backup' && <Backup />}
-        {tab === 'share' && <Share />}
-        {tab === 'export' && <ExportShop />}
       </div>
     </div>
   );
@@ -51,7 +47,7 @@ function Backup() {
   const [enabled, setEnabled] = useState(false);
   const [provider, setProvider] = useState<BackupProvider>('s3');
   const [schedule, setSchedule] = useState<'daily' | 'off'>('daily');
-  const [s3, setS3] = useState<S3Form>({ endpoint: '', region: 'ap-southeast-1', bucket: '', prefix: 'scg-erp/', accessKeyId: '', secretAccessKey: '', forcePathStyle: true });
+  const [s3, setS3] = useState<S3Form>({ endpoint: '', region: 'ap-southeast-1', bucket: '', prefix: 'prompt-os/', accessKeyId: '', secretAccessKey: '', forcePathStyle: true });
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
   const [err, setErr] = useState('');
@@ -151,7 +147,7 @@ function Backup() {
         ) : (
           <div style={{ marginTop: 10 }}>
             {!oauthReady ? (
-              <div className="note warn small" data-testid="oauth-unavailable">{provider === 'gdrive' ? 'Google Drive' : 'OneDrive'} ยังไม่เปิดให้ใช้ในเวอร์ชันนี้ (SCG กำลังลงทะเบียนแอปกับผู้ให้บริการ) ใช้ S3 ไปก่อน</div>
+              <div className="note warn small" data-testid="oauth-unavailable">{provider === 'gdrive' ? 'Google Drive' : 'OneDrive'} ยังไม่เปิดให้ใช้ในเวอร์ชันนี้ (ผู้ให้บริการกำลังลงทะเบียนแอปกับ Google และ Microsoft) ใช้ S3 ไปก่อน</div>
             ) : connected ? (
               <div className="row"><Pill k="ok">เชื่อมบัญชีแล้ว</Pill><span className="small muted">{c.oauth?.account ?? ''}</span><button className="btn sm" onClick={() => void connect()}>เชื่อมบัญชีใหม่</button></div>
             ) : (
@@ -235,173 +231,5 @@ function OauthModal({ provider, start, onClose, onDone }: { provider: 'gdrive' |
       {status === 'error' && <div className="err">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ปิด</button></div>
     </Modal>
-  );
-}
-
-// ------------------------------------------------------------------ M19-10 sales summary
-function Share() {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const { user } = useAuth();
-  const today = todayYmd();
-  const [from, setFrom] = useState(`${today.slice(0, 7)}-01` < today ? `${today.slice(0, 7)}-01` : addDays(today, -6));
-  const [to, setTo] = useState(addDays(today, -1) >= `${today.slice(0, 7)}-01` ? addDays(today, -1) : today);
-  const [preview, setPreview] = useState<z.infer<typeof SharePayload> | null>(null);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const conf = useQuery({ queryKey: ['share-config'], queryFn: () => api('GET', '/api/share/config', { schema: ShareConfig }) });
-  const load = async () => {
-    setErr('');
-    setBusy(true);
-    try {
-      setPreview(await api('GET', '/api/share/preview', { query: { from, to }, schema: SharePayload }));
-    } catch (e) {
-      setPreview(null);
-      setErr(admErr(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const send = async () => {
-    setConfirmOpen(false);
-    setBusy(true);
-    try {
-      const r = await api('POST', '/api/share/send', { body: { from, to }, schema: ShareSent });
-      toast(r.status === 'sent' ? `ส่งสรุปยอดขายให้ SCG แล้ว · เลขรับ ${r.receiptId}` : `ส่งไม่สำเร็จ · ${r.error ?? ''}`);
-      void qc.invalidateQueries({ queryKey: ['share-history'] });
-    } catch (e) {
-      setErr(admErr(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const c = conf.data;
-  return (
-    <>
-      <div className="note small">ส่งเฉพาะยอดขายรายวันของสินค้า SCG (จำนวน + มูลค่า) และยอดรวมสินค้าอื่น ไม่มีข้อมูลลูกค้า ผู้ใช้ หรือเลขเอกสาร · ระบบไม่ส่งอัตโนมัติ ถ้าไม่กดส่งก็ไม่มีข้อมูลใดออกจากร้าน (OQ-17)</div>
-      {c && (!c.receiverUrl || !c.licensed) && (
-        <div className="note warn small" style={{ marginTop: 8 }}>
-          {!c.licensed && 'ต้องใส่ license key ก่อน (คีย์ใช้ยืนยันกับ SCG ว่าเป็นร้านนี้) '}{!c.receiverUrl && '· ยังไม่ได้ตั้งปลายทางของ SCG ในเครื่องหลัก (SCG_SHARE_URL)'}
-        </div>
-      )}
-      <div className="row" style={{ margin: '12px 0' }}>
-        <label className="f">ตั้งแต่<input type="date" value={from} max={today} onChange={(e) => setFrom(e.target.value)} data-testid="share-from" /></label>
-        <label className="f">ถึง<input type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} data-testid="share-to" /></label>
-        <button className="btn" style={{ alignSelf: 'flex-end' }} disabled={busy} onClick={() => void load()} data-testid="share-preview">ดูตัวอย่างข้อมูลที่จะส่ง</button>
-        <button className="btn pri" style={{ alignSelf: 'flex-end' }} disabled={busy || !preview || user?.role !== 'owner'} onClick={() => setConfirmOpen(true)} data-testid="share-send">ส่งสรุปยอดขายให้ SCG</button>
-      </div>
-      {err && <div className="err" role="alert" data-testid="share-error">{err}</div>}
-      {preview && (
-        <>
-          <div className="grid g4" style={{ marginBottom: 10 }}>
-            <div className="card kpi"><div className="l">สินค้า SCG (จำนวน)</div><div className="v">{fq(preview.totals.scgQty)}</div></div>
-            <div className="card kpi"><div className="l">สินค้า SCG (มูลค่า)</div><div className="v">฿{fmt(preview.totals.scgAmount)}</div></div>
-            <div className="card kpi"><div className="l">สินค้าอื่น (ยอดรวม)</div><div className="v">฿{fmt(preview.totals.otherAmount)}</div></div>
-            <div className="card kpi"><div className="l">รวม {preview.days.length} วัน</div><div className="v" data-testid="share-total">฿{fmt(preview.totals.total)}</div></div>
-          </div>
-          <div className="tw">
-            <table data-testid="share-table">
-              <thead><tr><th>วันที่</th><th>รหัส SCG</th><th>สินค้า SCG</th><th className="n">จำนวน</th><th className="n">มูลค่า</th></tr></thead>
-              <tbody>
-                {preview.days.map((dd) => [
-                  ...dd.scg.map((x, i) => (
-                    <tr key={dd.date + x.sku}><td className="small">{i === 0 ? th(dd.date) : ''}</td><td className="mono small">{x.sku}</td><td>{x.name}</td><td className="n">{fq(x.qty)} {x.unit}</td><td className="n">{fmt(x.amount)}</td></tr>
-                  )),
-                  <tr key={`${dd.date}-o`}><td className="small">{dd.scg.length ? '' : th(dd.date)}</td><td /><td className="muted">สินค้าอื่นรวม</td><td /><td className="n">{fmt(dd.otherAmount)}</td></tr>,
-                ])}
-                {!preview.days.length && <tr><td colSpan={5} className="empty">ไม่มียอดขายในช่วงนี้</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-      <ShareHistory />
-      {confirmOpen && preview && (
-        <Modal onClose={() => setConfirmOpen(false)} label="ยืนยันส่ง">
-          <h3>ส่งสรุปยอดขายให้ SCG</h3>
-          <p style={{ margin: 0 }}>ช่วง {th(from)} – {th(to)} · {preview.days.length} วัน · ยอดรวม ฿{fmt(preview.totals.total)}</p>
-          <p className="small muted" style={{ margin: 0 }}>ส่งเฉพาะข้อมูลตามตัวอย่าง ระบบบันทึกการส่งใน audit log</p>
-          <div className="act"><button className="btn" onClick={() => setConfirmOpen(false)}>ยกเลิก</button><button className="btn pri" onClick={() => void send()} data-testid="share-confirm">ยืนยันส่ง</button></div>
-        </Modal>
-      )}
-    </>
-  );
-}
-
-function ShareHistory() {
-  const h = useLoadMore(['share-history'], '/api/share/history', ShareSent, {}, 10);
-  return (
-    <>
-      <h4 className="sec" style={{ marginTop: 16 }}>ประวัติการส่ง</h4>
-      <div className="tw">
-        <table data-testid="share-history">
-          <thead><tr><th>ส่งเมื่อ</th><th>ช่วงข้อมูล</th><th className="n">ยอดรวม</th><th>โดย</th><th>ผล</th></tr></thead>
-          <tbody>
-            {h.isLoading ? <SkeletonRows cols={5} rows={2} /> : h.rows.map((x) => (
-              <tr key={x.id}>
-                <td className="small">{thTime(x.sentAt)}</td><td className="small">{th(x.from)} – {th(x.to)}</td><td className="n">{fmt(x.total)}</td><td className="small">{x.sentBy}</td>
-                <td>{x.status === 'sent' ? <Pill k="ok">ส่งแล้ว · {x.receiptId}</Pill> : <span title={x.error ?? ''}><Pill k="bad">ไม่สำเร็จ</Pill></span>}</td>
-              </tr>
-            ))}
-            {h.data && !h.rows.length && <tr><td colSpan={5} className="empty">ยังไม่เคยส่ง</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <LoadMore hasMore={!!h.hasNextPage} loading={h.isFetchingNextPage} onMore={() => void h.fetchNextPage()} count={h.rows.length} />
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ M19-07 export
-function ExportShop() {
-  const toast = useToast();
-  const { user } = useAuth();
-  const [p1, setP1] = useState('');
-  const [p2, setP2] = useState('');
-  const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const go = async () => {
-    if (p1.length < 8) return setErr('รหัสผ่านอย่างน้อย 8 ตัวอักษร');
-    if (p1 !== p2) return setErr('รหัสผ่านสองช่องไม่ตรงกัน');
-    setErr('');
-    setBusy(true);
-    try {
-      const res = await fetch('/api/system/export', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${getToken() ?? ''}` }, body: JSON.stringify({ passphrase: p1 }) });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => null)) as { message?: string; details?: { reason?: string } } | null;
-        throw new Error(j?.details?.reason === 'OWNER_ONLY' ? 'เฉพาะเจ้าของร้านเท่านั้นที่ส่งออกข้อมูลทั้งร้านได้' : j?.message ?? `HTTP ${res.status}`);
-      }
-      const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'shop.scgshop';
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setP1('');
-      setP2('');
-      toast(`ส่งออกแล้ว · ${name}`);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div style={{ maxWidth: 680 }}>
-      <p style={{ marginTop: 0 }}>ส่งออกข้อมูลทั้งร้านเป็นไฟล์เดียวที่เข้ารหัสด้วยรหัสผ่าน เพื่อให้ทีม SCG นำเข้าเป็นร้านใหม่บน Cloud · สต็อกตามล็อต ลูกหนี้ เจ้าหนี้ เลขเอกสารล่าสุด และ log ตรงกัน 100% (ระบบตรวจยอดหลังนำเข้า)</p>
-      {user?.role === 'owner' ? (
-        <>
-          <div className="fgrid">
-            <label className="f">รหัสผ่านไฟล์ (อย่างน้อย 8 ตัว)<input type="password" autoComplete="new-password" value={p1} onChange={(e) => setP1(e.target.value)} data-testid="export-pass" /></label>
-            <label className="f">ยืนยันรหัสผ่าน<input type="password" autoComplete="new-password" value={p2} onChange={(e) => setP2(e.target.value)} data-testid="export-pass2" /></label>
-          </div>
-          {err && <div className="err" role="alert" style={{ marginTop: 6 }}>{err}</div>}
-          <button className="btn pri" style={{ marginTop: 10 }} disabled={busy} onClick={() => void go()} data-testid="export-go">{busy ? 'กำลังส่งออก…' : 'ส่งออกข้อมูลทั้งร้าน'}</button>
-          <p className="small muted">ส่งไฟล์และรหัสผ่านให้ทีม SCG แยกช่องทางกัน (เช่น ไฟล์ทางอีเมล รหัสทางโทรศัพท์) · หลังย้ายแล้วหยุดใช้เครื่องนี้ออกเอกสาร เพื่อไม่ให้ข้อมูลสองที่ไม่ตรงกัน</p>
-        </>
-      ) : <div className="note small">เฉพาะเจ้าของร้านส่งออกข้อมูลทั้งร้านได้</div>}
-    </div>
   );
 }

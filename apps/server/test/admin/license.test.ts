@@ -58,7 +58,7 @@ describe('on-prem license screen and read-only mode', () => {
     expect((await owner.post('/api/license', { key: 'SCG1.abcdefghijklmnop.qrstuvwxyz' })).body.details.reason).toBe('LICENSE_INVALID');
   });
 
-  it('expired key: reading, printing and export keep working, new documents are refused; a new key renews', async () => {
+  it('expired key: reading, printing and backups keep working, new documents are refused; a new key renews', async () => {
     const r = await owner.post('/api/license', { key: makeKey({ ...SHOP, type: 'expiring', expiresAt: '2026-10-20' }) });
     expect(r.body).toMatchObject({ state: 'expired', readOnly: true, daysLeft: -6 });
     const prae = await login(env.app, 'prae');
@@ -68,7 +68,7 @@ describe('on-prem license screen and read-only mode', () => {
     expect((await owner.post('/api/hr/employees', { name: 'x', startDate: '2026-10-01' })).body.details.reason).toBe('LICENSE_READ_ONLY');
     expect((await prae.get('/api/products')).status).toBe(200);
     expect((await owner.get('/api/sales/docs')).status).toBe(200);
-    expect((await owner.post('/api/system/export', { passphrase: 'pass-phrase-1' })).status).toBe(200);
+    expect((await owner.get('/api/backup/runs')).status).toBe(200);
     // a still-valid key for the same shop lifts read-only mode
     const renew = await owner.post('/api/license', { key: makeKey({ ...SHOP, type: 'expiring', expiresAt: '2027-10-31' }) });
     expect(renew.body).toMatchObject({ state: 'valid', readOnly: false, daysLeft: 370 });

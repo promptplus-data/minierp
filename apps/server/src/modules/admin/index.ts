@@ -8,7 +8,7 @@ import {
   AdmAuditEntry, AdmCentralPriceReq, AdmFeaturesSet, AdmCentralUpsert, AdmLicenseIssue, AdmLoginReq, AdmPushReq, AdmReason, AdmShareQuery, AdmTenantCreate,
   AdmTenantImport, AdmTenantQuery, AdmUserCreate, AdmUserUpdate, BackupConfigSave, BackupOauthStart, BackupRestoreReq, BackupRestoreTarget, HrEmployeeCreate,
   HrEmployeeQuery, HrEmployeeUpdate, HrLabourCostQuery, HrLeaveCreate, HrLeaveDecide, HrLeaveQuery, HrPayrollCreate, HrPayrollLineUpdate, HrPayrollUpdate, HrPayslipPeriodQuery,
-  HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall, ShareRange, ShopExportReq, SupportGrantCreate, TermsAccept, pageQuery,
+  HrPayrollPay, HrResignReq, HrSettingsUpdate, LicenseInstall,  SupportGrantCreate, TermsAccept, pageQuery,
 } from '@erp/contracts';
 import { writeAudit } from '../../lib/audit';
 import { can, requirePerm } from '../../lib/context';
@@ -19,14 +19,11 @@ import { needsSetup } from '../../services/setup';
 import type { ErpModule } from '../types';
 import * as adm from './adm';
 import { getBackupConfig, listBackupFiles, listBackupRuns, oauthPoll, oauthStart, requireOwner, restoreBackup, restoreFiles, runBackup, saveBackupConfig, startBackupScheduler } from './backup';
-import { deriveKey, sealBox } from './box';
 import * as hr from './hr';
 import { featureGuard, installLicense, licenseGuard, licenseStatus, shopFeatures } from './license';
 import { bootstrapAdmin, createAdmin, listAdmins, updateAdmin, admLogin, makeAdmAuthed, toAdmUser } from './platform';
-import { buildSharePayload, sendShare, shareConfig, shareHistory } from './share';
 import { createGrant, listGrants, revokeGrant } from './support';
 import { acceptTerms, shopStatusGuard, termsStatus } from './terms';
-import { exportShop } from './transfer';
 import { transports } from './transports';
 
 const id = (req: { params: unknown }) => (req.params as { id: string }).id;
@@ -98,22 +95,8 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
   }));
   app.get('/api/entitlements', authed(async (tx, ctx) => ({ features: [...await shopFeatures(tx, deps.edition, ctx.tenantId)] })));
 
-  // ================================================================ on-prem: export, backup, sales summary
+  // ================================================================ on-prem: backup and restore (nothing leaves the shop)
   if (deps.edition === 'onprem') {
-
-    // REQ-M19-07: whole shop as one passphrase-encrypted file (owner only: it contains every record of the shop).
-    app.post('/api/system/export', RO_OK, authed(async (tx, ctx, req, reply) => {
-      requireOwner(ctx, 'export the whole shop');
-      const { passphrase } = ShopExportReq.parse(req.body);
-      const data = await exportShop(tx, ctx.tenantId);
-      const now = new Date();
-      const file = sealBox('shop-export', { shopName: data.source.name, taxId: data.source.taxId, createdAt: now.toISOString() }, data, deriveKey(passphrase));
-      const rows = Object.values(data.tables).reduce((n, t) => n + t.length, 0);
-      await writeAudit(tx, ctx, [{ action: 'export', object: 'tenant', ref: data.source.code, detail: `ส่งออกข้อมูลทั้งร้าน ${Object.keys(data.tables).length} ตาราง ${rows} แถว (เข้ารหัส)` }]);
-      reply.header('content-type', 'application/json; charset=utf-8');
-      reply.header('content-disposition', `attachment; filename="${data.source.code}-${now.toISOString().slice(0, 10)}.scgshop"`);
-      return file;
-    }));
 
     app.get('/api/backup/config', authed(async (tx, ctx) => getBackupConfig(tx, ctx)));
     app.post('/api/backup/config', RO_OK, authed(async (tx, ctx, req) => saveBackupConfig(tx, ctx, BackupConfigSave.parse(req.body))));
@@ -148,17 +131,6 @@ export const adminModule: ErpModule = async (app, { deps, authed }) => {
         throw err;
       }
     });
-
-    app.get('/api/share/config', authed(async (tx, ctx) => shareConfig(tx, ctx)));
-    app.get('/api/share/preview', authed(async (tx, ctx, req) => {
-      const r = ShareRange.parse(req.query);
-      return buildSharePayload(tx, ctx, r.from, r.to, deps.today());
-    }));
-    app.post('/api/share/send', RO_OK, authed(async (tx, ctx, req) => {
-      const r = ShareRange.parse(req.body);
-      return sendShare(tx, ctx, r.from, r.to, deps.today(), transports.share);
-    }));
-    app.get('/api/share/history', authed(async (tx, ctx, req) => shareHistory(tx, ctx, pageQuery.parse(req.query))));
 
     if (deps.backgroundJobs) {
       const stop = startBackupScheduler(deps.pool, app.log, transports.backup);

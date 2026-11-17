@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { LicenseStatus } from '@erp/contracts';
 import { api } from '../../api';
 import { useAuth } from '../../auth';
-import { IS_CLOUD } from '../../cloud';
+import { IS_CLOUD, VENDOR } from '../../cloud';
 import { th } from '../../ui';
 import { TermsSign, useTerms } from './Terms';
 
@@ -33,7 +33,7 @@ function LicenseBanner() {
     return (
       <div className="adm-banner" role="status" data-testid="license-banner">
         <b>ไลเซนส์ใกล้หมดอายุ</b>
-        <span>เหลืออีก {s.daysLeft} วัน (หมดอายุ {s.license?.expiresAt ? th(s.license.expiresAt) : '-'}) · ติดต่อ SCG เพื่อต่ออายุ แล้วใส่คีย์ใหม่</span>
+        <span>เหลืออีก {s.daysLeft} วัน (หมดอายุ {s.license?.expiresAt ? th(s.license.expiresAt) : '-'}) · ติดต่อ {VENDOR} เพื่อต่ออายุ แล้วใส่คีย์ใหม่</span>
         <span className="sp" />{link}
       </div>
     );

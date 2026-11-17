@@ -4,6 +4,7 @@ import { ErrorBox, checkFields, markLoginFailure } from '../errors';
 import { useAuth } from '../auth';
 import { CloudSsoButton, IS_CLOUD } from '../cloud';
 import { useMeta } from '../data';
+import { BrandMark, BrandName } from '../ui/Brand';
 
 export default function Login() {
   const { login } = useAuth();
@@ -32,10 +33,10 @@ export default function Login() {
     <div className="lg">
       <form className="card lgcard" onSubmit={submit} aria-label="เข้าสู่ระบบ">
         <div className="row" style={{ gap: 10 }}>
-          <div className="logo">S</div>
+          {IS_CLOUD && <BrandMark initials="S" />}
           <div>
-            <b>SCG Shop ERP</b>
-            <div className="small muted">{meta.data?.shop.name ?? 'ร้านวัสดุก่อสร้าง'} · <span className={`ed ${IS_CLOUD ? 'cloud' : 'onprem'}`}>{IS_CLOUD ? 'Cloud' : 'On-premise'}</span></div>
+            <BrandName cloudName="SCG Shop ERP" />
+            <div className="small muted">{meta.data?.shop.name ?? (IS_CLOUD ? 'ร้านวัสดุก่อสร้าง' : 'ระบบบริหารร้าน')} · <span className={`ed ${IS_CLOUD ? 'cloud' : 'onprem'}`}>{IS_CLOUD ? 'Cloud' : 'On-premise'}</span></div>
           </div>
         </div>
         {CloudSsoButton ? (

@@ -271,3 +271,4 @@ input.qty.bad{border-color:var(--bad);color:var(--bad)}
 .ss-list li.ss-info{cursor:default;color:var(--muted);font-size:12px;align-items:center}
 html[data-touch] .ss-list li{min-height:48px}
 .loadmore{display:flex;justify-content:center;padding:10px}
+.logo-img{background:none;padding:0;object-fit:contain}

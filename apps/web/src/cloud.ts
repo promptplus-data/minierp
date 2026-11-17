@@ -8,6 +8,10 @@ import { lazy } from 'react';
 import type { DocCouponIn } from '@erp/contracts';
 
 export const IS_CLOUD = import.meta.env.VITE_EDITION === 'cloud';
+/** The on-prem edition is a general business system (retail, wholesale, projects) under its own name; the cloud
+ * edition is SCG's service for its sub-dealers. VENDOR is who issues license keys and enables menus. */
+export const PRODUCT = IS_CLOUD ? 'SCG Shop ERP' : 'Prompt OS';
+export const VENDOR = IS_CLOUD ? 'SCG' : 'ผู้ให้บริการ';
 
 export const CloudSsoButton = import.meta.env.VITE_EDITION === 'cloud' ? lazy(() => import('./promptplus/SsoButton')) : null;
 export const CloudIncomingCard = import.meta.env.VITE_EDITION === 'cloud' ? lazy(() => import('./promptplus/IncomingCard')) : null;

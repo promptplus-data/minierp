@@ -1,5 +1,5 @@
 /** Shared bits of the admin module screens: labels, dates, error text, A4 print mode, the payslip paper. */
-import { IS_CLOUD } from '../../cloud';
+import { IS_CLOUD, PRODUCT, VENDOR } from '../../cloud';
 import { useEffect, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -33,15 +33,15 @@ const REASONS: Record<string, string> = {
   LAST_SUPER: 'ต้องมี Super admin ที่ใช้งานอยู่อย่างน้อย 1 คน ปิดใช้งานหรือลดบทบาทคนสุดท้ายไม่ได้',
   ADM_SELF: 'ปิดใช้งานหรือลดบทบาทบัญชีของตัวเองไม่ได้ ให้ Super admin คนอื่นทำให้',
   LICENSE_INVALID: 'license key ไม่ถูกต้อง (ลายเซ็นไม่ตรง หรือคัดลอกไม่ครบ)',
-  LICENSE_EDITION: IS_CLOUD ? 'คีย์นี้เป็นของรุ่น On-premise ใช้กับร้านบน Cloud ไม่ได้ ขอคีย์รุ่น Cloud จาก SCG' : 'คีย์นี้ไม่ใช่ของรุ่น On-premise',
-  LICENSE_REVOKED: 'คีย์นี้ถูก SCG ยกเลิกแล้ว ติดต่อ SCG เพื่อขอคีย์ใหม่',
-  FEATURE_DISABLED: 'เมนูนี้ยังไม่ได้เปิดให้ร้านนี้ใช้ ติดต่อ SCG',
+  LICENSE_EDITION: IS_CLOUD ? 'คีย์นี้เป็นของรุ่น On-premise ใช้กับร้านบน Cloud ไม่ได้ ขอคีย์รุ่น Cloud จาก SCG' : 'คีย์นี้ไม่ใช่ของรุ่น On-premise ขอคีย์ที่ถูกต้องจากผู้ให้บริการ',
+  LICENSE_REVOKED: `คีย์นี้ถูก ${VENDOR} ยกเลิกแล้ว ติดต่อ ${VENDOR} เพื่อขอคีย์ใหม่`,
+  FEATURE_DISABLED: `เมนูนี้ยังไม่ได้เปิดให้ร้านนี้ใช้ ติดต่อ ${VENDOR}`,
   LICENSE_SHOP_MISMATCH: 'คีย์นี้ออกให้ร้านอื่น (ชื่อร้านหรือเลขผู้เสียภาษีไม่ตรงกับร้านนี้)',
   LICENSE_READ_ONLY: 'ไลเซนส์หมดอายุ (หรือยังไม่ได้ใส่คีย์) ร้านอยู่ในโหมดอ่านอย่างเดียว ดู พิมพ์ และส่งออกได้ แต่ทำรายการใหม่ไม่ได้',
   TERMS_REQUIRED: 'เจ้าของร้านต้องลงนามสัญญาการใช้งานก่อน',
   SHOP_SUSPENDED: 'ร้านนี้ถูก SCG ระงับการใช้งานชั่วคราว ติดต่อ SCG',
   BACKUP_INCOMPLETE: 'ต้องเลือกปลายทางและตั้งรหัสเข้ารหัสข้อมูลสำรองก่อน',
-  OAUTH_NOT_CONFIGURED: 'ปลายทางนี้ยังไม่เปิดให้ใช้ (SCG ยังไม่ได้ลงทะเบียนแอปกับผู้ให้บริการ) ใช้ S3 ไปก่อน',
+  OAUTH_NOT_CONFIGURED: `ปลายทางนี้ยังไม่เปิดให้ใช้ (${VENDOR} ยังไม่ได้ลงทะเบียนแอปกับ Google หรือ Microsoft) ใช้ S3 ไปก่อน`,
   OAUTH_NOT_CONNECTED: 'ต้องเชื่อมบัญชีปลายทางก่อนเปิดการสำรองข้อมูล',
   BACKUP_DEST: 'เชื่อมต่อปลายทางสำรองข้อมูลไม่ได้ ตรวจการตั้งค่าและอินเทอร์เน็ต',
   BOX_DECRYPT: 'ถอดรหัสไม่ได้: รหัสผ่านไม่ถูกต้อง หรือไฟล์ถูกแก้ไข',
@@ -52,14 +52,12 @@ const REASONS: Record<string, string> = {
   SIGNING_KEY_MISSING: 'เซิร์ฟเวอร์ยังไม่ได้ตั้ง LICENSE_SIGNING_KEY ออกคีย์ไม่ได้',
   SIGNING_KEY_MISMATCH: 'LICENSE_SIGNING_KEY บนเซิร์ฟเวอร์ไม่ตรงกับ public key ในโปรแกรม ออกคีย์ไม่ได้ ติดต่อทีมพัฒนา',
   RATE_LIMITED: 'ลองผิดหลายครั้งเกินไป รอ 10 นาทีแล้วลองใหม่',
-  SHARE_URL_MISSING: 'ยังไม่ได้ตั้งปลายทางของ SCG (SCG_SHARE_URL) ในเครื่องหลัก',
-  LICENSE_REQUIRED: 'ต้องใส่ license key ก่อน (คีย์ใช้ยืนยันกับ SCG ว่าเป็นร้านนี้)',
   USERNAME_TAKEN: 'ชื่อผู้ใช้นี้มีแล้วในร้าน (รวมพนักงานที่ลาออก) ใช้ชื่ออื่น',
   SELF_APPROVAL: 'อนุมัติรายการของตัวเองไม่ได้ ให้ผู้จัดการหรือเจ้าของคนอื่นอนุมัติ',
   CODE_TAKEN: 'รหัสร้านนี้มีแล้ว ใช้รหัสอื่น',
   ADM_ROLE: 'บทบาทผู้ดูแลของคุณทำรายการนี้ไม่ได้',
   NO_SUPPORT_GRANT: 'ร้านยังไม่ได้อนุญาตให้ SCG เข้าดู (หรือการอนุญาตหมดอายุแล้ว)',
-  BOX_FORMAT: 'ไฟล์ไม่ถูกต้อง (ไม่ใช่ไฟล์ส่งออกของ SCG Shop ERP)',
+  BOX_FORMAT: `ไฟล์ไม่ถูกต้อง (ไม่ใช่ไฟล์ของ ${PRODUCT})`,
   BOX_KIND: 'ไฟล์ผิดประเภท (เช่น ไฟล์สำรองข้อมูลแทนไฟล์ย้ายร้าน)',
   IMPORT_MISMATCH: 'ตรวจยอดหลังนำเข้าไม่ตรงกับไฟล์ ระบบยกเลิกการนำเข้าทั้งหมด',
   TERMS_VERSION: 'สัญญามีเวอร์ชันใหม่ โหลดหน้าใหม่แล้วอ่านอีกครั้ง',

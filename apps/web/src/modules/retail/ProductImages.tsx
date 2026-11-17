@@ -8,6 +8,7 @@ import { fmt, Pill, SkeletonRows, useDebounced, useToast } from '../../ui';
 import { LoadMore, useLoadMore } from '../../ui/lists';
 import { PosImg } from './pos';
 import './retail.css';
+import { IS_CLOUD } from '../../cloud';
 
 /** Downscales a photo to ≤ 800 px and re-encodes as JPEG until it fits the server limit. */
 async function shrink(file: File): Promise<{ mime: 'image/png' | 'image/jpeg' | 'image/webp'; data: string }> {
@@ -68,7 +69,7 @@ export default function ProductImages() {
   return (
     <div className="card">
       <h2>รูปสินค้าในหน้าขาย</h2>
-      <p className="small muted" style={{ marginTop: 0 }}>สินค้าแบรนด์อื่นอัปโหลดรูปได้ (PNG, JPEG, WebP ระบบย่อให้ไม่เกิน {PRODUCT_IMAGE_MAX_BYTES / 1024} KB) · สินค้า SCG ใช้รูปจาก master กลาง แก้ไม่ได้ · ไม่มีรูประบบแสดงภาพตามหมวดสินค้า</p>
+      <p className="small muted" style={{ marginTop: 0 }}>{IS_CLOUD ? 'สินค้าแบรนด์อื่นอัปโหลดรูปได้' : 'อัปโหลดรูปสินค้าได้'} (PNG, JPEG, WebP ระบบย่อให้ไม่เกิน {PRODUCT_IMAGE_MAX_BYTES / 1024} KB) · {IS_CLOUD && 'สินค้า SCG ใช้รูปจาก master กลาง แก้ไม่ได้ · '}ไม่มีรูประบบแสดงภาพตามหมวดสินค้า</p>
       <div className="rt-filters"><input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นชื่อหรือรหัสสินค้า" aria-label="ค้นหาสินค้า" /></div>
       <div className="tw">
         <table data-testid="img-table">
@@ -82,8 +83,8 @@ export default function ProductImages() {
                   <td>{p.name}<div className="rt-desc mono">{p.sku}</div></td>
                   <td className="small">{p.category}</td>
                   <td className="n">{fmt(p.price)}</td>
-                  <td>{p.isScg ? <Pill k="acc">SCG master</Pill> : v ? <Pill k="ok">รูปของร้าน · {Math.ceil(v.bytes / 1024)} KB</Pill> : <Pill k="mut">ภาพตามหมวด</Pill>}</td>
-                  <td>{manage && !p.isScg && <UploadCell p={p} has={!!v} onFile={upload} onRemove={remove} />}</td>
+                  <td>{IS_CLOUD && p.isScg ? <Pill k="acc">SCG master</Pill> : v ? <Pill k="ok">รูปของร้าน · {Math.ceil(v.bytes / 1024)} KB</Pill> : <Pill k="mut">ภาพตามหมวด</Pill>}</td>
+                  <td>{manage && !(IS_CLOUD && p.isScg) && <UploadCell p={p} has={!!v} onFile={upload} onRemove={remove} />}</td>
                 </tr>
               );
             })}

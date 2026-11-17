@@ -1,4 +1,4 @@
-// SCG Shop ERP client: a thin shell that finds the main machine on the LAN, then
+// Prompt OS client: a thin shell that finds the main machine on the LAN, then
 // navigates its webview to the main machine's web UI. All business logic lives on
 // the main machine; this app only adds LAN discovery and local receipt printing.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -34,5 +34,5 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![discover_main, print_receipt])
         .run(tauri::generate_context!())
-        .expect("error while running SCG Shop ERP client");
+        .expect("error while running Prompt OS client");
 }

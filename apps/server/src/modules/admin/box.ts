@@ -64,10 +64,10 @@ function parse(text: string): BoxFile {
   try {
     f = JSON.parse(text) as BoxFile;
   } catch {
-    throw E.validation('Not an SCG Shop ERP file', { reason: 'BOX_FORMAT' });
+    throw E.validation('Not a shop data file of this program', { reason: 'BOX_FORMAT' });
   }
   if (f?.format !== BOX_FORMAT || f.v !== 1 || f.kdf?.alg !== 'scrypt' || typeof f.data !== 'string') {
-    throw E.validation('Not an SCG Shop ERP file', { reason: 'BOX_FORMAT' });
+    throw E.validation('Not a shop data file of this program', { reason: 'BOX_FORMAT' });
   }
   if (f.kdf.N !== KDF.N || f.kdf.r !== KDF.r || f.kdf.p !== KDF.p) throw E.validation('Unsupported key derivation parameters', { reason: 'BOX_FORMAT' });
   return f;

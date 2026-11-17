@@ -11,7 +11,7 @@ import { DocSummary, SalesDoc, type PosPreviewReq, type PosSaleReq, type Product
 import { calcDoc, d, money, needsOverride, scopeCovers, sum, type DiscReason, type PriceChange } from '@erp/core';
 import { ApiFail, api, errText } from '../api';
 import { useAuth } from '../auth';
-import { CloudCouponSlot, CloudCouponTotal, cloudReleaseCoupon, type AppliedCoupon } from '../cloud';
+import { CloudCouponSlot, CloudCouponTotal, cloudReleaseCoupon, type AppliedCoupon, IS_CLOUD } from '../cloud';
 import { useBelowCostRule, useCatalog, useMeta, useShift, useWarehouseStock, useWarehouses } from '../data';
 import { ApprovalModal, fmt, fq, Modal, Pill, ShortageModal, th, useToast, type ApprovalInput, type Shortage } from '../ui';
 import {
@@ -365,7 +365,7 @@ function PosMain({ shiftId, deviceId }: { shiftId: string; deviceId: string }) {
               <span className="small muted mono">{p.sku} · {p.category}</span>
               <span className="nm">{p.name}</span>
               <span className="row" style={{ gap: 4 }}>
-                {p.isScg && <Pill k="acc">SCG</Pill>}
+                {IS_CLOUD && p.isScg && <Pill k="acc">SCG</Pill>}
                 {tp && <Pill k="ok">โปร</Pill>}
                 <span className="small muted">{p.kind === 'stock' ? `คงเหลือ ${fq(have(p.id))} ${p.units[0]?.name}` : 'บริการ (ไม่นับสต็อก)'}</span>
               </span>

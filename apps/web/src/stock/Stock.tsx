@@ -50,8 +50,8 @@ export default function Stock() {
     <>
       {!IS_CLOUD && (
         <div className="card">
-          <h2>รับของจากผู้แทนจำหน่าย SCG</h2>
-          <div className="note small">On-premise · รับของ SCG ด้วย "ซื้อเข้าแบบบันทึกเอง" แล้วระบบรับเข้าสต็อกทันที</div>
+          <h2>รับของจากผู้ขาย</h2>
+          <div className="note small">บันทึกรับของด้วย "ซื้อเข้าแบบบันทึกเอง" แล้วระบบรับเข้าสต็อกทันที</div>
           {can('inv.receive') === 1 && <div className="act" style={{ marginTop: 10, justifyContent: 'flex-start' }}><button className="btn sm pri" onClick={() => setForm('gr')}>+ ซื้อเข้าแบบบันทึกเอง</button></div>}
         </div>
       )}
@@ -94,7 +94,7 @@ export default function Stock() {
                 const low = p && total.lt(d(p.reorderPoint));
                 return (
                   <tr key={pid} data-product={pid}>
-                    <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(pid)}`}>{p?.name ?? pid}</RouteLink> {p?.isScg && <Pill k="acc">SCG</Pill>}</td>
+                    <td><RouteLink to={`/stock-ledger?productId=${encodeURIComponent(pid)}`}>{p?.name ?? pid}</RouteLink> {IS_CLOUD && p?.isScg && <Pill k="acc">SCG</Pill>}</td>
                     <td>{p?.units[0]?.name}{p && p.units.length > 1 && <div className="small muted">{p.units.slice(1).map((u) => `1 ${u.name} = ${fq(u.factor)} ${p.units[0]!.name}`).join(' · ')}</div>}</td>
                     {active.map((w) => {
                       const b = byWh.get(w.id);

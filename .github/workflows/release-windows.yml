@@ -87,7 +87,7 @@ jobs:
           $exe = Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
           if (-not $exe) { throw 'Tauri NSIS bundle not found' }
           New-Item -ItemType Directory -Force ../installer/build/client | Out-Null
-          Copy-Item $exe.FullName ../installer/build/client/SCG-Shop-ERP-Client-Setup.exe
+          Copy-Item $exe.FullName ../installer/build/client/Prompt-OS-Client-Setup.exe
 
       # ---- code signing (skipped when the secret is absent) -------------------
       - name: Import signing certificate
@@ -105,7 +105,7 @@ jobs:
         env:
           PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 apps/installer/build/client/SCG-Shop-ERP-Client-Setup.exe
+          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 apps/installer/build/client/Prompt-OS-Client-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
       - name: Signing skipped
         if: env.HAS_SIGNING_CERT != 'true'
@@ -131,20 +131,20 @@ jobs:
         env:
           PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 apps/installer/Output/SCG-Shop-ERP-Setup.exe
+          & $env:SIGNTOOL sign /f $env:SIGN_PFX /p $env:PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 apps/installer/Output/Prompt-OS-Setup.exe
           if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
 
       - name: Checksum
         run: |
-          $h = (Get-FileHash apps/installer/Output/SCG-Shop-ERP-Setup.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  SCG-Shop-ERP-Setup.exe" | Set-Content apps/installer/Output/SCG-Shop-ERP-Setup.exe.sha256
+          $h = (Get-FileHash apps/installer/Output/Prompt-OS-Setup.exe -Algorithm SHA256).Hash.ToLower()
+          "$h  Prompt-OS-Setup.exe" | Set-Content apps/installer/Output/Prompt-OS-Setup.exe.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SCG-Shop-ERP-Setup-${{ steps.ver.outputs.version }}
+          name: Prompt-OS-Setup-${{ steps.ver.outputs.version }}
           path: |
-            apps/installer/Output/SCG-Shop-ERP-Setup.exe
-            apps/installer/Output/SCG-Shop-ERP-Setup.exe.sha256
+            apps/installer/Output/Prompt-OS-Setup.exe
+            apps/installer/Output/Prompt-OS-Setup.exe.sha256
           if-no-files-found: error
 
       - name: Clean up signing material

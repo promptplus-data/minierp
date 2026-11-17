@@ -11,7 +11,10 @@ export default defineConfig(({ mode }) => {
   const env = { ...loadEnv(mode, process.cwd(), 'VITE_'), ...process.env };
   const edition = env.VITE_EDITION === 'onprem' ? 'onprem' : 'cloud';
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      { name: 'edition-title', transformIndexHtml: (html: string) => (edition === 'onprem' ? html.replace('<title>SCG Shop ERP</title>', '<title>Prompt OS</title>') : html) },
+    ],
     define: { 'import.meta.env.VITE_EDITION': JSON.stringify(edition) },
     build: { outDir: edition === 'onprem' ? 'dist-onprem' : 'dist', emptyOutDir: true, sourcemap: false },
     server: {

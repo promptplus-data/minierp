@@ -26,10 +26,11 @@ async function ownProduct(tx: Tx, productId: string): Promise<{ id: string; sku:
   return p;
 }
 
-export async function putImage(tx: Tx, ctx: Ctx, productId: string, body: { mime: Mime; data: string }) {
+/** On the cloud edition SCG products show the SCG master image; the on-prem edition has no SCG master, every product is the shop's own. */
+export async function putImage(tx: Tx, ctx: Ctx, productId: string, body: { mime: Mime; data: string }, edition: 'cloud' | 'onprem') {
   requirePerm(ctx, 'data.master');
   const p = await ownProduct(tx, productId);
-  if (p.is_scg) throw E.validation('SCG products use the image from the SCG master and cannot be changed');
+  if (p.is_scg && edition === 'cloud') throw E.validation('SCG products use the image from the SCG master and cannot be changed');
   const raw = body.data.replace(/^data:[^,]*,/, '');
   if (!/^[A-Za-z0-9+/=\s]+$/.test(raw)) throw E.validation('Image data must be base64');
   const buf = Buffer.from(raw, 'base64');

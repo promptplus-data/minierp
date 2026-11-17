@@ -117,14 +117,14 @@ if (-not (Test-Path (Join-Path $Dirs.pgdata 'PG_VERSION'))) {
 
 # ---- 4. self-signed TLS certificate (once) -----------------------------------
 $pfx = Join-Path $Dirs.certs 'server.pfx'
-$cer = Join-Path $Dirs.certs 'scg-shop-erp-main.cer'
+$cer = Join-Path $Dirs.certs 'prompt-os-main.cer'
 if (-not (Test-Path $pfx)) {
   Write-Host 'Generating self-signed TLS certificate...'
   $hostName = $env:COMPUTERNAME
   $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
     Where-Object { $_.IPAddress -notlike '169.254.*' } | Select-Object -ExpandProperty IPAddress
   $san = @("DNS=$hostName", "DNS=$hostName.local", 'DNS=localhost') + ($ips | ForEach-Object { "IPAddress=$_" })
-  $cert = New-SelfSignedCertificate -Subject "CN=$hostName SCG Shop ERP" -FriendlyName 'SCG Shop ERP (LAN)' `
+  $cert = New-SelfSignedCertificate -Subject "CN=$hostName Prompt OS" -FriendlyName 'Prompt OS (LAN)' `
     -CertStoreLocation 'Cert:\LocalMachine\My' -KeyAlgorithm RSA -KeyLength 2048 -KeyExportPolicy Exportable `
     -NotAfter (Get-Date).AddYears(10) -TextExtension @("2.5.29.17={text}$($san -join '&')")
   $pfxPw = ConvertTo-SecureString $secrets.pfxPassword -AsPlainText -Force
@@ -205,8 +205,8 @@ if (Test-Path $migrate) {
 
 # ---- 7. firewall: Private (LAN) profile only ---------------------------------
 $rules = @(
-  @{ Name = 'SCGShopERP-HTTPS'; DisplayName = 'SCG Shop ERP (HTTPS, LAN)'; Protocol = 'TCP'; LocalPort = $HttpsPort },
-  @{ Name = 'SCGShopERP-mDNS';  DisplayName = 'SCG Shop ERP (mDNS discovery, LAN)'; Protocol = 'UDP'; LocalPort = 5353 }
+  @{ Name = 'PromptOS-HTTPS'; DisplayName = 'Prompt OS (HTTPS, LAN)'; Protocol = 'TCP'; LocalPort = $HttpsPort },
+  @{ Name = 'PromptOS-mDNS';  DisplayName = 'Prompt OS (mDNS discovery, LAN)'; Protocol = 'UDP'; LocalPort = 5353 }
 )
 foreach ($r in $rules) {
   Remove-NetFirewallRule -Name $r.Name -ErrorAction SilentlyContinue
@@ -224,7 +224,7 @@ $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
   -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$backup`" -Reason nightly"
 $trigger = New-ScheduledTaskTrigger -Daily -At '23:30'
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 2)
-Register-ScheduledTask -TaskName 'SCG Shop ERP nightly backup' -Action $action -Trigger $trigger `
+Register-ScheduledTask -TaskName 'Prompt OS nightly backup' -Action $action -Trigger $trigger `
   -Settings $settings -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
 
 Start-Service scgerp-server

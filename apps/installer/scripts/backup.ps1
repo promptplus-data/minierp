@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-  pg_dump backup of the SCG Shop ERP database on the main machine.
+  pg_dump backup of the Prompt OS database on the main machine.
 
 .DESCRIPTION
   Writes <DataDir>\backups\erp-<yyyyMMdd-HHmmss>-<Reason>.dump (custom format, compressed)
   and prunes old dumps per reason. Callers:
-    - Scheduled task "SCG Shop ERP nightly backup" (registered by install-main.ps1, 23:30, as SYSTEM)
+    - Scheduled task "Prompt OS nightly backup" (registered by install-main.ps1, 23:30, as SYSTEM)
     - The server after a shift is closed (it runs the script named in its BACKUP_SCRIPT env
       with -Reason shift-close; the service account is LocalService)
     - The installer before an upgrade (-Reason pre-upgrade)
@@ -24,7 +24,7 @@ param(
   [ValidateSet('nightly', 'shift-close', 'pre-upgrade', 'manual')]
   [string] $Reason = 'manual',
   [string] $AppDir = (Split-Path -Parent $PSScriptRoot),
-  [string] $DataDir = (Join-Path $env:ProgramData 'SCG Shop ERP'),
+  [string] $DataDir = (Join-Path $env:ProgramData 'Prompt OS'),
   [int] $PgPort = 5433,
   # Copy the finished dump here too (USB drive, NAS share). Failure to copy is a warning only.
   [string] $CopyTo,
@@ -68,6 +68,6 @@ try {
   Remove-Item $partial -Force -ErrorAction SilentlyContinue
   $msg = "Backup ($Reason) failed: $_"
   Write-Error $msg -ErrorAction Continue
-  try { Write-EventLog -LogName Application -Source 'SCG Shop ERP' -EventId 1001 -EntryType Error -Message $msg } catch {}
+  try { Write-EventLog -LogName Application -Source 'Prompt OS' -EventId 1001 -EntryType Error -Message $msg } catch {}
   exit 1
 }

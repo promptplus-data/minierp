@@ -11,7 +11,7 @@ import { admErr } from '../common';
 import { ADM_ROLE_TH, AdmAuthProvider, admCan, useAdm } from './admApi';
 import Admins from './Admins';
 import Kpi from './Kpi';
-import Licenses, { Shares } from './Licenses';
+import Licenses from './Licenses';
 import Master from './Master';
 import Shops from './Shops';
 
@@ -20,7 +20,6 @@ const NAV = [
   { to: '/scg/shops', label: 'ร้านค้า', code: 'M14-01', icon: 'admShops', show: () => true },
   { to: '/scg/master', label: 'สินค้า SCG กลาง', code: 'M14-02', icon: 'admMaster', show: () => true },
   { to: '/scg/licenses', label: 'License key', code: 'M19-11', icon: '<rect x="3" y="10" width="18" height="11" rx="2"/><path d="M7 10V7a5 5 0 0 1 10 0v3"/>', show: () => true },
-  { to: '/scg/shares', label: 'สรุปยอดขายที่ร้านส่ง', code: 'M19-10', icon: 'reports', show: () => true },
   { to: '/scg/admins', label: 'ผู้ดูแลและ log', code: 'M14', icon: 'admUsers', show: (a: Parameters<typeof admCan>[0]) => admCan(a, 'admins') },
 ] as const;
 
@@ -110,7 +109,6 @@ function Shell() {
             <Route path="shops" element={<Shops />} />
             <Route path="master" element={<Master />} />
             <Route path="licenses" element={<Licenses />} />
-            <Route path="shares" element={<Shares />} />
             <Route path="admins" element={admCan(admin, 'admins') ? <Admins /> : <Navigate to="/scg" replace />} />
             <Route path="*" element={<Navigate to="/scg" replace />} />
           </Routes>

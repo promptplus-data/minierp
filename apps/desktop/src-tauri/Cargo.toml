@@ -1,7 +1,7 @@
 [package]
 name = "scg-shop-erp-client"
 version = "0.1.0"
-description = "SCG Shop ERP client machine app (LAN shell + receipt printing)"
+description = "Prompt OS client machine app (LAN shell + receipt printing)"
 edition = "2021"
 rust-version = "1.90"
 publish = false

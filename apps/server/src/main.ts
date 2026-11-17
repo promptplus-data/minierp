@@ -47,7 +47,7 @@ const app = await buildApp({
 });
 
 await app.listen({ host: env.HOST ?? '0.0.0.0', port });
-app.log.info({ edition, https: !!https, version: APP_VERSION }, 'SCG Shop ERP server started');
+app.log.info({ edition, https: !!https, version: APP_VERSION }, edition === 'onprem' ? 'Prompt OS server started' : 'SCG Shop ERP server started');
 
 let stopMdns: (() => void) | undefined;
 if (edition === 'onprem' && !serverless && env.MDNS_SERVICE_TYPE !== 'off') {

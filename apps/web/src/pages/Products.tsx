@@ -8,6 +8,7 @@ import { useAuth } from '../auth';
 import { fmt, Modal, Pill, SkeletonRows, useDebounced, useToast } from '../ui';
 import { LoadMore, useLoadMore } from '../ui/lists';
 import { ErrorBanner, checkFields, requiredMsg } from '../errors';
+import { IS_CLOUD } from '../cloud';
 
 const PAGE = 20;
 
@@ -45,7 +46,7 @@ export default function Products() {
             {showSkeleton ? <SkeletonRows cols={cols} rows={8} /> : list.rows.map((p) => (
               <tr key={p.id}>
                 <td className="mono small">{p.sku}</td>
-                <td>{p.name} {p.isScg && <Pill k="acc">SCG</Pill>} {p.kind === 'service' && <Pill k="mut">บริการ</Pill>}</td>
+                <td>{p.name} {IS_CLOUD && p.isScg && <Pill k="acc">SCG</Pill>} {p.kind === 'service' && <Pill k="mut">บริการ</Pill>}</td>
                 <td className="small">{p.category}</td>
                 <td className="mono small">{p.barcode || '-'}</td>
                 <td className="small">{p.units.map((u) => u.name).join(' / ')}</td>
@@ -129,7 +130,7 @@ function ProductModal({ product, onClose }: { product: Product | null; onClose: 
         <label className="f">จุดสั่งซื้อ (หน่วยหลัก)<input type="text" inputMode="decimal" name="reorderPoint" value={f.reorderPoint} onChange={(e) => set('reorderPoint', e.target.value)} /></label>
       </div>
       <div className="row">
-        <label className="row small"><input type="checkbox" checked={f.isScg} onChange={(e) => set('isScg', e.target.checked)} /> สินค้า SCG</label>
+        {IS_CLOUD && <label className="row small"><input type="checkbox" checked={f.isScg} onChange={(e) => set('isScg', e.target.checked)} /> สินค้า SCG</label>}
         <label className="row small"><input type="checkbox" checked={f.active} onChange={(e) => set('active', e.target.checked)} /> ใช้งาน</label>
       </div>
       <h4 className="sec">หน่วยนับ</h4>

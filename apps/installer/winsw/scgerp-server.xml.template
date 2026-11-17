@@ -1,5 +1,5 @@
 <!--
-  WinSW v2.12 service definition for the SCG Shop ERP server (Node + dist-onprem/server.mjs).
+  WinSW v2.12 service definition for the Prompt OS server (Node + dist-onprem/server.mjs).
   install-main.ps1 renders this to services\scgerp-server.xml with secrets filled in and
   restricts the file ACL to SYSTEM, Administrators and LocalService.
   UNTESTED on a real Windows machine.
@@ -11,8 +11,8 @@
 -->
 <service>
   <id>scgerp-server</id>
-  <name>SCG Shop ERP Server</name>
-  <description>SCG Shop ERP on-premise server (HTTPS on port {{HTTPS_PORT}}, LAN only).</description>
+  <name>Prompt OS Server</name>
+  <description>Prompt OS on-premise server (HTTPS on port {{HTTPS_PORT}}, LAN only).</description>
   <depend>scgerp-postgres</depend>
   <executable>{{APP_DIR}}\node\node.exe</executable>
   <arguments>"{{APP_DIR}}\server\server.mjs"</arguments>

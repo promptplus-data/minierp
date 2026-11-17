@@ -134,7 +134,7 @@ const notYet = (label: string, what: string) =>
  *   put:  POST https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable  {name, parents:[<folder id>]} then PUT the bytes
  *   list: GET  https://www.googleapis.com/drive/v3/files?q='<folder id>' in parents and trashed=false&fields=files(id,name,size,modifiedTime)
  *   get:  GET  https://www.googleapis.com/drive/v3/files/<id>?alt=media
- * The folder ("SCG Shop ERP backups") is created on first put and its id kept in settings.folderId.
+ * The folder ("Prompt OS backups") is created on first put and its id kept in settings.folderId.
  */
 export class DriveAdapter implements BackupAdapter {
   constructor(readonly provider: DeviceFlowProvider, readonly settings: Record<string, unknown>) {}

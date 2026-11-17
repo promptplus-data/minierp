@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SCG Shop ERP",
+  "productName": "Prompt OS",
   "version": "0.1.0",
   "identifier": "com.scg.shoperp",
   "build": {
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SCG Shop ERP",
+        "title": "Prompt OS",
         "width": 1280,
         "height": 800,
         "minWidth": 800,
@@ -26,9 +26,9 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
-    "publisher": "SCG",
+    "publisher": "Prompt OS",
     "category": "Business",
-    "shortDescription": "SCG Shop ERP client",
+    "shortDescription": "Prompt OS client",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

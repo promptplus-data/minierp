@@ -191,13 +191,14 @@ test('production: BOM, open an MO (FIFO issue), record output twice, close into 
   await expect(row(page, 'morep-table', no)).toContainText('เหล็กเส้นกลม RB9 ยาว 10 ม.: 3 → 3');
 });
 
-test('owner uploads a photo for a shop product; SCG products keep the master image', async ({ page }) => {
+test('owner uploads a photo for a shop product; on the cloud SCG products keep the master image', async ({ page }) => {
   await login(page, 'charoen');
   await page.getByRole('link', { name: /รูปสินค้าในหน้าขาย/ }).click();
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await page.getByTestId('img-file-RB9-10').setInputFiles({ name: 'rebar.png', mimeType: 'image/png', buffer: png });
   await expect(row(page, 'img-table', 'RB9-10')).toContainText('รูปของร้าน');
-  await expect(row(page, 'img-table', 'SCG-CEM-T50')).toContainText('SCG master');
+  if (EDITION === 'cloud') await expect(row(page, 'img-table', 'SCG-CEM-T50')).toContainText('SCG master');
+  else await expect(page.getByTestId('img-file-SCG-CEM-T50')).toBeAttached();
 });
 
 test('POS machines: register, approve with POS ID; a pending machine issues full tax invoices only', async ({ page }) => {

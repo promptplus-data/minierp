@@ -45,7 +45,7 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
       capabilities: capabilities(deps.edition),
       shop: shop
         ? { name: shop.name, taxId: shop.tax_id, branch: shop.branch, vatRegistered: shop.vat_registered, b2bVatMode: shop.b2b_vat_mode, belowCostApprover: shop.below_cost_approver }
-        : { name: 'SCG Shop ERP', taxId: '', branch: '', vatRegistered: true, b2bVatMode: 'exc', belowCostApprover: 'owner' },
+        : { name: deps.edition === 'onprem' ? 'Prompt OS' : 'SCG Shop ERP', taxId: '', branch: '', vatRegistered: true, b2bVatMode: 'exc', belowCostApprover: 'owner' },
       version: APP_VERSION,
       needsSetup: !shop && deps.edition === 'onprem' ? await needsSetup(deps.pool) : false,
     };

@@ -16,7 +16,7 @@ pub const SERVICE_TYPE: &str = "_scgerp._tcp.local.";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiscoveredMain {
-    /// Instance name, e.g. "SCG Shop ERP (FRONT-PC)".
+    /// Instance name, e.g. "Prompt OS (FRONT-PC)".
     pub name: String,
     /// IPv4 address preferred; falls back to the first address seen.
     pub host: String,

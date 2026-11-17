@@ -76,7 +76,7 @@ export const retailModule: ErpModule = async (app, { deps, authed }) => {
     return img;
   }));
   app.post('/api/product-images/:productId', { bodyLimit: 512 * 1024 }, authed(async (tx, ctx, req) =>
-    putImage(tx, ctx, param(req, 'productId'), ProductImagePut.parse(req.body))));
+    putImage(tx, ctx, param(req, 'productId'), ProductImagePut.parse(req.body), deps.edition)));
   app.post('/api/product-images/:productId/remove', authed(async (tx, ctx, req) => removeImage(tx, ctx, param(req, 'productId'))));
 
   // ---------- REQ-M01-07 POS machines ----------

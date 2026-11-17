@@ -4,6 +4,8 @@ import { LoginRes } from '@erp/contracts';
 import { api, errText } from '../api';
 import { ErrorBox, checkFields, requiredMsg, taxIdMsg } from '../errors';
 import { useAuth } from '../auth';
+import { BrandMark } from '../ui/Brand';
+import { PRODUCT } from '../cloud';
 
 export default function Setup() {
   const { login } = useAuth();
@@ -38,10 +40,10 @@ export default function Setup() {
     <div className="lg">
       <form className="card lgcard" onSubmit={submit} aria-label="ตั้งค่าร้านครั้งแรก">
         <div className="row" style={{ gap: 10 }}>
-          <div className="logo">S</div>
+          <BrandMark initials="S" />
           <div>
             <b>ตั้งค่าร้านครั้งแรก</b>
-            <div className="small muted">SCG Shop ERP · <span className="ed onprem">On-premise</span></div>
+            <div className="small muted">{PRODUCT} · <span className="ed onprem">On-premise</span></div>
           </div>
         </div>
         <div className="note small" style={{ margin: '14px 0' }}>เครื่องหลักยังไม่มีข้อมูลร้าน สร้างร้านและบัญชีเจ้าของร้านก่อนเริ่มใช้งาน ทำได้ครั้งเดียวจากเครื่องหลักเท่านั้น</div>

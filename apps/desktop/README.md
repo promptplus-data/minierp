@@ -1,4 +1,4 @@
-# SCG Shop ERP client (Tauri v2)
+# Prompt OS client (Tauri v2)
 
 Installed on **client machines** only. It shows a connect screen (`ui/index.html`),
 then navigates its webview to the main machine's web UI. All data and logic stay on
@@ -18,7 +18,7 @@ Windows only (`bundle.targets = ["nsis"]`):
 ```powershell
 cd apps/desktop
 npx --yes @tauri-apps/cli@2.12.4 build
-# -> src-tauri/target/release/bundle/nsis/SCG Shop ERP_0.1.0_x64-setup.exe
+# -> src-tauri/target/release/bundle/nsis/Prompt OS_0.1.0_x64-setup.exe
 ```
 
 The release workflow does this. `cargo check` does not work in a Linux container

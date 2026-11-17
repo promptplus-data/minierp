@@ -8,8 +8,8 @@
 -->
 <service>
   <id>scgerp-postgres</id>
-  <name>SCG Shop ERP Database</name>
-  <description>PostgreSQL {{PG_MAJOR}} for SCG Shop ERP (listens on 127.0.0.1:{{PG_PORT}} only).</description>
+  <name>Prompt OS Database</name>
+  <description>PostgreSQL {{PG_MAJOR}} for Prompt OS (listens on 127.0.0.1:{{PG_PORT}} only).</description>
   <executable>{{APP_DIR}}\pgsql\bin\postgres.exe</executable>
   <arguments>-D "{{DATA_DIR}}\pgdata"</arguments>
   <!-- Clean shutdown instead of TerminateProcess. -->

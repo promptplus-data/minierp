@@ -1,4 +1,4 @@
-# Deploying SCG Shop ERP
+# Deploying Prompt OS
 
 One codebase ships as two editions. The edition is fixed at bundle time
 (`process.env.EDITION` is replaced by esbuild `define`), not read at runtime.
@@ -92,7 +92,7 @@ docker compose up --build          # or run the production image against it
 
 ### What gets installed
 
-`SCG-Shop-ERP-Setup.exe` comes from `.github/workflows/release-windows.yml` on a
+`Prompt-OS-Setup.exe` comes from `.github/workflows/release-windows.yml` on a
 `v*` tag. It is built from `apps/installer/setup.iss` with Inno Setup. The first
 page asks for the **machine role**.
 
@@ -100,24 +100,24 @@ page asks for the **machine role**.
 
 | Path | Content |
 | --- | --- |
-| `C:\Program Files\SCG Shop ERP\node\` | Node.js 22 (win-x64) |
+| `C:\Program Files\Prompt OS\node\` | Node.js 22 (win-x64) |
 | `...\server\` | `dist-onprem` bundle + win32 `argon2` |
 | `...\web\` | `apps/web/dist-onprem` |
 | `...\pgsql\` | PostgreSQL 16 binaries (EnterpriseDB zip, trimmed) |
 | `...\winsw\`, `...\services\` | WinSW binary, XML templates, rendered service XMLs |
 | `...\scripts\` | `install-main.ps1`, `backup.ps1`, `uninstall-main.ps1` |
-| `C:\ProgramData\SCG Shop ERP\` | `pgdata\`, `certs\`, `backups\`, `logs\`, `config\secrets.json` (ACL: SYSTEM, Administrators, LocalService) |
+| `C:\ProgramData\Prompt OS\` | `pgdata\`, `certs\`, `backups\`, `logs\`, `config\secrets.json` (ACL: SYSTEM, Administrators, LocalService) |
 
 After the files are copied, `install-main.ps1` runs. It is idempotent and runs on
 every install and upgrade:
 
 1. Generates secrets once: Postgres superuser password, `erp` DB password, JWT secret, PFX password.
 2. Runs `initdb` once. PostgreSQL listens on **127.0.0.1:5433** only, with scram-sha-256 auth.
-3. Creates a self-signed TLS certificate once. SAN covers the hostname, `hostname.local`, `localhost` and the current LAN IPv4 addresses. Exports `certs\server.pfx` (for the server) and `certs\scg-shop-erp-main.cer` (public, for clients).
+3. Creates a self-signed TLS certificate once. SAN covers the hostname, `hostname.local`, `localhost` and the current LAN IPv4 addresses. Exports `certs\server.pfx` (for the server) and `certs\prompt-os-main.cer` (public, for clients).
 4. Registers the WinSW services `scgerp-postgres` and `scgerp-server`. Both run as `NT AUTHORITY\LocalService`, start automatically and restart on failure.
 5. Creates the `erp` role and database, then runs `node server\migrate.mjs`.
 6. Adds firewall rules: inbound TCP 8443 and UDP 5353 (mDNS), **Private profile only**, remote address `LocalSubnet`. Warns if the network is set to Public.
-7. Registers the scheduled task "SCG Shop ERP nightly backup" (23:30, SYSTEM), then starts the server.
+7. Registers the scheduled task "Prompt OS nightly backup" (23:30, SYSTEM), then starts the server.
 
 On the main machine you can also choose "Also install the client app", which you
 need to print receipts there. Without it, the installer creates a desktop
@@ -144,17 +144,17 @@ when set), `DATA_DIR`, `BACKUP_SCRIPT`, `MDNS_SERVICE_TYPE=_scgerp._tcp`
 3. Enter the code. The app navigates to `https://<ip>:8443/pair?code=...`.
 
 Known gap: WebView2 does not trust the self-signed certificate yet. Until
-certificate import is built, install `certs\scg-shop-erp-main.cer` on each
+certificate import is built, install `certs\prompt-os-main.cer` on each
 client into *Local Computer → Trusted Root Certification Authorities*:
 
 ```powershell
-Import-Certificate -FilePath .\scg-shop-erp-main.cer -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath .\prompt-os-main.cer -CertStoreLocation Cert:\LocalMachine\Root
 ```
 
 ## 4. Backup and restore
 
 `apps/installer/scripts/backup.ps1` runs `pg_dump --format=custom` into
-`C:\ProgramData\SCG Shop ERP\backups\erp-<yyyyMMdd-HHmmss>-<reason>.dump`.
+`C:\ProgramData\Prompt OS\backups\erp-<yyyyMMdd-HHmmss>-<reason>.dump`.
 
 | Trigger | Reason | Kept |
 | --- | --- | --- |
@@ -165,7 +165,7 @@ Import-Certificate -FilePath .\scg-shop-erp-main.cer -CertStoreLocation Cert:\Lo
 
 ```powershell
 # manual backup, plus a copy to a USB drive or NAS share
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\SCG Shop ERP\scripts\backup.ps1" -Reason manual -CopyTo E:\ERP-Backups
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\Prompt OS\scripts\backup.ps1" -Reason manual -CopyTo E:\ERP-Backups
 ```
 
 The script uses `$env:DATABASE_URL` when set (the server passes its own).
@@ -175,12 +175,12 @@ the error to the Windows Application event log.
 Restore (as Administrator, on the main machine):
 
 ```powershell
-$app = 'C:\Program Files\SCG Shop ERP'
-$secrets = Get-Content 'C:\ProgramData\SCG Shop ERP\config\secrets.json' -Raw | ConvertFrom-Json
+$app = 'C:\Program Files\Prompt OS'
+$secrets = Get-Content 'C:\ProgramData\Prompt OS\config\secrets.json' -Raw | ConvertFrom-Json
 Stop-Service scgerp-server
 $env:PGPASSWORD = $secrets.dbPassword
 & "$app\pgsql\bin\pg_restore.exe" -h 127.0.0.1 -p 5433 -U erp -d erp --clean --if-exists --no-owner --single-transaction `
-  'C:\ProgramData\SCG Shop ERP\backups\erp-20260101-233000-nightly.dump'
+  'C:\ProgramData\Prompt OS\backups\erp-20260101-233000-nightly.dump'
 Remove-Item Env:PGPASSWORD
 Start-Service scgerp-server
 ```
@@ -194,7 +194,7 @@ Cloud: use the managed database's point-in-time recovery. For a portable copy:
 **Cloud**: build and push a new image. Run `node migrate.mjs` as a one-off job,
 then roll the deployment.
 
-**On-premise**: run the new `SCG-Shop-ERP-Setup.exe` on the main machine. Inno
+**On-premise**: run the new `Prompt-OS-Setup.exe` on the main machine. Inno
 Setup recognises the existing install by `AppId` and remembers the role. Then:
 
 1. `PrepareToInstall` runs `backup.ps1 -Reason pre-upgrade`. If that fails, setup asks before continuing.
@@ -205,7 +205,7 @@ Update client machines with the same setup file (choose "Client machine"), or
 with the Tauri client's own setup.
 
 Uninstall removes the services, firewall rules and backup task. It **keeps**
-`C:\ProgramData\SCG Shop ERP` (database, backups, certificates).
+`C:\ProgramData\Prompt OS` (database, backups, certificates).
 
 ## 6. Status: what has and has not been tested
 

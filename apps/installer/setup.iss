@@ -1,4 +1,4 @@
-; SCG Shop ERP – on-premise Windows installer (Inno Setup 6.3+)
+; Prompt OS – on-premise Windows installer (Inno Setup 6.3+)
 ;
 ; One setup.exe, two roles chosen on the "Machine role" page:
 ;   Main machine   : Node runtime + dist-onprem server bundle + web build + PostgreSQL 16,
@@ -10,21 +10,21 @@
 ;   iscc /DAppVersion=1.2.3 apps\installer\setup.iss
 ; Expects the staged payload in apps\installer\build\ (see docs/DEPLOY.md):
 ;   build\node\  build\pgsql\  build\winsw\WinSW-x64.exe  build\server\  build\web\
-;   build\client\SCG-Shop-ERP-Client-Setup.exe
+;   build\client\Prompt-OS-Client-Setup.exe
 ;
 ; STATUS: never compiled or run here (Linux container). Untested on Windows.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0-dev"
 #endif
-#define AppName "SCG Shop ERP"
+#define AppName "Prompt OS"
 #define HttpsPort "8443"
 
 [Setup]
 AppId={{6B0C1E52-3C1F-4C55-9F0E-5C9B2C7E8A11}
 AppName={#AppName}
 AppVersion={#AppVersion}
-AppPublisher=SCG
+AppPublisher=Prompt OS
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -33,7 +33,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=Output
-OutputBaseFilename=SCG-Shop-ERP-Setup
+OutputBaseFilename=Prompt-OS-Setup
 SetupIconFile=..\desktop\src-tauri\icons\icon.ico
 UninstallDisplayIcon={app}\scgerp.ico
 Compression=lzma2/max
@@ -61,14 +61,14 @@ Source: "scripts\uninstall-main.ps1"; DestDir: "{app}\scripts"; Flags: ignorever
 Source: "scripts\backup.ps1";         DestDir: "{app}\scripts"; Flags: ignoreversion; Check: IsMainRole
 Source: "..\desktop\src-tauri\icons\icon.ico"; DestDir: "{app}"; DestName: "scgerp.ico"; Flags: ignoreversion
 ; ---- client app (both roles, when wanted) ----
-Source: "build\client\SCG-Shop-ERP-Client-Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsClientApp
+Source: "build\client\Prompt-OS-Client-Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsClientApp
 
 [Icons]
 Name: "{autodesktop}\{#AppName} (this machine)"; Filename: "https://localhost:{#HttpsPort}/"; IconFilename: "{app}\scgerp.ico"; Check: IsMainRoleWithoutClient
 Name: "{group}\Back up database now"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\backup.ps1"" -Reason manual"; IconFilename: "{app}\scgerp.ico"; Check: IsMainRole
 
 [Run]
-Filename: "{tmp}\SCG-Shop-ERP-Client-Setup.exe"; Parameters: "/S"; StatusMsg: "Installing the client app..."; Flags: waituntilterminated; Check: NeedsClientApp
+Filename: "{tmp}\Prompt-OS-Client-Setup.exe"; Parameters: "/S"; StatusMsg: "Installing the client app..."; Flags: waituntilterminated; Check: NeedsClientApp
 
 [UninstallRun]
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-main.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveServices"; Check: HasMainScripts
@@ -130,7 +130,7 @@ end;
 
 function DataDir: String;
 begin
-  Result := ExpandConstant('{commonappdata}\SCG Shop ERP');
+  Result := ExpandConstant('{commonappdata}\Prompt OS');
 end;
 
 function RunPowerShell(const Script, Args: String; var ResultCode: Integer): Boolean;

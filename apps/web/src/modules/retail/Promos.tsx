@@ -12,6 +12,7 @@ import { NoteField } from '../../ui/NoteField';
 import { ProductPicker } from '../../ui/ProductPicker';
 import './retail.css';
 import { ErrorBanner } from '../../errors';
+import { IS_CLOUD } from '../../cloud';
 
 const STATES: [PromoState | '', string][] = [['', 'ทั้งหมด'], ['live', 'กำลังใช้'], ['scheduled', 'ยังไม่เริ่ม'], ['draft', 'ร่าง'], ['expired', 'หมดอายุ'], ['closed', 'ปิดแล้ว']];
 const STATE_PILL: Record<PromoState, PillKind> = { live: 'ok', scheduled: 'acc', draft: 'warn', expired: 'mut', closed: 'mut' };
@@ -60,7 +61,7 @@ function PromoList() {
       <div className="rt-head" style={{ marginTop: 12 }}>
         <div>
           <h2 style={{ margin: 0 }}>โปรโมชั่นของร้าน {!manage && <Pill k="acc">ดูอย่างเดียว</Pill>}</h2>
-          <p className="small muted">ร้านตั้งโปรเองได้ 2 แบบ: <b>ลดราคา</b> (ลดเป็น % บาทต่อหน่วย หรือตั้งราคาโปร ใช้อัตโนมัติเมื่อสแกนสินค้าที่ร่วมรายการ) และ <b>ชุดโปร (bundle)</b> ขายหลายสินค้าในราคาเดียว ระบบตัดสต็อกทุกชิ้นในชุดและคิดต้นทุนจริงของแต่ละชิ้น (FIFO) · โปรนี้แยกจากคูปอง SCG Family</p>
+          <p className="small muted">ร้านตั้งโปรเองได้ 2 แบบ: <b>ลดราคา</b> (ลดเป็น % บาทต่อหน่วย หรือตั้งราคาโปร ใช้อัตโนมัติเมื่อสแกนสินค้าที่ร่วมรายการ) และ <b>ชุดโปร (bundle)</b> ขายหลายสินค้าในราคาเดียว ระบบตัดสต็อกทุกชิ้นในชุดและคิดต้นทุนจริงของแต่ละชิ้น (FIFO){IS_CLOUD && ' · โปรนี้แยกจากคูปอง SCG Family'}</p>
         </div>
         <button className="btn pri" disabled={!manage} onClick={() => setEdit('new')} data-testid="promo-new">+ สร้างโปรโมชั่น</button>
       </div>
@@ -314,7 +315,7 @@ function PromoModal({ promo, onClose, onSaved }: { promo: Promo | null; onClose:
       )}
       {clash.length > 0 && !f.draft && <div className="note bad small">สินค้าซ้ำกับโปรที่ช่วงเวลาทับกัน: {clash.map((c) => `${c.code} ${c.name}`).join(', ')} · สินค้าหนึ่งอยู่ได้ในโปรลดราคาเดียวต่อช่วงเวลา</div>}
       {ck && ck.belowCost.length > 0 && <div className="note bad small" data-testid="pm-below">ราคาโปรต่ำกว่าต้นทุน: {ck.belowCost.join(', ')} · ต้องอนุมัติตอนบันทึกตามการตั้งค่าร้าน หลังอนุมัติแล้วขายตามโปรได้โดยไม่ต้องขออนุมัติทุกบิล</div>}
-      <NoteField value={f.note} onChange={(note) => set({ note })} testId="pm-note" placeholder="เช่น โปรร่วมกับตัวแทน SCG ภาคเหนือ" />
+      <NoteField value={f.note} onChange={(note) => set({ note })} testId="pm-note" placeholder="เช่น โปรร่วมกับซัพพลายเออร์ ภาคเหนือ" />
       <label className="row small"><input type="checkbox" checked={f.draft} disabled={!!promo && promo.status !== 'draft'} onChange={(e) => set({ draft: e.target.checked })} /> บันทึกเป็นร่าง (ยังไม่ใช้กับบิล)</label>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act">
