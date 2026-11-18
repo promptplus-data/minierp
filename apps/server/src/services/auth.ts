@@ -4,16 +4,17 @@ import { withTenant, type Pool, type Tx } from '@erp/db';
 import type { SessionUser } from '@erp/contracts';
 import { PERM_KEYS, perm, type Role } from '@erp/core';
 import { writeAudit } from '../lib/audit';
-import type { Ctx, TenantGuard } from '../lib/context';
+import { can, type Ctx, type TenantGuard } from '../lib/context';
+import { grantsFor } from './roles';
 import { AppError, E, isUuid } from '../lib/errors';
 
 export const MAX_FAILED_LOGINS = 5;
 
-export const sessionUser = (u: { id: string; name: string; role: Role }): SessionUser => ({
-  id: u.id, name: u.name, role: u.role, perms: Object.fromEntries(PERM_KEYS.map((k) => [k, perm(u.role, k)])),
+export const sessionUser = (c: Pick<Ctx, 'userId' | 'name' | 'role' | 'grants' | 'roleName'>): SessionUser => ({
+  id: c.userId, name: c.name, role: c.role, roleName: c.roleName ?? null, perms: Object.fromEntries(PERM_KEYS.map((k) => [k, can(c as Ctx, k)])),
 });
 
-interface UserRow { id: string; tenant_id: string; name: string; role: Role; password_hash: string; status: string; failed_logins: number; locked_at: Date | null }
+interface UserRow { id: string; tenant_id: string; name: string; role: Role; shop_role_id: string | null; grants?: Awaited<ReturnType<typeof grantsFor>>; password_hash: string; status: string; failed_logins: number; locked_at: Date | null }
 
 type Outcome = { ok: true; user: UserRow } | { ok: false; reason: 'BAD_CREDENTIALS' | 'LOCKED' | 'RESIGNED' } | { ok: false; reason: 'GUARD'; error: AppError };
 
@@ -36,7 +37,7 @@ export async function login(pool: Pool, body: { username: string; password: stri
   // 2. Check and record the attempt inside the user's tenant; the audit row commits even when login fails.
   const outcome = await withTenant(pool, hit.tenant_id, async (tx): Promise<Outcome> => {
     const u = (await tx.query<UserRow>(
-      `select id, tenant_id, name, role, password_hash, status, failed_logins, locked_at from users where id = $1 for update`, [hit.id],
+      `select id, tenant_id, name, role, shop_role_id, password_hash, status, failed_logins, locked_at from users where id = $1 for update`, [hit.id],
     )).rows[0]!;
     const who = { tenantId: u.tenant_id, userId: u.id, name: u.name };
     for (const g of guards) {
@@ -66,7 +67,7 @@ export async function login(pool: Pool, body: { username: string; password: stri
     }
     if (u.failed_logins) await tx.query(`update users set failed_logins = 0 where id = $1`, [u.id]);
     await writeAudit(tx, who, [{ action: 'login', object: 'user', ref: body.username, detail: '' }]);
-    return { ok: true, user: u };
+    return { ok: true, user: { ...u, grants: await grantsFor(tx, u.role, u.shop_role_id) } };
   });
   if (!outcome.ok && outcome.reason === 'GUARD') throw outcome.error;
   if (!outcome.ok) {
@@ -74,21 +75,21 @@ export async function login(pool: Pool, body: { username: string; password: stri
     throw E.unauthorized(msg, { reason: outcome.reason });
   }
   const u = outcome.user;
-  return { tenantId: u.tenant_id, userId: u.id, name: u.name, role: u.role };
+  return { tenantId: u.tenant_id, userId: u.id, name: u.name, role: u.role, ...u.grants };
 }
 
 /** Re-reads the token's user on every request: resigned or role-changed users take effect immediately. */
-export async function loadActiveUser(tx: Tx, userId: string): Promise<{ id: string; name: string; role: Role } | null> {
+export async function loadActiveUser(tx: Tx, userId: string): Promise<{ id: string; name: string; role: Role; shop_role_id: string | null } | null> {
   if (!isUuid(userId)) return null;
-  const r = await tx.query<{ id: string; name: string; role: Role; status: string; locked: boolean }>(
-    `select id, name, role, status, locked_at is not null locked from users where id = $1`, [userId]);
+  const r = await tx.query<{ id: string; name: string; role: Role; shop_role_id: string | null; status: string; locked: boolean }>(
+    `select id, name, role, shop_role_id, status, locked_at is not null locked from users where id = $1`, [userId]);
   const u = r.rows[0];
   return u && u.status === 'active' && !u.locked ? u : null; // resigned or locked: existing tokens stop working
 }
 
 /** Clears the login lock and the approval-PIN lock. Owner: anyone; manager: anyone except an owner. */
 export async function unlockUser(tx: Tx, ctx: Ctx, userId: string): Promise<{ id: string; status: string }> {
-  if (ctx.role !== 'owner' && ctx.role !== 'manager' && perm(ctx.role, 'sys.users') !== 1) throw E.forbidden('Only the owner or a manager can unlock users');
+  if (ctx.role !== 'owner' && ctx.role !== 'manager' && can(ctx, 'sys.users') !== 1) throw E.forbidden('Only the owner or a manager can unlock users');
   if (!isUuid(userId)) throw E.notFound('User not found');
   const target = (await tx.query<{ role: Role }>(`select role from users where id = $1`, [userId])).rows[0];
   if (!target) throw E.notFound('User not found');

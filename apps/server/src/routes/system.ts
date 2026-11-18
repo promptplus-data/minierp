@@ -58,7 +58,7 @@ export function systemRoutes(app: FastifyInstance, deps: Deps, authed: Authed): 
     if (!isLoopback(req.ip)) throw E.forbidden('Run the first-time setup on the main machine (https://localhost)');
     const ctx = await runSetup(deps.pool, SetupReq.parse(req.body));
     reply.status(201);
-    return { token: signToken(app, ctx), user: sessionUser({ id: ctx.userId, name: ctx.name, role: ctx.role }) };
+    return { token: signToken(app, ctx), user: sessionUser(ctx) };
   });
 
   // ---------- on-prem pairing (docs/DEPLOY.md §3) ----------

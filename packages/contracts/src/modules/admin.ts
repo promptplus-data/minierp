@@ -44,7 +44,7 @@ export const HrEmployee = z.object({
   salary: Dec.nullable(), dailyRate: Dec.nullable(), commissionPct: Dec.nullable(), sso: z.boolean(),
   bank: z.string(), bankAccount: z.string(), bankAccountName: z.string(), nationalId: z.string(), phone: z.string(), leaveEnt: HrLeaveEnt,
   status: z.enum(['active', 'resigned']), resignedAt: z.string().nullable(), resignReason: z.string().nullable(),
-  user: z.object({ id: z.string(), username: z.string(), role: Role, status: z.string() }).nullable(),
+  user: z.object({ id: z.string(), username: z.string(), role: Role, status: z.string(), shopRoleId: z.string().nullable().default(null), roleName: z.string().nullable().default(null) }).nullable(),
 });
 export type HrEmployee = z.infer<typeof HrEmployee>;
 export const HrEmployeeQuery = pageQuery.extend({ status: z.enum(['active', 'resigned', 'all']).default('all') });
@@ -62,11 +62,13 @@ export const HrEmployeeCreate = HrEmployeeFields.extend({
   user: z.object({
     username: z.string().regex(/^[a-z0-9._]{3,20}$/, 'a-z 0-9 . _ 3-20'),
     role: Role.exclude(['owner']),
+    /** A role the owner created (สิทธิ์และบทบาท); `role` is then ignored and its base role is stored. */
+    shopRoleId: z.string().nullable().optional(),
     password: z.string().min(4).optional(), // omitted: a temporary password is generated and returned once
     pin: z.string().regex(/^\d{4,6}$/).optional(),
   }).optional(),
 });
-export const HrEmployeeUpdate = HrEmployeeFields.partial().extend({ role: Role.exclude(['owner']).optional() });
+export const HrEmployeeUpdate = HrEmployeeFields.partial().extend({ role: Role.exclude(['owner']).optional(), shopRoleId: z.string().nullable().optional() });
 export const HrEmployeeCreated = z.object({ employee: HrEmployee, tempPassword: z.string().nullable() });
 export const HrResignReq = z.object({ date: YMD, reason: z.string().min(1) });
 

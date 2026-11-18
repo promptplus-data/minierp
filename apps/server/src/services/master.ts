@@ -111,11 +111,11 @@ export async function updateProduct(tx: Tx, ctx: Ctx, id: string, p: Partial<Pro
   return toProduct(r.rows[0], ctx);
 }
 
-interface CustomerRow { id: string; code: string; name: string; tax_id: string | null; branch: string | null; phone: string | null; grp: Customer['group']; credit_limit: string; term: Customer['term']; address: string; note: string }
+interface CustomerRow { id: string; code: string; name: string; tax_id: string | null; branch: string | null; phone: string | null; grp: Customer['group']; credit_limit: string; term: Customer['term']; address: string; note: string; customer_type: string | null; active: boolean }
 const toCustomer = (r: CustomerRow): Customer => ({
-  id: r.id, code: r.code, name: r.name, taxId: r.tax_id, branch: r.branch, phone: r.phone, group: r.grp, creditLimit: money(r.credit_limit), term: r.term, address: r.address, note: r.note,
+  id: r.id, code: r.code, name: r.name, taxId: r.tax_id, branch: r.branch, phone: r.phone, group: r.grp, creditLimit: money(r.credit_limit), term: r.term, address: r.address, note: r.note, type: r.customer_type, active: r.active,
 });
-const CUSTOMER_COLS = `id, code, name, tax_id, branch, phone, grp, credit_limit::text, term, address, note`;
+const CUSTOMER_COLS = `id, code, name, tax_id, branch, phone, grp, credit_limit::text, term, address, note, customer_type, active`;
 
 export async function listCustomers(tx: Tx, q: PageQuery) {
   const cur = decodeCursor(q.cursor, 2);
@@ -130,6 +130,7 @@ export async function listCustomers(tx: Tx, q: PageQuery) {
     const j = params.length;
     where.push(`(name ilike $${i} or code ilike $${i} or coalesce(phone,'') ilike $${i} or regexp_replace(coalesce(phone,''),'[^0-9]','','g') ilike coalesce($${j}, $${i}) or coalesce(tax_id,'') ilike $${i} or address ilike $${i})`);
   }
+  where.push('active'); // inactive customers stay on old documents but are not offered for new ones
   if (cur) {
     params.push(cur[0], cur[1]);
     where.push(`(code, id) > ($${params.length - 1}, $${params.length}::uuid)`);
@@ -157,10 +158,64 @@ export async function createCustomer(tx: Tx, ctx: Ctx, c: Pick<Customer, 'name'>
     code = 'C' + String((r.rows[0]?.n ?? 0) + 1).padStart(5, '0');
   }
   const r = await tx.query<CustomerRow>(
-    `insert into customers (tenant_id, code, name, tax_id, branch, phone, grp, credit_limit, term, address, note) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning ${CUSTOMER_COLS}`,
-    [ctx.tenantId, code, c.name.trim(), c.taxId || null, c.branch || null, c.phone || null, c.group ?? 'retail', c.creditLimit ?? '0', JSON.stringify(c.term ?? { t: 'cash' }), c.address ?? '', c.note ?? ''],
+    `insert into customers (tenant_id, code, name, tax_id, branch, phone, grp, credit_limit, term, address, note, customer_type) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning ${CUSTOMER_COLS}`,
+    [ctx.tenantId, code, c.name.trim(), c.taxId || null, c.branch || null, c.phone || null, c.group ?? 'retail', c.creditLimit ?? '0', JSON.stringify(c.term ?? { t: 'cash' }), c.address ?? '', c.note ?? '', c.type?.trim() || null],
   );
   return toCustomer(r.rows[0]!);
+}
+
+/** Customer master list (M03): every customer with what is still owed, overdue and on open sales orders. */
+export async function customerMaster(tx: Tx, q: { q?: string; limit: number; cursor?: string; status: 'active' | 'inactive' | 'all'; type?: string }, today: string) {
+  const cur = decodeCursor(q.cursor, 2);
+  const params: unknown[] = [];
+  const where: string[] = [];
+  for (const w of searchTokens(q.q)) {
+    params.push(`%${likeEscape(w)}%`);
+    const i = params.length;
+    where.push(`(c.name ilike $${i} or c.code ilike $${i} or coalesce(c.phone,'') ilike $${i} or coalesce(c.tax_id,'') ilike $${i} or c.address ilike $${i} or coalesce(c.customer_type,'') ilike $${i})`);
+  }
+  if (q.status !== 'all') where.push(q.status === 'active' ? 'c.active' : 'not c.active');
+  if (q.type) { params.push(q.type); where.push(`c.customer_type = $${params.length}`); }
+  if (cur) {
+    params.push(cur[0], cur[1]);
+    where.push(`(c.code, c.id) > ($${params.length - 1}, $${params.length}::uuid)`);
+  }
+  params.push(today);
+  const t = params.length;
+  params.push(q.limit + 1);
+  const r = await tx.query<CustomerRow & { ar: string; overdue: string; so: string; invoices: number }>(
+    `select ${CUSTOMER_COLS.split(', ').map((x) => `c.${x}`).join(', ')},
+            coalesce(a.ar, 0)::text ar, coalesce(a.overdue, 0)::text overdue, coalesce(a.n, 0)::int invoices, coalesce(so.v, 0)::text so
+       from customers c
+       left join (select d.customer_id, sum(d.ar_balance) ar, sum(d.ar_balance) filter (where si.due_date < $${t}::date) overdue, count(*) n
+                    from docs d left join sales_invoices si on si.doc_id = d.id
+                   where d.status = 'active' and d.ar_balance > 0 group by d.customer_id) a on a.customer_id = c.id
+       left join (select o.customer_id, sum(o.total) v from sales_orders o where o.status = 'active' and o.dlv_status <> 'delivered' group by o.customer_id) so on so.customer_id = c.id
+      ${where.length ? 'where ' + where.join(' and ') : ''} order by c.code, c.id limit $${params.length}`,
+    params,
+  );
+  return pageOf(r.rows, q.limit, (c) => [c.code, c.id], (c) => ({ ...toCustomer(c), arBalance: money(c.ar), overdue: money(c.overdue), openOrders: money(c.so), invoices: c.invoices }));
+}
+
+export async function updateCustomer(tx: Tx, id: string, c: Partial<Omit<Customer, 'id'>>): Promise<{ before: Customer; after: Customer }> {
+  const before = await getCustomer(tx, id);
+  const set: string[] = [];
+  const params: unknown[] = [id];
+  const col = (name: string, v: unknown) => { if (v !== undefined) { params.push(v); set.push(`${name} = $${params.length}`); } };
+  col('code', c.code?.trim());
+  col('name', c.name?.trim());
+  col('tax_id', c.taxId === undefined ? undefined : c.taxId || null);
+  col('branch', c.branch === undefined ? undefined : c.branch || null);
+  col('phone', c.phone === undefined ? undefined : c.phone || null);
+  col('grp', c.group);
+  col('credit_limit', c.creditLimit);
+  col('term', c.term === undefined ? undefined : JSON.stringify(c.term));
+  col('address', c.address);
+  col('note', c.note);
+  col('customer_type', c.type === undefined ? undefined : c.type?.trim() || null);
+  col('active', c.active);
+  if (set.length) await tx.query(`update customers set ${set.join(', ')} where id = $1`, params);
+  return { before, after: await getCustomer(tx, id) };
 }
 
 export async function listVendors(tx: Tx, q: PageQuery) {

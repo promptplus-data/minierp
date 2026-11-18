@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, THAI_BANKS, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
+import { HrEmployee, HrEmployeeCreated, HrLeaveBalanceRow, Role, ShopRole, THAI_BANKS, type HrEmpType, type HrLeaveEnt } from '@erp/contracts';
 import { DEFAULT_LEAVE_ENTITLEMENT, USERNAME_RE, thaiIdValid } from '@erp/core';
 import { api } from '../../api';
 import { ROLE_TH, useAuth } from '../../auth';
@@ -85,7 +85,7 @@ export default function Employees() {
                   <td>{e.position || '-'}<div className="small muted">{EMP_TYPE_TH[e.type]}</div></td>
                   <td className="small">{th(e.startDate)}</td>
                   {sal && <td className="n">{e.type === 'daily' || e.type === 'parttime' ? `${fmt(e.dailyRate)} /วัน` : e.salary && Number(e.salary) ? fmt(e.salary) : '-'}</td>}
-                  <td className="small">{e.user ? <><span className="mono">{e.user.username}</span> · {ROLE_TH[e.user.role]}<div className="muted">{e.user.status === 'active' ? 'เปิดใช้งาน' : 'ปิดบัญชีแล้ว'}</div></> : '-'}</td>
+                  <td className="small">{e.user ? <><span className="mono">{e.user.username}</span> · {e.user.roleName ?? ROLE_TH[e.user.role]}<div className="muted">{e.user.status === 'active' ? 'เปิดใช้งาน' : 'ปิดบัญชีแล้ว'}</div></> : '-'}</td>
                   <td className="small">{e.type === 'external' || e.type === 'owner' || !b ? '-' : (['sick', 'personal', 'vacation'] as const).map((k) => {
                     const x = b.balances.find((y) => y.type === k);
                     return x ? `${fq(x.remaining)}/${x.entitled}` : '-';
@@ -131,7 +131,7 @@ export default function Employees() {
 interface Form {
   code: string; name: string; position: string; type: HrEmpType; startDate: string; phone: string; bank: string; bankAccount: string; bankAccountName: string; nationalId: string;
   salary: string; dailyRate: string; commissionPct: string; sso: boolean; ent: HrLeaveEnt;
-  username: string; role: z.infer<typeof Role>; pin: string;
+  username: string; role: string; pin: string;
 }
 
 function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal: boolean; onClose: () => void; onSaved: (pw: { username: string; password: string } | null) => void }) {
@@ -141,13 +141,14 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
     code: emp?.code ?? '', name: emp?.name ?? '', position: emp?.position ?? '', type: emp?.type ?? 'monthly', startDate: emp?.startDate ?? todayYmd(),
     phone: emp?.phone ?? '', bank: emp?.bank ?? '', bankAccount: emp?.bankAccount ?? '', bankAccountName: emp?.bankAccountName ?? '', nationalId: emp?.nationalId ?? '',
     salary: emp?.salary ?? '0', dailyRate: emp?.dailyRate ?? '0', commissionPct: emp?.commissionPct ?? '0', sso: emp?.sso ?? true,
-    ent: emp?.leaveEnt ?? { ...DEFAULT_LEAVE_ENTITLEMENT }, username: emp?.user?.username ?? '', role: emp?.user?.role ?? 'cashier', pin: '',
+    ent: emp?.leaveEnt ?? { ...DEFAULT_LEAVE_ENTITLEMENT }, username: emp?.user?.username ?? '', role: emp?.user?.shopRoleId ? `shop:${emp.user.shopRoleId}` : emp?.user?.role ?? 'cashier', pin: '',
   }));
   const [withUser, setWithUser] = useState(true);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
   const owner = emp?.type === 'owner';
+  const shopRoles = useQuery({ queryKey: ['roles'], queryFn: () => api('GET', '/api/roles', { schema: z.array(ShopRole) }), staleTime: 60_000 });
 
   const save = async () => {
     const uname = f.username.trim().toLowerCase();
@@ -169,13 +170,13 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
     try {
       if (isNew) {
         const r = await api('POST', '/api/hr/employees', {
-          body: { ...base, code: f.code.trim() || undefined, ...(withUser ? { user: { username: uname, role: f.role, pin: f.pin || undefined } } : {}) },
+          body: { ...base, code: f.code.trim() || undefined, ...(withUser ? { user: { username: uname, ...roleBody(f.role), pin: f.pin || undefined } } : {}) },
           schema: HrEmployeeCreated,
         });
         toast(withUser ? `เพิ่มพนักงานและผู้ใช้ ${uname} แล้ว` : 'เพิ่มพนักงานแล้ว');
         onSaved(r.tempPassword ? { username: uname, password: r.tempPassword } : null);
       } else {
-        await api('PATCH', `/api/hr/employees/${emp.id}`, { body: { ...base, ...(emp.user && !owner ? { role: f.role } : {}) }, schema: HrEmployee });
+        await api('PATCH', `/api/hr/employees/${emp.id}`, { body: { ...base, ...(emp.user && !owner ? roleBody(f.role) : {}) }, schema: HrEmployee });
         toast('บันทึกพนักงานแล้ว');
         onSaved(null);
       }
@@ -239,6 +240,7 @@ function EmpModal({ emp, sal, onClose, onSaved }: { emp: HrEmployee | null; sal:
           <label className="f">บทบาท (สิทธิ์)
             <select value={f.role} disabled={owner} onChange={(e) => set('role', e.target.value as Form['role'])} data-testid="emp-role">
               {(owner ? Role.options : ROLES).map((r) => <option key={r} value={r}>{ROLE_TH[r]}</option>)}
+              {!owner && (shopRoles.data ?? []).filter((r) => !r.builtin).map((r) => <option key={r.id} value={`shop:${r.id}`}>{r.name} (บทบาทของร้าน)</option>)}
             </select>
           </label>
           {isNew && <label className="f">PIN อนุมัติ (ผู้จัดการ · ไม่บังคับ)<input type="password" inputMode="numeric" maxLength={6} data-field="user.pin" value={f.pin} onChange={(e) => set('pin', e.target.value)} /></label>}
@@ -283,4 +285,10 @@ function ResignModal({ emp, onClose, onDone }: { emp: HrEmployee; onClose: () =>
       </div>
     </Modal>
   );
+}
+
+/** The role select holds a built-in key or `shop:<id>` for a role the owner created. */
+function roleBody(v: string): { role: Exclude<z.infer<typeof Role>, 'owner'>; shopRoleId: string | null } {
+  if (v.startsWith('shop:')) return { role: 'cashier', shopRoleId: v.slice(5) };
+  return { role: v as Exclude<z.infer<typeof Role>, 'owner'>, shopRoleId: null };
 }

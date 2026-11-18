@@ -61,7 +61,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-        <div className="small muted" style={{ padding: '16px 8px' }}>ผู้ใช้: {user?.name} ({user ? ROLE_TH[user.role] : ''}){meta.data ? ` · v${meta.data.version}` : ''}</div>
+        <div className="small muted" style={{ padding: '16px 8px' }}>ผู้ใช้: {user?.name} ({user ? user.roleName ?? ROLE_TH[user.role] : ''}){meta.data ? ` · v${meta.data.version}` : ''}</div>
       </aside>
       <div className="main">
         <header className="top">
@@ -73,7 +73,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <div className="sp" />
           <div className="who">
             <span className={`ed ${IS_CLOUD ? 'cloud' : 'onprem'}`} data-testid="edition">{IS_CLOUD ? 'Cloud' : 'On-premise'}</span>
-            <span className="uname">{user?.name}<small>{user ? ROLE_TH[user.role] : ''}</small></span>
+            <span className="uname">{user?.name}<small>{user ? user.roleName ?? ROLE_TH[user.role] : ''}</small></span>
             <TouchToggle />
             <button className="btn sm" onClick={logout}>ออกจากระบบ</button>
           </div>

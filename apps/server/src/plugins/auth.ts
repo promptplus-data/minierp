@@ -10,6 +10,7 @@ import { withTenant, type Tx } from '@erp/db';
 import type { Ctx, Deps } from '../lib/context';
 import { E, isUuid } from '../lib/errors';
 import { cookie, DEVICE_COOKIE, isLoopback, sha256 } from '../lib/net';
+import { grantsFor } from '../services/roles';
 import { loadActiveUser } from '../services/auth';
 
 export interface TokenClaims { sub: string; tid: string }
@@ -55,7 +56,7 @@ export function makeAuthed(deps: Deps) {
       // Module guards (license read-only mode, suspended shop): one central place for every authed route.
       const config = (req.routeOptions?.config ?? {}) as unknown as Record<string, unknown>;
       for (const g of deps.tenantGuards) await g(tx, { tenantId: claims.tid, phase: 'request', method: req.method, route: req.routeOptions?.url ?? req.url, config });
-      return handler(tx, { tenantId: claims.tid, userId: u.id, name: u.name, role: u.role }, req, reply);
+      return handler(tx, { tenantId: claims.tid, userId: u.id, name: u.name, role: u.role, ...(await grantsFor(tx, u.role, u.shop_role_id)) }, req, reply);
     });
   };
 }

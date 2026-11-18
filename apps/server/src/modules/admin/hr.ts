@@ -16,6 +16,7 @@ import {
   bahtText, d, deductibleDays, defaultEntitlement, leaveBalances, leaveDays, money, overEntitlement, payRow, periodRange, periodTH,
   sum, thaiIdValid, maskThaiId, type LeaveKind, type LeaveRecord, type PayrollConfig,
 } from '@erp/core';
+import { resolveAssignment } from '../../services/roles';
 import { writeAudit } from '../../lib/audit';
 import { can, requireAny, requirePerm, type Ctx } from '../../lib/context';
 import { nextDocNo } from '../../lib/docno';
@@ -55,11 +56,11 @@ export async function updateHrSettings(tx: Tx, ctx: Ctx, body: In<typeof HrSetti
 interface EmpRow {
   id: string; code: string; name: string; position: string; emp_type: HrEmployee['type']; start_date: string; salary: string; daily_rate: string;
   commission_pct: string; sso: boolean; bank: string; bank_account: string; bank_account_name: string; national_id: string; phone: string; leave_ent: HrLeaveEnt; status: 'active' | 'resigned';
-  resigned_at: string | null; resign_reason: string | null; user_id: string | null; u_username: string | null; u_role: HrEmployee['user'] extends infer U ? U extends { role: infer R } ? R : never : never; u_status: string | null;
+  resigned_at: string | null; resign_reason: string | null; user_id: string | null; u_username: string | null; u_role: HrEmployee['user'] extends infer U ? U extends { role: infer R } ? R : never : never; u_status: string | null; u_shop_role_id: string | null; u_role_name: string | null;
 }
 const EMP_SELECT = `select e.id, e.code, e.name, e.position, e.emp_type, e.start_date, e.salary::text, e.daily_rate::text, e.commission_pct::text, e.sso,
   e.bank, e.bank_account, e.bank_account_name, e.national_id, e.phone, e.leave_ent, e.status, e.resigned_at, e.resign_reason, e.user_id,
-  u.username u_username, u.role u_role, u.status u_status
+  u.username u_username, u.role u_role, u.status u_status, u.shop_role_id u_shop_role_id, (select sr.name from shop_roles sr where sr.id = u.shop_role_id) u_role_name
   from employees e left join users u on u.id = e.user_id`;
 
 function toEmployee(r: EmpRow, ctx: Ctx): HrEmployee {
@@ -69,7 +70,7 @@ function toEmployee(r: EmpRow, ctx: Ctx): HrEmployee {
     salary: pay ? money(r.salary) : null, dailyRate: pay ? money(r.daily_rate) : null, commissionPct: pay ? d(r.commission_pct).toString() : null,
     sso: r.sso, bank: r.bank, bankAccount: r.bank_account, bankAccountName: r.bank_account_name, nationalId: pay ? r.national_id : maskThaiId(r.national_id), phone: r.phone, leaveEnt: r.leave_ent,
     status: r.status, resignedAt: r.resigned_at, resignReason: r.resign_reason,
-    user: r.user_id ? { id: r.user_id, username: r.u_username!, role: r.u_role, status: r.u_status! } : null,
+    user: r.user_id ? { id: r.user_id, username: r.u_username!, role: r.u_role, status: r.u_status!, shopRoleId: r.u_shop_role_id, roleName: r.u_role_name } : null,
   };
 }
 
@@ -140,12 +141,13 @@ export async function createEmployee(tx: Tx, ctx: Ctx, body: In<typeof HrEmploye
     if (body.user.pin && !['manager'].includes(body.user.role)) {
       // Only owners and managers approve with a PIN; a PIN for other roles is stored but unused.
     }
+    const asg = await resolveAssignment(tx, ctx, { role: body.user.role, shopRoleId: body.user.shopRoleId });
     temp = body.user.password ? null : tempPassword();
     const hash = await argon2.hash(body.user.password ?? temp!, { type: argon2.argon2id });
     const pin = body.user.pin ? await argon2.hash(body.user.pin, { type: argon2.argon2id }) : null;
     const u = await tx.query<{ id: string }>(
-      `insert into users (tenant_id, username, name, role, password_hash, pin_hash, phone) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
-      [ctx.tenantId, body.user.username, body.name, body.user.role, hash, pin, body.phone || null],
+      `insert into users (tenant_id, username, name, role, password_hash, pin_hash, phone, shop_role_id) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
+      [ctx.tenantId, body.user.username, body.name, asg.role, hash, pin, body.phone || null, asg.shopRoleId],
     );
     userId = u.rows[0]!.id;
   }
@@ -158,7 +160,7 @@ export async function createEmployee(tx: Tx, ctx: Ctx, body: In<typeof HrEmploye
   const e = await loadEmp(tx, r.rows[0]!.id);
   await writeAudit(tx, ctx, [{
     action: 'create', object: body.user ? 'employee+user' : 'employee', ref: code,
-    detail: `${body.name} · ${body.position || EMP_TH[body.type]}${body.user ? ` · ผู้ใช้ ${body.user.username} (${body.user.role})` : ''}`,
+    detail: `${body.name} · ${body.position || EMP_TH[body.type]}${body.user ? ` · ผู้ใช้ ${body.user.username} (${body.user.shopRoleId ? 'บทบาทของร้าน' : body.user.role})` : ''}`,
   }]);
   return { employee: toEmployee(e, ctx), tempPassword: temp };
 }
@@ -202,11 +204,19 @@ export async function updateEmployee(tx: Tx, ctx: Ctx, id: string, body: In<type
     params.push(id);
     await tx.query(`update employees set ${set.join(', ')}, updated_at = now() where id = $${params.length}`, params);
   }
-  if (e.user_id && (body.name !== undefined || body.role !== undefined)) {
-    if (body.role && e.u_role === 'owner') throw E.forbidden('The owner role cannot be changed here');
-    if (body.role && body.role !== e.u_role) changes.push(`บทบาท: ${e.u_role} → ${body.role}`);
-    await tx.query(`update users set name = coalesce($2, name), role = coalesce($3, role) where id = $1`, [e.user_id, body.name ?? null, body.role ?? null]);
-  } else if (body.role) throw E.validation('This employee has no login user');
+  const roleChange = body.role !== undefined || body.shopRoleId !== undefined;
+  if (e.user_id && (body.name !== undefined || roleChange)) {
+    if (roleChange && e.u_role === 'owner') throw E.forbidden('The owner role cannot be changed here');
+    let role: string | null = null;
+    let shopRoleId: string | null = e.u_shop_role_id;
+    if (roleChange) {
+      const asg = await resolveAssignment(tx, ctx, { role: body.role ?? (e.u_role as Exclude<typeof e.u_role, 'owner'>), shopRoleId: body.shopRoleId ?? null });
+      if (asg.role !== e.u_role || asg.shopRoleId !== e.u_shop_role_id) changes.push(`บทบาท: ${e.u_role_name ?? e.u_role} → ${asg.label}`);
+      role = asg.role;
+      shopRoleId = asg.shopRoleId;
+    }
+    await tx.query(`update users set name = coalesce($2, name), role = coalesce($3, role), shop_role_id = $4 where id = $1`, [e.user_id, body.name ?? null, role, shopRoleId]);
+  } else if (roleChange) throw E.validation('This employee has no login user');
   const after = await loadEmp(tx, id);
   await writeAudit(tx, ctx, [{ action: 'update', object: 'employee', ref: after.code, detail: changes.join(' · ') || 'ไม่มีการเปลี่ยนแปลง' }]);
   return toEmployee(after, ctx);

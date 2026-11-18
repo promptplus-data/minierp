@@ -91,3 +91,21 @@ export function perm(role: Role, key: PermKey): PermValue {
 
 /** Roles whose PIN can approve an 'apv' action. */
 export const approverRoles = (key: PermKey): Role[] => (OWNER_ONLY.has(key) ? ['owner'] : ['owner', 'manager']);
+
+/** A full permission set: every key with its value (shop roles store this). */
+export type GrantSet = Record<PermKey, PermValue>;
+
+/** The default permission set of a built-in role. */
+export const defaultGrants = (role: Role): GrantSet => Object.fromEntries(PERM_KEYS.map((k) => [k, perm(role, k)])) as GrantSet;
+
+/** Values a key may take: pos.discCap is a percentage cap, the rest yes / read-only / with PIN / no. */
+export const isPermValue = (key: PermKey, v: unknown): v is PermValue =>
+  key === 'pos.discCap' ? typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100 : v === 0 || v === 1 || v === 'ro' || v === 'apv';
+
+/** Whether `a` gives no more than `b` for one key (used so a non-owner cannot hand out more than they have). */
+export function permWithin(key: PermKey, a: PermValue, b: PermValue): boolean {
+  if (key === 'pos.discCap') return Number(a) <= Number(b);
+  if (a === b || a === 0) return true;
+  if (b === 1) return true;
+  return false;
+}

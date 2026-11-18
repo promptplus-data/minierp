@@ -16,6 +16,7 @@ const Terms = lazy(() => import('./Terms'));
 const TermsSigned = lazy(() => import('./Terms').then((m) => ({ default: m.TermsSigned })));
 const System = lazy(() => import('./System'));
 const Restore = lazy(() => import('./Restore'));
+const Roles = lazy(() => import('./Roles'));
 // Static VITE_EDITION test: the on-prem build drops the console and its chunks entirely.
 const ScgApp = import.meta.env.VITE_EDITION === 'cloud' ? lazy(() => import('./scg/ScgApp')) : null;
 
@@ -29,6 +30,7 @@ if (!IS_CLOUD) publicRoutes.push({ path: '/restore', element: <Restore /> });
 
 export const adminModule: WebModule = {
   nav: [
+    { path: '/roles', label: 'สิทธิ์และบทบาท', code: 'M01', section: 'sys', icon: '<path d="M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>', perm: 'sys.users', order: 15 },
     { path: '/hr', label: 'พนักงานและเงินเดือน', code: 'M17', section: 'hr', icon: 'settings', perm: ['hr.manage', 'hr.salary'], order: 10 },
     { path: '/leave', label: 'วันลา', code: 'M17', section: 'hr', icon: CAL, order: 20 },
     { path: '/system', label: 'ระบบและข้อมูลร้าน', code: 'M19', section: 'sys', icon: SRV, perm: 'sys.settings', edition: 'onprem', order: 70 },
@@ -36,6 +38,7 @@ export const adminModule: WebModule = {
   ],
   routes: [
     { path: '/hr', element: <HrPage /> },
+    { path: '/roles', element: <Roles /> },
     { path: '/leave', element: <Leave /> },
     { path: '/payslip/:period', element: <Payslips /> },
     ...(IS_CLOUD ? [{ path: '/terms', element: <Terms /> }, { path: '/terms/signed', element: <TermsSigned /> }] : [{ path: '/system', element: <System /> }]),

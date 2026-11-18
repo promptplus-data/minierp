@@ -1,5 +1,5 @@
 import type { Pool, Tx } from '@erp/db';
-import { perm, type PermKey, type PermValue, type Role } from '@erp/core';
+import { perm, type GrantSet, type PermKey, type PermValue, type Role } from '@erp/core';
 import { E } from './errors';
 
 export type Edition = 'cloud' | 'onprem';
@@ -10,6 +10,10 @@ export interface Ctx {
   userId: string;
   name: string;
   role: Role;
+  /** The shop's permission set for this user (shop role or the shop's version of the built-in role); absent = defaults. */
+  grants?: GrantSet;
+  /** Display name of a shop-created role. */
+  roleName?: string;
 }
 
 export interface TestHooks {
@@ -49,7 +53,7 @@ export type TenantGuard = (tx: Tx, info: TenantGuardInfo) => Promise<void>;
 export const bangkokToday = (): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
-export const can = (ctx: Ctx, key: PermKey): PermValue => perm(ctx.role, key);
+export const can = (ctx: Ctx, key: PermKey): PermValue => (ctx.role !== 'owner' && ctx.grants ? ctx.grants[key] ?? 0 : perm(ctx.role, key));
 
 /** Full permission (1) required; 'ro' is accepted when readOnly is true. */
 export function requirePerm(ctx: Ctx, key: PermKey, opts: { readOnly?: boolean } = {}): void {

@@ -39,7 +39,7 @@ export const LoginReq = z.object({
   username: z.string().min(1), password: z.string().min(1),
   tenant: z.string().optional(), // shop code; only needed (cloud) when the username exists in several shops
 });
-export const SessionUser = z.object({ id: z.string(), name: z.string(), role: Role, perms: z.record(z.union([z.literal(0), z.literal(1), z.literal('ro'), z.literal('apv'), z.number()])) });
+export const SessionUser = z.object({ id: z.string(), name: z.string(), role: Role, roleName: z.string().nullable().default(null), perms: z.record(z.union([z.literal(0), z.literal(1), z.literal('ro'), z.literal('apv'), z.number()])) });
 export type SessionUser = z.infer<typeof SessionUser>;
 export const LoginRes = z.object({ token: z.string(), user: SessionUser });
 /** GET /api/users/approvers: active users whose PIN can approve (owner, manager). The UI needs their ids for `Approval`. */
@@ -60,10 +60,35 @@ export const ProductUpsert = Product.omit({ id: true, cost: true }).partial({ ba
 export const Customer = z.object({
   id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable(),
   group: z.enum(['retail', 'whole', 'contr']), creditLimit: Dec, address: z.string().default(''), note: z.string().default(''),
+  /** ประเภทลูกค้า: one of CUSTOMER_TYPES or the shop's own words; null = not set. */
+  type: z.string().max(60).nullable().default(null),
+  active: z.boolean().default(true),
   term: z.discriminatedUnion('t', [z.object({ t: z.literal('cash') }), z.object({ t: z.literal('days'), x: z.number().int() }), z.object({ t: z.literal('nextDay'), x: z.number().int() }), z.object({ t: z.literal('eom') })]),
 });
 export type Customer = z.infer<typeof Customer>;
-export const CustomerCreate = Customer.omit({ id: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true, address: true, note: true });
+export const CUSTOMER_TYPES = ['ช่าง', 'เจ้าของบ้าน', 'งานโครงการ', 'บริษัทรับเหมา'] as const;
+export const CustomerCreate = Customer.omit({ id: true, active: true }).partial({ code: true, taxId: true, branch: true, phone: true, group: true, creditLimit: true, term: true, address: true, note: true, type: true });
+/** PATCH /api/customers/:id (data.master; credit limit and term need sales.creditApv or the owner). */
+export const CustomerUpdate = Customer.omit({ id: true }).partial();
+/** GET /api/customers/master: the customer master list with what each still owes. */
+export const CustomerMasterQuery = z.object({
+  q: z.string().optional(), limit: z.coerce.number().int().min(1).max(200).default(50), cursor: z.string().optional(),
+  status: z.enum(['active', 'inactive', 'all']).default('active'), type: z.string().optional(),
+});
+export const CustomerMaster = Customer.extend({ arBalance: Dec, overdue: Dec, openOrders: Dec, invoices: z.number().int() });
+export type CustomerMaster = z.infer<typeof CustomerMaster>;
+
+// ---------- shop roles (owner manages permissions) ----------
+const PermVal = z.union([z.literal(0), z.literal(1), z.literal('ro'), z.literal('apv'), z.number()]);
+export const ShopRole = z.object({
+  /** built-in: the role key; shop role: uuid */
+  id: z.string(), key: z.string(), name: z.string(), base: Role.exclude(['owner']), builtin: z.boolean(),
+  grants: z.record(PermVal), defaults: z.record(PermVal), customized: z.boolean(), users: z.number().int(),
+  updatedBy: z.string().nullable(), updatedAt: z.string().nullable(),
+});
+export type ShopRole = z.infer<typeof ShopRole>;
+export const ShopRoleCreate = z.object({ name: z.string().trim().min(1).max(40), base: Role.exclude(['owner']), grants: z.record(PermVal).optional() });
+export const ShopRoleUpdate = z.object({ name: z.string().trim().min(1).max(40).optional(), grants: z.record(PermVal).optional(), reset: z.boolean().optional() });
 export const Vendor = z.object({ id: z.string(), code: z.string(), name: z.string(), taxId: z.string().nullable(), branch: z.string().nullable(), phone: z.string().nullable() });
 export type Vendor = z.infer<typeof Vendor>;
 /** Quick-create from the vendor picker (`POST /api/vendors`, data.master). Code is generated (V + 5 digits) when empty. */
@@ -301,7 +326,9 @@ export const PairingCode = z.object({ code: z.string().regex(/^\d{6}$/), expires
 export const coreRoutes = {
   meta: 'GET /api/meta', login: 'POST /api/auth/login', me: 'GET /api/auth/me',
   products: 'GET /api/products', productCreate: 'POST /api/products', productUpdate: 'PATCH /api/products/:id',
-  customers: 'GET /api/customers', customerCreate: 'POST /api/customers', warehouses: 'GET /api/warehouses',
+  customers: 'GET /api/customers', customerCreate: 'POST /api/customers', customerMaster: 'GET /api/customers/master', customerGet: 'GET /api/customers/:id', customerUpdate: 'PATCH /api/customers/:id',
+  roles: 'GET /api/roles', roleCreate: 'POST /api/roles', roleUpdate: 'PATCH /api/roles/:id', roleDelete: 'POST /api/roles/:id/delete',
+  warehouses: 'GET /api/warehouses',
   stock: 'GET /api/stock', lots: 'GET /api/stock/lots', receipt: 'POST /api/stock/receipts', transfer: 'POST /api/stock/transfers', issue: 'POST /api/stock/issues',
   adjustRequest: 'POST /api/stock/adjust-requests', adjustRequests: 'GET /api/stock/adjust-requests', adjustApprove: 'POST /api/stock/adjust-requests/:id/approve',
   shiftCurrent: 'GET /api/shifts/current', shiftOpen: 'POST /api/shifts/open', shiftMove: 'POST /api/shifts/:id/cash-moves', shiftClose: 'POST /api/shifts/:id/close',

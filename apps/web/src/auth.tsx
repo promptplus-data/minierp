@@ -47,6 +47,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setRestoring(false));
   }, [logout]);
 
+  // The owner may change a role's permissions while staff are signed in: refresh the session on focus and every 2 minutes.
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => { if (getToken()) api('GET', '/api/auth/me', { schema: SessionUser, silent: true }).then((u) => setUser((cur) => (cur && JSON.stringify(cur) === JSON.stringify(u) ? cur : u))).catch(() => {}); };
+    const t = setInterval(refresh, 120_000);
+    window.addEventListener('focus', refresh);
+    return () => { clearInterval(t); window.removeEventListener('focus', refresh); };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const login = useCallback(async (username: string, password: string) => {
     const r = await api('POST', '/api/auth/login', { body: { username, password }, schema: LoginRes });
     qc.clear();
@@ -54,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   }, [qc]);
 
-  const can = useCallback((key: PermKey) => (user ? perm(user.role, key) : 0), [user]);
+  // The shop's permission set comes with the session (owner-managed roles); the built-in table is the fallback.
+  const can = useCallback((key: PermKey) => (user ? (user.perms[key] as PermValue | undefined) ?? perm(user.role, key) : 0), [user]);
   return <Ctx.Provider value={{ user, restoring, login, logout, can }}>{children}</Ctx.Provider>;
 }

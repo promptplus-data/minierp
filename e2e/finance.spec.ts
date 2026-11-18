@@ -69,7 +69,7 @@ test('ปรับปรุงต้นทุน: locked by default, the owner o
 test('มัดจำซื้อ and รับวางบิลซื้อ: pay the billing note and take off the deposit in one voucher', async ({ page, request }) => {
   const suda = await apiToken(request, 'suda');
   const vendors = (await call(request, suda, 'get', '/api/vendors?limit=50')).items as { id: string; name: string }[];
-  const v = vendors.find((x) => x.name.includes('ทวีพัฒนา'))!;
+  const v = vendors.find((x) => x.name.includes('เหล็กสยาม'))!; // a vendor no other spec pays
   const products = (await call(request, suda, 'get', '/api/products?q=SAND-C&limit=1')).items as { id: string }[];
   const whs = (await call(request, suda, 'get', '/api/warehouses')).items as { id: string; isPos: boolean; active: boolean; kind?: string }[];
   const wh = whs.find((w) => !w.isPos && w.active && w.kind !== 'damaged')!;
