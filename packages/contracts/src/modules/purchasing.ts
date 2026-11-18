@@ -312,7 +312,9 @@ export const StockCountLine = z.object({
   productId: z.string(), sku: z.string(), name: z.string(), unitName: z.string(), barcode: z.string().nullable(),
   /** Hidden (null) while counting unless the caller has inv.seeSys and asked for it (BR-09). */
   systemQty: Dec.nullable(), movedQty: Dec.nullable(), countedQty: Dec.nullable(), variance: Dec.nullable(),
-  countedBy: z.string().nullable(),
+  countedBy: z.string().nullable(), countedAt: z.string().nullable().optional(),
+  /** Who decided the line's adjustment (approved or not) and when; null until decided. */
+  approvedBy: z.string().nullable().optional(), decidedAt: z.string().nullable().optional(),
   /** counting (editable) / review (variance waiting for approval) / approved / rejected / done (no variance or not counted). */
   state: z.enum(['counting', 'review', 'approved', 'rejected', 'done']).default('counting'),
   round: z.number().int().default(1), prevCountedQty: Dec.nullable().optional(),
@@ -330,9 +332,24 @@ export const LedgerEntry = z.object({
   warehouseId: z.string(), qty: Dec, unitCost: Dec.nullable(), balance: Dec, note: z.string(), user: z.string(),
 });
 export type LedgerEntry = z.infer<typeof LedgerEntry>;
+
+/** Excel / CSV export of the stock page and the stock ledger: pick products and warehouses (comma-separated ids, none = all). */
+const IdList = z.string().optional().transform((s) => (s ? [...new Set(s.split(',').map((x) => x.trim()).filter(Boolean))] : undefined));
+export const StockExportQuery = z.object({
+  format: z.enum(['csv', 'xlsx']).default('xlsx'), productIds: IdList, warehouseIds: IdList,
+  /** Leave out product × warehouse rows with nothing on hand and nothing reserved. */
+  nonZero: QBool.optional(),
+});
+export const LedgerExportQuery = z.object({
+  format: z.enum(['csv', 'xlsx']).default('xlsx'), productIds: IdList, warehouseIds: IdList, from: Ymd.optional(), to: Ymd.optional(),
+});
+/** Most rows one export may hold; narrow the products, warehouses or dates beyond this. */
+export const STOCK_EXPORT_MAX_ROWS = 50_000;
 export const ReorderItem = z.object({ productId: z.string(), sku: z.string(), name: z.string(), unitName: z.string(), category: z.string(), qty: Dec, reorderPoint: Dec, shortBy: Dec });
 
 export const purchasingRoutes = {
+  stockExport: 'GET /api/stock/export',
+  ledgerExport: 'GET /api/stock/ledger/export',
   purchasingSettings: 'GET /api/purchasing/settings',
   purchasingSettingsUpdate: 'PATCH /api/purchasing/settings',
   purchasingDashboard: 'GET /api/purchasing/dashboard',

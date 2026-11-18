@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import {
   ApBillUpdate, ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
-  GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerQuery, PurchasingSettingsPatch, StockCountEntryReq,
+  GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerExportQuery, LedgerQuery, StockExportQuery, PurchasingSettingsPatch, StockCountEntryReq,
   StockCountOpenReq, StockCountQuery, StockCountRecountReq, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny } from '../../lib/context';
@@ -17,6 +17,8 @@ import * as gv from './grvoid';
 import * as hub from './importhub';
 import * as po from './po';
 import * as sx from './stockx';
+import { ledgerSheet, stockSheet } from './stockExport';
+import { sendFile } from '../reports/files';
 
 /** Uploads travel as base64 JSON: a 10 MB file is ~13.4 MB of body. */
 const UPLOAD = { bodyLimit: 15 * 1024 * 1024 };
@@ -109,6 +111,15 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   app.post('/api/stock-counts/:id/cancel', authed(async (tx, ctx, req) => sx.cancelCount(tx, ctx, params(req).id)));
   app.post('/api/stock-counts/:id/recount', authed(async (tx, ctx, req) => sx.recountLines(tx, ctx, params(req).id, StockCountRecountReq.parse(req.body))));
   app.get('/api/stock/ledger', authed(async (tx, ctx, req) => sx.ledger(tx, ctx, LedgerQuery.parse(req.query))));
+  // Excel / CSV of the stock page and the ledger for the picked products and warehouses.
+  app.get('/api/stock/export', authed(async (tx, ctx, req, reply) => {
+    const q = StockExportQuery.parse(req.query);
+    return sendFile(reply, q.format, `stock-${deps.today()}`, await stockSheet(tx, ctx, q), 'สต็อกคงเหลือ');
+  }));
+  app.get('/api/stock/ledger/export', authed(async (tx, ctx, req, reply) => {
+    const q = LedgerExportQuery.parse(req.query);
+    return sendFile(reply, q.format, `stock-ledger-${q.from ?? 'start'}_${q.to ?? deps.today()}`, await ledgerSheet(tx, ctx, q), 'สมุดคุมสต็อก');
+  }));
   app.get('/api/stock/reorder', authed(async (tx, ctx, req) => {
     requireAny(ctx, ['inv.view', 'inv.receive', 'fin.ap'], { readOnly: true });
     return sx.reorder(tx, ctx, pageQuery.parse(req.query));

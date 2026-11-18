@@ -47,7 +47,7 @@ export const FEATURES = [
   { key: 'promos', group: 'sale', label: 'โปรโมชั่นของร้าน', code: 'M15', paths: ['/promos'], api: ['/api/promos', '/api/reports/promotions'] },
   { key: 'purchasing', group: 'inv', label: 'ซื้อเข้า / รับของ', code: 'M05', paths: ['/purchasing'],
     api: ['/api/purchasing', '/api/purchase-orders', '/api/gr-drafts', '/api/delivery-imports'] },
-  { key: 'stock', group: 'inv', label: 'คลังสินค้า', code: 'M06', paths: ['/stock'], api: ['/api/stock/transfers', '/api/stock/issues', '/api/stock/adjust-requests'] },
+  { key: 'stock', group: 'inv', label: 'คลังสินค้า', code: 'M06', paths: ['/stock'], api: ['/api/stock/transfers', '/api/stock/issues', '/api/stock/adjust-requests', '/api/stock/export'] },
   { key: 'stockLedger', group: 'inv', label: 'สมุดคุมสต็อก', code: 'M06', paths: ['/stock-ledger'], api: ['/api/stock/ledger'] },
   { key: 'stockCount', group: 'inv', label: 'นับสต็อก', code: 'M06', paths: ['/stock-count'], api: ['/api/stock-counts'] },
   { key: 'ap', group: 'inv', label: 'เจ้าหนี้ / จ่ายเงิน', code: 'M18', paths: ['/ap'], api: ['/api/ap'] },

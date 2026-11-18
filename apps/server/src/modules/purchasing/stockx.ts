@@ -102,10 +102,12 @@ export async function getCount(tx: Tx, ctx: Ctx, id: string, q: { showSystem?: b
   if (!c) throw E.notFound('ไม่พบรอบนับ');
   // BR-09: while counting the system quantity is hidden; only inv.seeSys may reveal it on request.
   const hidden = c.status === 'counting' && !(q.showSystem && can(ctx, 'inv.seeSys') === 1);
-  const lines = await tx.query<{ product_id: string; sku: string; name: string; units: { name: string }[]; barcode: string | null; system_qty: string; moved_qty: string | null; counted_qty: string | null; counted_by: string | null; state: StockCount['items'][number]['state']; round: number; prev_counted_qty: string | null }>(
-    `select l.product_id, p.sku, p.name, p.units, p.barcode, l.system_qty::text, l.moved_qty::text, l.counted_qty::text, u.name counted_by,
+  const lines = await tx.query<{ product_id: string; sku: string; name: string; units: { name: string }[]; barcode: string | null; system_qty: string; moved_qty: string | null; counted_qty: string | null; counted_by: string | null; counted_at: Date | null; approved_by: string | null; decided_at: Date | null; state: StockCount['items'][number]['state']; round: number; prev_counted_qty: string | null }>(
+    `select l.product_id, p.sku, p.name, p.units, p.barcode, l.system_qty::text, l.moved_qty::text, l.counted_qty::text, u.name counted_by, l.counted_at,
+            case when l.state in ('approved', 'rejected') then du.name end approved_by, case when l.state in ('approved', 'rejected') then a.decided_at end decided_at,
             l.state, l.round, l.prev_counted_qty::text
        from stock_count_lines l join products p on p.id = l.product_id left join users u on u.id = l.counted_by
+       left join adjust_requests a on a.id = l.adjust_request_id left join users du on du.id = a.decided_by
       where l.count_id = $1 order by p.category, p.sku`, [c.id]);
   const moves = c.status === 'counting' && !hidden ? await movesSince(tx, c.warehouse_id, c.opened_at) : null;
   return {
@@ -118,7 +120,7 @@ export async function getCount(tx: Tx, ctx: Ctx, id: string, q: { showSystem?: b
         systemQty: hidden ? null : qty4(l.system_qty), movedQty: hidden ? null : qty4(moved),
         countedQty: l.counted_qty == null ? null : qty4(l.counted_qty),
         variance: hidden || l.counted_qty == null ? null : qty4(d(l.counted_qty).minus(expected)),
-        countedBy: l.counted_by, state: l.state, round: l.round, prevCountedQty: l.prev_counted_qty == null ? null : qty4(l.prev_counted_qty),
+        countedBy: l.counted_by, countedAt: l.counted_at?.toISOString() ?? null, approvedBy: l.approved_by, decidedAt: l.decided_at?.toISOString() ?? null, state: l.state, round: l.round, prevCountedQty: l.prev_counted_qty == null ? null : qty4(l.prev_counted_qty),
       };
     }),
   };
@@ -216,7 +218,7 @@ export async function cancelCount(tx: Tx, ctx: Ctx, id: string) {
 }
 
 // ---------- ledger ----------
-export async function ledger(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; productId?: string; warehouseId?: string; from?: string; to?: string }) {
+export async function ledger(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; cursor?: string; productId?: string; warehouseId?: string; productIds?: readonly string[]; warehouseIds?: readonly string[]; from?: string; to?: string }) {
   requirePerm(ctx, 'inv.view', { readOnly: true });
   const cur = decodeCursor(q.cursor, 2);
   const params: unknown[] = [];
@@ -226,6 +228,12 @@ export async function ledger(tx: Tx, ctx: Ctx, q: { q?: string; limit: number; c
     if (!isUuid(v)) throw E.validation(`Bad ${col}`);
     params.push(v);
     part.push(`${col} = $${params.length}`);
+  }
+  // Several products / warehouses at once (the Excel export); ids are checked by the caller.
+  for (const [col, v] of [['m.product_id', q.productIds], ['m.warehouse_id', q.warehouseIds]] as const) {
+    if (!v?.length) continue;
+    params.push(v);
+    part.push(`${col} = any($${params.length}::uuid[])`);
   }
   // Text search filters the outer query only, so the running-balance window still sees every move.
   const outer: string[] = [];

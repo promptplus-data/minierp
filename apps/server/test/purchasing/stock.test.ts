@@ -56,6 +56,11 @@ describe('stock count', () => {
     expect((await suda.post(`/api/stock/adjust-requests/${adj.id}/approve`)).status).toBe(200);
     expect(await stockQty(env.pool, P('p1'), W('WH1'))).toBe(57);
     expect((await chai.post(`/api/stock-counts/${id}/entries`, { productId: P('p1'), qty: '1' })).status).toBe(409); // closed
+    // printed result: who counted the line last and who decided it
+    const done = (await chai.get(`/api/stock-counts/${id}`)).body.items[0];
+    expect(done).toMatchObject({ state: 'approved', countedBy: expect.any(String), approvedBy: expect.any(String) });
+    expect(done.approvedBy).not.toBe(done.countedBy === done.approvedBy ? '' : done.countedBy);
+    expect(Date.parse(done.decidedAt)).toBeGreaterThan(Date.parse(done.countedAt));
   });
 
   it('a round that matches creates no request; rounds can be cancelled; list is paged', async () => {

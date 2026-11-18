@@ -12,7 +12,8 @@ import { z } from 'zod';
 import { d } from '@erp/core';
 import { api, errText } from '../../api';
 import { useAuth } from '../../auth';
-import { useCatalog, useAllWarehouses } from '../../data';
+import { useCatalog, useAllWarehouses, useMeta } from '../../data';
+import { PrintA4, SignBox } from '../../ui/PrintA4';
 import { fq, Modal, Pill, SkeletonRows, thTime, useToast } from '../../ui';
 import { LoadMore, useLoadMore } from '../../ui/lists';
 import { DecideModal } from '../../stock/Stock';
@@ -119,6 +120,7 @@ function CountSheet({ id, onBack }: { id: string; onBack: () => void }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [deciding, setDeciding] = useState<z.infer<typeof AdjustRequest> | null>(null);
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState<'order' | 'result' | null>(null);
   const scanRef = useRef<HTMLInputElement>(null);
   const key = ['pu', 'count', id, show];
   const c = useQuery({ queryKey: key, queryFn: () => api('GET', `/api/stock-counts/${id}`, { query: { showSystem: show ? 'true' : undefined }, schema: StockCount }) });
@@ -222,6 +224,8 @@ function CountSheet({ id, onBack }: { id: string; onBack: () => void }) {
         <span className="row"><button className="btn sm" onClick={onBack}>‹ กลับ</button> นับสต็อก {x?.no ?? ''} {x && <Pill k={statusOf(x)[1]}>{statusOf(x)[0]}</Pill>}{x && x.round > 1 && <span className="small muted">รอบนับใหม่ {x.round - 1}</span>}</span>
         <span className="row small">
           {x && <span className="muted">{whs.data?.find((w) => w.id === x.warehouseId)?.name} · {x.category ?? 'ทั้งคลัง'} · นับแล้ว {x.counted}/{x.lines}</span>}
+          {counting && <button className="btn sm" onClick={() => setPrinting('order')} data-testid="count-print-order">พิมพ์ใบสั่งนับ</button>}
+          {x?.status === 'submitted' && <button className="btn sm" onClick={() => setPrinting('result')} data-testid="count-print-result">พิมพ์ผลการนับ</button>}
           {counting && <label className="row"><input type="checkbox" checked={!show} disabled={can('inv.seeSys') !== 1} onChange={(e) => setShow(!e.target.checked)} data-testid="count-hide" /> ซ่อนยอดตามระบบระหว่างนับ</label>}
         </span>
       </h2>
@@ -266,6 +270,12 @@ function CountSheet({ id, onBack }: { id: string; onBack: () => void }) {
           {x?.status === 'submitted' && x.review > 0 && canApprove && <button className="btn pri" disabled={busy} onClick={() => void openDecide()} data-testid="count-decide">อนุมัติ / ไม่อนุมัติ / นับใหม่ รายรายการ</button>}
         </div>
       )}
+      {x && printing && (
+        <PrintA4 onDone={() => setPrinting(null)}>
+          {printing === 'order' ? <CountOrderDoc c={x} warehouse={whs.data?.find((w) => w.id === x.warehouseId)?.name ?? ''} />
+            : <CountResultDoc c={x} warehouse={whs.data?.find((w) => w.id === x.warehouseId)?.name ?? ''} />}
+        </PrintA4>
+      )}
       {deciding && <DecideModal a={deciding} busy={busy} onClose={() => setDeciding(null)} onSubmit={(b) => void decide(b)} />}
       {canCount && (
         <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
@@ -274,5 +284,79 @@ function CountSheet({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- printed documents (A4)
+function DocHead({ title, c, warehouse }: { title: string; c: StockCount; warehouse: string }) {
+  const shop = useMeta().data?.shop;
+  return (
+    <>
+      <div className="a4-head"><div><b>{shop?.name ?? ''}</b>{shop && <div className="a4-muted">สาขา{shop.branch || 'สำนักงานใหญ่'}{shop.taxId ? ` · เลขผู้เสียภาษี ${shop.taxId}` : ''}</div>}</div><div className="a4-muted">พิมพ์เมื่อ {thTime(new Date().toISOString())}</div></div>
+      <h1>{title}</h1>
+      <div className="a4-meta">
+        <span>เลขที่รอบนับ</span><b>{c.no}{c.round > 1 ? ` (นับใหม่ครั้งที่ ${c.round - 1})` : ''}</b>
+        <span>คลัง</span><b>{warehouse}</b>
+        <span>หมวดสินค้า</span><b>{c.category ?? 'ทั้งคลัง'}</b>
+        <span>ผู้เปิดรอบ</span><b>{c.openedBy} · {thTime(c.openedAt)}</b>
+        {c.submittedAt && <><span>ส่งผลนับเมื่อ</span><b>{thTime(c.submittedAt)}</b></>}
+        {c.adjustRequestNo && <><span>คำขอปรับยอด</span><b>{c.adjustRequestNo}</b></>}
+      </div>
+      {c.note && <div className="a4-muted" style={{ marginBottom: '3mm' }}>หมายเหตุ: {c.note}</div>}
+    </>
+  );
+}
+
+const uniq = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((v): v is string => !!v))];
+
+/** ใบสั่งนับ: what to count, with blank columns to write on; never the system quantity (BR-09). */
+export function CountOrderDoc({ c, warehouse }: { c: StockCount; warehouse: string }) {
+  const toCount = c.items.filter((i) => i.state === 'counting');
+  const lines = toCount.length ? toCount : c.items;
+  return (
+    <>
+      <DocHead title="ใบสั่งนับสต็อก" c={c} warehouse={warehouse} />
+      <div className="a4-muted" style={{ marginBottom: '2mm' }}>{lines.length} รายการ · นับของจริงแล้วเขียนจำนวนเป็นหน่วยหลัก · ใบนี้ไม่แสดงยอดตามระบบ</div>
+      <table>
+        <thead><tr><th className="n">#</th><th>รหัสสินค้า</th><th>บาร์โค้ด</th><th>สินค้า</th><th>หน่วย</th><th className="n">จำนวนที่นับได้</th><th>หมายเหตุ</th></tr></thead>
+        <tbody>{lines.map((i, n) => <tr key={i.productId}><td className="n">{n + 1}</td><td>{i.sku}</td><td>{i.barcode ?? ''}</td><td>{i.name}</td><td>{i.unitName}</td><td className="blank" /><td className="blank" /></tr>)}</tbody>
+      </table>
+      <div className="a4-signs"><SignBox role="ผู้นับ" names={[]} /><SignBox role="ผู้สั่งนับ" names={[c.openedBy]} /></div>
+    </>
+  );
+}
+
+const RESULT_TH: Record<LineState, string> = { counting: 'ยังไม่ส่งผล', review: 'รออนุมัติ', approved: 'อนุมัติปรับยอด', rejected: 'ไม่อนุมัติ', done: 'ตรง / ไม่ต้องปรับ' };
+
+/** ผลการนับ: system, moves during the count, counted, variance, who counted and who approved each line. */
+export function CountResultDoc({ c, warehouse }: { c: StockCount; warehouse: string }) {
+  const counters = uniq(c.items.map((i) => i.countedBy));
+  const approvers = uniq(c.items.map((i) => i.approvedBy));
+  const n = (st: LineState) => c.items.filter((i) => i.state === st).length;
+  const varied = c.items.filter((i) => i.variance != null && !d(i.variance).isZero()).length;
+  return (
+    <>
+      <DocHead title="ใบรายงานผลการนับสต็อก" c={c} warehouse={warehouse} />
+      <div className="a4-sum">
+        <span>ทั้งหมด <b>{c.items.length}</b> รายการ</span><span>นับแล้ว <b>{c.counted}</b></span><span>มีผลต่าง <b>{varied}</b></span>
+        <span>อนุมัติปรับยอด <b>{n('approved')}</b></span><span>ไม่อนุมัติ <b>{n('rejected')}</b></span><span>รออนุมัติ <b>{n('review')}</b></span>
+      </div>
+      <table>
+        <thead><tr><th className="n">#</th><th>สินค้า</th><th>หน่วย</th><th className="n">ตามระบบ</th><th className="n">ขาย/รับระหว่างนับ</th><th className="n">นับได้</th><th className="n">ผลต่าง</th><th>ผู้นับ</th><th>ผลอนุมัติ</th><th>ผู้อนุมัติ</th></tr></thead>
+        <tbody>{c.items.map((i, k) => (
+          <tr key={i.productId}>
+            <td className="n">{k + 1}</td><td>{i.name}<div className="a4-muted">{i.sku}</div></td><td>{i.unitName}</td>
+            <td className="n">{i.systemQty == null ? '' : fq(i.systemQty)}</td>
+            <td className="n">{i.movedQty && !d(i.movedQty).isZero() ? fq(i.movedQty) : '-'}</td>
+            <td className="n">{i.countedQty == null ? 'ไม่ได้นับ' : fq(i.countedQty)}</td>
+            <td className="n">{i.variance == null ? '' : `${d(i.variance).gt(0) ? '+' : ''}${fq(i.variance)}`}</td>
+            <td>{i.countedBy ?? ''}{i.countedAt && <div className="a4-muted">{thTime(i.countedAt)}</div>}</td>
+            <td>{RESULT_TH[i.state]}</td>
+            <td>{i.approvedBy ?? ''}{i.decidedAt && <div className="a4-muted">{thTime(i.decidedAt)}</div>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      <div className="a4-signs"><SignBox role="ผู้นับ" names={counters} /><SignBox role={n('review') ? 'ผู้อนุมัติ (ยังมีรายการรออนุมัติ)' : 'ผู้อนุมัติ'} names={approvers} /></div>
+    </>
   );
 }

@@ -3,8 +3,24 @@
  * available show on the stock screen, a stock count is approved line by line with one line sent back to recount.
  * Data is created through the API, assertions go through the UI.
  */
-import { expect, test, type APIRequestContext } from '@playwright/test';
-import { apiToken, login, logout } from './helpers';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { EDITION, apiToken, login, logout, pick } from './helpers';
+
+const DIR = path.join(__dirname, 'screenshots');
+/** Keeps the A4 document in the page: window.print is stubbed, then the print media is emulated for the screenshot. */
+async function printShot(page: Page, name: string) {
+  await page.emulateMedia({ media: 'print' });
+  await page.setViewportSize({ width: 1000, height: 1300 });
+  await page.screenshot({ path: path.join(DIR, `stock-${EDITION}-${name}.png`), fullPage: true });
+  await page.emulateMedia({ media: 'screen' });
+  await page.setViewportSize({ width: 1300, height: 900 });
+}
+async function download(page: Page, button: ReturnType<Page['getByTestId']>) {
+  const [dl] = await Promise.all([page.waitForEvent('download'), button.click()]);
+  return { name: dl.suggestedFilename(), raw: readFileSync((await dl.path())!) };
+}
 
 async function call<T = any>(request: APIRequestContext, token: string, method: 'get' | 'post', url: string, data?: unknown): Promise<T> {
   const r = await request[method](url, { headers: { authorization: `Bearer ${token}` }, ...(data !== undefined ? { data } : {}) });
@@ -116,4 +132,72 @@ test('stock count: approve one line, send the other back to recount, recount clo
   await page.getByTestId('count-submit').click();
   await expect(page.getByText('นับตรงทุกรายการ')).toBeVisible();
   await expect(page.getByTestId('count-sheet').locator('tr[data-state="counting"]')).toHaveCount(0);
+});
+
+test('stock and ledger export to Excel / CSV for the picked products and warehouses', async ({ page, request }) => {
+  const cement = await product(request, owner, 'SCG-CEM-T50');
+  await login(page, 'suda');
+  await page.goto('/stock');
+  await page.getByTestId('btn-stock-export').click();
+  await pick(page, 'exp-product', cement.name, 'SCG-CEM-T50');
+  await expect(page.getByTestId('exp-products')).toContainText(cement.name);
+  await page.getByTestId('exp-wh-all').uncheck();
+  await page.getByTestId('exp-wh-WH2').check();
+  await page.setViewportSize({ width: 1300, height: 900 });
+  await page.screenshot({ path: path.join(DIR, `stock-${EDITION}-export-modal-1300.png`) });
+  const csv = await download(page, page.getByTestId('exp-csv'));
+  expect(csv.name).toMatch(/^stock-\d{4}-\d{2}-\d{2}\.csv$/);
+  const lines = csv.raw.toString('utf8').replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+  expect(lines[0]).toContain('พร้อมขาย');
+  expect(lines[0]).toContain('มูลค่าคงเหลือ');
+  expect(lines).toHaveLength(2);
+  expect(lines[1]).toContain('SCG-CEM-T50');
+
+  await page.goto(`/stock-ledger?productId=${cement.id}`);
+  await page.getByTestId('btn-ledger-export').click();
+  await expect(page.getByTestId('exp-products')).toContainText(cement.name);
+  const xlsx = await download(page, page.getByTestId('exp-xlsx'));
+  expect(xlsx.name).toMatch(/^stock-ledger-.+\.xlsx$/);
+  expect(xlsx.raw.subarray(0, 2).toString()).toBe('PK');
+});
+
+test('stock count prints the count order and the result with the counters and the approver', async ({ page, request }) => {
+  const chai = await apiToken(request, 'chai');
+  const sand = await product(request, owner, 'SAND-C');
+  const c = await call(request, chai, 'post', '/api/stock-counts', { warehouseId: backWh, category: 'วัสดุมวลรวม', note: 'e2e พิมพ์ใบนับ' });
+
+  await login(page, 'chai');
+  await page.addInitScript(() => { window.print = () => {}; });
+  await page.goto(`/stock-count?no=${c.no}`);
+  await page.getByTestId('count-print-order').click();
+  const doc = page.getByTestId('a4-doc');
+  await expect(doc).toContainText('ใบสั่งนับสต็อก');
+  await expect(doc).toContainText(c.no);
+  await expect(doc).toContainText(sand.name);
+  await expect(doc.locator('th', { hasText: 'จำนวนที่นับได้' })).toHaveCount(1);
+  await expect(doc.locator('th', { hasText: 'ตามระบบ' })).toHaveCount(0);
+  await expect(doc).toContainText('ผู้สั่งนับ');
+  await printShot(page, 'count-order-print');
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await expect(doc).toHaveCount(0);
+
+  const sys = await call(request, owner, 'get', `/api/stock-counts/${c.id}?showSystem=true`);
+  const q = Number(sys.items.find((i: { productId: string }) => i.productId === sand.id).systemQty);
+  await call(request, chai, 'post', `/api/stock-counts/${c.id}/entries`, { productId: sand.id, qty: String(q + 2) });
+  await call(request, chai, 'post', `/api/stock-counts/${c.id}/submit`);
+  await logout(page);
+
+  await login(page, 'suda');
+  await page.goto(`/stock-count?no=${c.no}`);
+  await page.getByTestId('count-decide').click();
+  await page.getByTestId('dec-save').click();
+  await expect(page.getByText(/อนุมัติแล้ว/)).toBeVisible();
+  await page.getByTestId('count-print-result').click();
+  await expect(doc).toContainText('ใบรายงานผลการนับสต็อก');
+  await expect(doc).toContainText('พี่ชัย');
+  await expect(doc).toContainText('คุณสุดา ศรีสุข');
+  await expect(doc).toContainText('อนุมัติปรับยอด');
+  await expect(doc.locator('.a4-signs')).toContainText('ผู้นับ');
+  await expect(doc.locator('.a4-signs')).toContainText('ผู้อนุมัติ');
+  await printShot(page, 'count-result-print');
 });

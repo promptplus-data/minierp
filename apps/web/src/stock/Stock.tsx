@@ -12,6 +12,7 @@ import { useCatalog, useAllWarehouses } from '../data';
 import { fmt, fq, Modal, Pill, ShortageModal, SkeletonRows, th, useDebounced, useToast, type Shortage } from '../ui';
 import { LoadMore, useLoadMore } from '../ui/lists';
 import './stock.css';
+import { StockExportModal } from './ExportModal';
 import { ReceiptModal, StockFormModal, type StockKind } from './forms';
 import { ErrorBanner } from '../errors';
 import { DocLink, DocText, RouteLink } from '../doclink';
@@ -30,6 +31,7 @@ export default function Stock() {
   const dq = useDebounced(q.trim(), 250);
   const [form, setForm] = useState<StockKind | 'gr' | null>(null);
   const [lotsOf, setLotsOf] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const seeCost = can('data.cost') === 1;
   const rowsPerPage = Math.min(100, PAGE * Math.max(1, active.length));
 
@@ -60,6 +62,7 @@ export default function Stock() {
         <h2>
           <span className="row">สต็อกคงเหลือ <Pill k="acc">ต้นทุน: FIFO ตามล็อต</Pill></span>
           <span className="row">
+            <button className="btn sm" onClick={() => setExporting(true)} data-testid="btn-stock-export">⭳ Export Excel</button>
             {can('inv.receive') === 1 && <button className="btn sm" onClick={() => setForm('gr')} data-testid="btn-gr">ซื้อเข้าแบบบันทึกเอง</button>}
             {(can('inv.adj') === 1 || can('inv.receive') === 1) && <button className="btn sm" onClick={() => setForm('tr')} data-testid="btn-tr">โอนคลัง</button>}
             {can('inv.adj') === 1 && <button className="btn sm" onClick={() => setForm('iss')} data-testid="btn-iss">เบิกใช้</button>}
@@ -133,6 +136,7 @@ export default function Stock() {
       {form === 'gr' && <ReceiptModal onClose={() => setForm(null)} />}
       {form && form !== 'gr' && <StockFormModal kind={form} onClose={() => setForm(null)} />}
       {lotsOf && <LotsModal productId={lotsOf} onClose={() => setLotsOf(null)} />}
+      {exporting && <StockExportModal kind="stock" onClose={() => setExporting(false)} />}
     </>
   );
 }

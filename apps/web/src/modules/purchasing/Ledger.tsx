@@ -13,6 +13,7 @@ import { ProductPicker } from '../../ui/ProductPicker';
 import type { Product } from '@erp/contracts';
 import '../../stock/stock.css';
 import { GrAlertBanner } from './shared';
+import { StockExportModal } from '../../stock/ExportModal';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocText, type DocType } from '../../doclink';
 
@@ -46,6 +47,7 @@ function LedgerTab() {
   const [warehouseId, setWarehouseId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+  const [exporting, setExporting] = useState(false);
   const dq = useDebounced(q.trim());
   const filt = { q: dq, productId, warehouseId, from, to };
   const r = useLoadMore(['pu', 'ledger'], '/api/stock/ledger', LedgerEntry, filt, 20);
@@ -68,7 +70,10 @@ function LedgerTab() {
         <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} aria-label="คลัง"><option value="">ทุกคลัง</option>{(whs.data ?? []).map((w) => <option key={w.id} value={w.id}>{w.name}{w.kind === 'damaged' ? ' (ของเสีย)' : ''}</option>)}</select>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="ตั้งแต่วันที่" />
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="ถึงวันที่" />
+        <button className="btn sm" onClick={() => setExporting(true)} data-testid="btn-ledger-export">⭳ Export Excel</button>
       </div>
+      {exporting && <StockExportModal kind="ledger" onClose={() => setExporting(false)}
+        init={{ productIds: productId ? [productId] : [], warehouseIds: warehouseId ? [warehouseId] : [], from, to }} />}
       {productId && bal.data && (
         <div className="stk-summary small" data-testid="ledger-balance">
           <span>คงเหลือ <b>{fq(sumOf('qty', false))}</b> {unit}</span>
