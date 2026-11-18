@@ -16,6 +16,7 @@ import { E, isUuid } from '../../lib/errors';
 import { decodeCursor, likeEscape, pageOf } from '../../lib/paging';
 import { applyOut, lockLots, planTakes } from '../../lib/stock';
 import { billDiscountMode, freeGoodsCosting } from './grhook';
+import { billingNoteFor, takeDeposits } from './apx';
 
 const seeCost = (ctx: Ctx) => can(ctx, 'data.cost') === 1;
 const words = (q?: string) => searchTokens(q);
@@ -241,9 +242,10 @@ export async function purchaseDiscounts(tx: Tx, ctx: Ctx, q: { limit: number; cu
 const METHOD_TH = { transfer: 'โอนเงิน', cheque: 'เช็ค', cash: 'เงินสด' } as const;
 
 async function loadPayment(tx: Tx, where: string, arg: string): Promise<ApPayment | null> {
-  const r = await tx.query<{ id: string; no: string; date: string; vendor_id: string; vendor_name: string; method: ApPayment['method']; ref: string | null; amount: string; wht_rate: string; wht: string; net: string; note: string | null; created_by: string }>(
-    `select p.id, p.no, to_char(p.date,'YYYY-MM-DD') date, p.vendor_id, v.name vendor_name, p.method, p.ref, p.amount::text, p.wht_rate::text, p.wht::text, p.net::text, p.note, u.name created_by
-       from ap_payments p join vendors v on v.id = p.vendor_id join users u on u.id = p.created_by where ${where}`, [arg]);
+  const r = await tx.query<{ id: string; no: string; date: string; vendor_id: string; vendor_name: string; method: ApPayment['method']; ref: string | null; amount: string; wht_rate: string; wht: string; net: string; note: string | null; created_by: string; deposit_used: string; bn_no: string | null }>(
+    `select p.id, p.no, to_char(p.date,'YYYY-MM-DD') date, p.vendor_id, v.name vendor_name, p.method, p.ref, p.amount::text, p.wht_rate::text, p.wht::text, p.net::text, p.note, u.name created_by,
+            p.deposit_used::text, n.no bn_no
+       from ap_payments p join vendors v on v.id = p.vendor_id join users u on u.id = p.created_by left join ap_billing_notes n on n.id = p.billing_note_id where ${where}`, [arg]);
   const p = r.rows[0];
   if (!p) return null;
   const a = await tx.query<{ bill_id: string; no: string; vendor_invoice_no: string; amount: string }>(
@@ -252,6 +254,9 @@ async function loadPayment(tx: Tx, where: string, arg: string): Promise<ApPaymen
     id: p.id, no: p.no, date: p.date, vendorId: p.vendor_id, vendorName: p.vendor_name, method: p.method, ref: p.ref, amount: money(p.amount),
     whtRate: qty4(p.wht_rate), wht: money(p.wht), net: money(p.net), note: p.note, createdBy: p.created_by,
     bills: a.rows.map((x) => ({ billId: x.bill_id, billNo: x.no, vendorInvoiceNo: x.vendor_invoice_no, amount: money(x.amount) })),
+    depositUsed: money(p.deposit_used), billingNoteNo: p.bn_no,
+    deposits: (await tx.query<{ no: string; amount: string }>(`select dp.no, a.amount::text from ap_deposit_allocs a join ap_deposits dp on dp.id = a.deposit_id where a.payment_id = $1 order by dp.no`, [p.id]))
+      .rows.map((x) => ({ no: x.no, amount: money(x.amount) })),
   };
 }
 
@@ -287,7 +292,7 @@ export async function listPayments(tx: Tx, ctx: Ctx, q: { q?: string; limit: num
 
 export async function createPayment(
   tx: Tx, deps: Deps, ctx: Ctx,
-  req: { vendorId: string; method: ApPayment['method']; ref?: string; whtRate: 0 | 1 | 3; allocations: { billId: string; amount: string }[]; note?: string },
+  req: { vendorId: string; method: ApPayment['method']; ref?: string; whtRate: 0 | 1 | 3; allocations: { billId: string; amount: string }[]; note?: string; deposits?: { depositId: string; amount: string }[]; billingNoteNo?: string },
 ): Promise<ApPayment> {
   requirePerm(ctx, 'fin.ap');
   if (!isUuid(req.vendorId)) throw E.validation('Unknown vendor');
@@ -308,13 +313,19 @@ export async function createPayment(
   if (problem) throw E.validation(problem);
   const shop = await tx.query<{ vat_registered: boolean }>(`select vat_registered from tenants where id = $1`, [ctx.tenantId]);
   const amount = money(sum(req.allocations.map((a) => a.amount)));
-  const wht = whtAmount(amount, req.whtRate, shop.rows[0]?.vat_registered ?? true);
-  const net = money(d(amount).minus(d(wht)));
+  const bnId = req.billingNoteNo ? await billingNoteFor(tx, req.billingNoteNo, req.vendorId, ids) : null;
+  // มัดจำซื้อ already paid part of these bills: withholding tax is on what is paid now, the deposit is not paid twice.
+  const used = req.deposits?.length ? await takeDeposits(tx, req.vendorId, req.deposits) : [];
+  const depositUsed = money(sum(used.map((u) => u.amount)));
+  if (d(depositUsed).gt(d(amount))) throw E.validation(`มัดจำที่ใช้ ฿${fmtTHB(depositUsed)} เกินยอดที่จ่ายบิล ฿${fmtTHB(amount)}`);
+  const wht = whtAmount(money(d(amount).minus(d(depositUsed))), req.whtRate, shop.rows[0]?.vat_registered ?? true);
+  const net = money(d(amount).minus(d(wht)).minus(d(depositUsed)));
   const no = await nextDocNo(tx, ctx.tenantId, 'PV', deps.today());
   const ins = await tx.query<{ id: string }>(
-    `insert into ap_payments (tenant_id, no, date, vendor_id, method, ref, amount, wht_rate, wht, net, note, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning id`,
-    [ctx.tenantId, no, deps.today(), req.vendorId, req.method, req.ref?.trim() || null, amount, req.whtRate, wht, net, req.note?.trim() || null, ctx.userId]);
+    `insert into ap_payments (tenant_id, no, date, vendor_id, method, ref, amount, wht_rate, wht, net, note, created_by, deposit_used, billing_note_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
+    [ctx.tenantId, no, deps.today(), req.vendorId, req.method, req.ref?.trim() || null, amount, req.whtRate, wht, net, req.note?.trim() || null, ctx.userId, depositUsed, bnId]);
+  for (const u of used) await tx.query(`insert into ap_deposit_allocs (tenant_id, deposit_id, payment_id, amount) values ($1,$2,$3,$4)`, [ctx.tenantId, u.id, ins.rows[0]!.id, u.amount]);
   for (const a of req.allocations) {
     await tx.query(`insert into ap_payment_allocs (tenant_id, payment_id, bill_id, amount) values ($1,$2,$3,$4)`, [ctx.tenantId, ins.rows[0]!.id, a.billId, money(a.amount)]);
     await tx.query(`update ap_bills set paid = paid + $1 where id = $2`, [money(a.amount), a.billId]);
@@ -322,7 +333,7 @@ export async function createPayment(
   await deps.hooks.beforeCommit?.('apPayment', tx);
   await writeAudit(tx, ctx, [{
     action: 'pay', object: 'payment-voucher', ref: no,
-    detail: `${req.allocations.map((a) => byId.get(a.billId)!.no).join(', ')} · ฿${fmtTHB(amount)} · ${METHOD_TH[req.method]}${req.whtRate ? ` · หัก ณ ที่จ่าย ${req.whtRate}% ฿${fmtTHB(wht)}` : ''} · จ่ายจริง ฿${fmtTHB(net)}`,
+    detail: `${req.allocations.map((a) => byId.get(a.billId)!.no).join(', ')} · ฿${fmtTHB(amount)} · ${METHOD_TH[req.method]}${req.whtRate ? ` · หัก ณ ที่จ่าย ${req.whtRate}% ฿${fmtTHB(wht)}` : ''} ${used.length ? ` · หักมัดจำ ${used.map((u) => u.no).join(', ')} ฿${fmtTHB(depositUsed)}` : ''}${req.billingNoteNo ? ` · ตามใบรับวางบิล ${req.billingNoteNo}` : ''} · จ่ายจริง ฿${fmtTHB(net)}`,
   }]);
   return (await loadPayment(tx, 'p.id = $1', ins.rows[0]!.id))!;
 }

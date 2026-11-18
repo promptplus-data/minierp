@@ -96,6 +96,9 @@ commit. Screenshots: `e2e/screenshots/purchasing-<edition>-*.png`.
 | REQ-M18-01 | done | AP bill per GR with vendor invoice, due date by term, base/VAT/total, separate discount |
 | REQ-M18-02 | done | Payment voucher over several bills, partial, transfer/cheque/cash, WHT 0/1/3% |
 | REQ-M18-03 | done | Vendor return against the GR at the lot cost, ≤ remaining, reason, vendor CN no., reduces AP |
+| มัดจำซื้อ / รับวางบิลซื้อ | done | `/api/ap/deposits` (pay a vendor in advance, optional PO, used in a payment voucher via `deposits`, refund / void) and `/api/ap/billing-notes` (vendor billing note: open bills + agreed payment date, one active note per bill, paid with `billingNoteNo`) (`test/purchasing/ap-extras.test.ts`, e2e `finance.spec.ts`) |
+| ปรับปรุงต้นทุน | done | `/api/stock/cost-adjustments`: owner on/off lock (`/settings`, default off), request (data.cost + inv.adj) → approval (inv.adjApprove, not self except owner) rewrites the remaining lots' unit cost, the product's average cost and writes a zero-quantity `CA` ledger row with the value change |
+| Stock / ledger export, count printouts | done | `GET /api/stock/export`, `GET /api/stock/ledger/export` (picked products × warehouses, Excel / CSV, cost columns for data.cost); count order (no system qty) and count result (counters, approvers) printed on A4 (`test/purchasing/stock-export.test.ts`, e2e `stock-returns.spec.ts`) |
 | REQ-M18-04 | partial | Aging buckets and "due within 7 days" card on the AP screen; home-page card waits for the home dashboard (`ApDueCard`) |
 | REQ-M19-08 | done | Generic CSV/Excel delivery file (OQ-19: shop maps columns), one draft per DN, DN dedupe, stock on confirm only, BR-10 |
 | BR-07, BR-09, BR-10, BR-19, BR-21 | done | See the rules table |

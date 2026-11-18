@@ -14,15 +14,18 @@ import type { Product } from '@erp/contracts';
 import '../../stock/stock.css';
 import { GrAlertBanner } from './shared';
 import { StockExportModal } from '../../stock/ExportModal';
+import { CostAdjTab } from './CostAdj';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocText, type DocType } from '../../doclink';
 
 const isStockProduct = (p: Product) => p.kind === 'stock';
-const DOC_TH: Record<string, string> = { GR: 'รับสินค้า', PR: 'คืนผู้ขาย', TR: 'โอนคลัง', ADJ: 'เบิก / ปรับยอด', ABB: 'ขายหน้าร้าน', INV: 'ใบกำกับ', CN: 'รับคืน', OPEN: 'สต็อกเปิด', DO: 'ส่งของ', MO: 'ผลิต' };
+const DOC_TH: Record<string, string> = { CA: 'ปรับปรุงต้นทุน', GR: 'รับสินค้า', PR: 'คืนผู้ขาย', TR: 'โอนคลัง', ADJ: 'เบิก / ปรับยอด', ABB: 'ขายหน้าร้าน', INV: 'ใบกำกับ', CN: 'รับคืน', OPEN: 'สต็อกเปิด', DO: 'ส่งของ', MO: 'ผลิต' };
 
 export default function Ledger() {
   const [sp] = useSearchParams();
-  const [tab, setTab] = useState<'ledger' | 'reorder'>(sp.get('tab') === 'reorder' ? 'reorder' : 'ledger');
+  const { can } = useAuth();
+  const seeCost = can('data.cost') === 1;
+  const [tab, setTab] = useState<'ledger' | 'reorder' | 'cost'>(sp.get('tab') === 'reorder' ? 'reorder' : sp.get('tab') === 'cost' && seeCost ? 'cost' : 'ledger');
   return (
     <>
       <GrAlertBanner />
@@ -30,8 +33,9 @@ export default function Ledger() {
         <div className="tabs" style={{ marginBottom: 12 }}>
           <button className={tab === 'ledger' ? 'on' : ''} onClick={() => setTab('ledger')}>ความเคลื่อนไหว (stock ledger)</button>
           <button className={tab === 'reorder' ? 'on' : ''} onClick={() => setTab('reorder')} data-testid="tab-reorder">สินค้าต่ำกว่าจุดสั่งซื้อ</button>
+          {seeCost && <button className={tab === 'cost' ? 'on' : ''} onClick={() => setTab('cost')} data-testid="tab-cost">ปรับปรุงต้นทุน</button>}
         </div>
-        {tab === 'ledger' ? <LedgerTab key={`${sp.get('q')}|${sp.get('productId')}`} /> : <ReorderTab />}
+        {tab === 'ledger' ? <LedgerTab key={`${sp.get('q')}|${sp.get('productId')}`} /> : tab === 'reorder' ? <ReorderTab /> : <CostAdjTab />}
       </div>
     </>
   );

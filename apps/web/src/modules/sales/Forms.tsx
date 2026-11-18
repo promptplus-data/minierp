@@ -14,6 +14,7 @@ import { useAuth } from '../../auth';
 import { useBelowCostRule, useMeta, useWarehouses } from '../../data';
 import { fmt, fq, Modal, Pill, ShortageModal, th, useToast, type Shortage } from '../../ui';
 import { useCustomer } from '../../ui/CustomerPicker';
+import { DepositPicker } from './Deposits';
 import { AddressPicker, DeliverySourceSelect, SaleTypeSelect, SalespersonSelect, WarehouseSelect } from './pickers';
 import {
   blankLine, CustomerSelect, LineEditor, METHOD_TH, lineReq, previewTotals, priceSourceText, ProfitSummary, TERM_TH, useGatedSave, useLineCheck, useSalesInvalidate, useSalesSettings, type EditLine,
@@ -55,6 +56,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
   const [shipTo, setShipTo] = useState('');
   const [goodsLeft, setGoodsLeft] = useState(false);
   const [pay, setPay] = useState<'credit' | 'cash' | 'transfer'>('credit');
+  const [deps, setDeps] = useState<{ no: string; amount: string }[]>([]);
   const [soPay, setSoPay] = useState<'cash' | 'credit' | null>(null); // ข้อ 4: null = default from the customer's terms
   const [pjMode, setPjMode] = useState<'' | 'new' | string>(presetProject ? presetProject.id : newProject ? 'new' : '');
   const [pjName, setPjName] = useState('');
@@ -96,8 +98,10 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
       const term = soTerms === 'cash' || !creditTerm ? { t: 'cash' } : creditTerm;
       return { customerId, quoteNo: quote?.no, vatMode: vatShop && !quote ? vatMode : undefined, term, warehouseId: wh, shipTo, note, salespersonId: sp, billDiscount: disc, lines: ls, project, ...(coupon ? { coupon: { memberId: coupon.memberId, code: coupon.code, reservationId: coupon.reservationId, amount: coupon.amount } } : {}), ...extra };
     }
-    const payments = pay === 'credit' ? undefined : [{ method: pay, amount: t.total }];
-    return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, salespersonId: sp, billDiscount: disc, lines: ls, payments, ...extra };
+    const used = deps.filter((x) => /^\d+(\.\d+)?$/.test(x.amount) && d(x.amount).gt(0));
+    const due = d(t.total).minus(used.reduce((a, x) => a.plus(d(x.amount)), d(0)));
+    const payments = pay === 'credit' || !due.gt(0) ? undefined : [{ method: pay, amount: due.toFixed(2) }];
+    return { source: 'direct', customerId, vatMode: vatShop ? vatMode : undefined, warehouseId: wh, goodsLeft, note, salespersonId: sp, billDiscount: disc, lines: ls, payments, deposits: used.length ? used : undefined, ...extra };
   };
   const save = useGatedSave(
     async (extra) => {
@@ -210,6 +214,7 @@ export function DocFormModal({ mode, quote, edit, presetProject, newProject, onC
             cart={lines.some((l) => l.productId && !l.free) ? { vatMode, billDiscount: '0', lines: lines.filter((l) => l.productId && !l.free).map((l) => ({ productId: l.productId, qty: l.qty && d(l.qty).gt(0) ? l.qty : '0', unitPrice: l.unitPrice || '0', ...(l.discValue && d(l.discValue).gt(0) ? { discount: { kind: l.discKind, value: l.discValue } } : {}) })) } : null} />
         </Suspense>
       )}
+      {mode === 'INV' && <DepositPicker customerId={customerId} total={t.total} value={deps} onChange={setDeps} />}
       <ProfitSummary profit={check?.profit} />
       {check?.lines.some((l) => l.belowCost) && <div className="note bad small" data-testid="below-warn">มีรายการราคาต่ำกว่าทุน (สีแดง) · ตอนบันทึก{below.need}</div>}
       {mode !== 'QT' && !(mode === 'SO' && soTerms === 'cash') && credit.data && cust && (
@@ -333,11 +338,13 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
   // ข้อ 4: delivery orders of a cash sales order are invoiced and paid on the spot (cash / transfer / QR).
   const cashSale = items.some((x) => sel.includes(x.no) && x.cashSale);
   const [payMethod, setPayMethod] = useState<'cash' | 'transfer' | 'promptpay' | 'card'>('cash');
+  const [deps, setDeps] = useState<{ no: string; amount: string }[]>([]);
+  const usedDeps = deps.filter((x) => /^\d+(\.\d+)?$/.test(x.amount) && d(x.amount).gt(0));
   const go = async () => {
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel, note, ...(cashSale ? { payMethod } : {}) }, schema: SalesInvoice });
+      const r = await api('POST', '/api/sales/invoices', { body: { source: 'delivery', deliveryNos: sel, note, ...(cashSale ? { payMethod } : {}), deposits: usedDeps.length ? usedDeps : undefined }, schema: SalesInvoice });
       await invalidate();
       toast(r.kind === 'cash' ? `${r.doc.no} ออกแล้ว · รับชำระ${METHOD_TH[payMethod]} ฿${fmt(r.doc.totals.total)}` : `${r.doc.no} ออกแล้ว · ครบกำหนด ${th(r.dueDate)}`);
       onClose();
@@ -368,6 +375,7 @@ export function InvoiceFromDeliveriesModal({ preselect, onClose }: { preselect?:
       </div>
       <LoadMore hasMore={!!list.hasNextPage} loading={list.isFetchingNextPage} onMore={() => void list.fetchNextPage()} />
       <label className="f">หมายเหตุในใบกำกับ<textarea rows={2} name="note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น อ้างอิงใบสั่งซื้อลูกค้า PO-778" data-testid="inv-note" /></label>
+      {cust && <DepositPicker customerId={cust} total={null} value={deps} onChange={setDeps} />}
       {cashSale && (
         <label className="f" style={{ maxWidth: 320 }}>ขายเงินสด · รับชำระตอนออกใบกำกับโดย
           <select value={payMethod} onChange={(e) => setPayMethod(e.target.value as typeof payMethod)} data-testid="inv-pay-method">

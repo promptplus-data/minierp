@@ -175,13 +175,64 @@ export const ApPaymentMethod = z.enum(['transfer', 'cheque', 'cash']);
 export const ApPaymentReq = z.object({
   vendorId: z.string(), method: ApPaymentMethod, ref: z.string().optional(), whtRate: z.union([z.literal(0), z.literal(1), z.literal(3)]).default(0),
   allocations: z.array(z.object({ billId: z.string(), amount: DecNN })).min(1), note: z.string().optional(),
+  /** มัดจำซื้อ used in this payment: taken off what is paid now. */
+  deposits: z.array(z.object({ depositId: z.string(), amount: DecNN })).max(10).optional(),
+  /** Paying a vendor billing note (ใบรับวางบิล): links the voucher to it. */
+  billingNoteNo: z.string().optional(),
 });
 export const ApPayment = z.object({
   id: z.string(), no: z.string(), date: Ymd, vendorId: z.string(), vendorName: z.string(), method: ApPaymentMethod, ref: z.string().nullable(),
   amount: Dec, whtRate: Dec, wht: Dec, net: Dec, note: z.string().nullable(), createdBy: z.string(),
   bills: z.array(z.object({ billId: z.string(), billNo: z.string(), vendorInvoiceNo: z.string(), amount: Dec })),
+  depositUsed: Dec.default('0.00'), deposits: z.array(z.object({ no: z.string(), amount: Dec })).default([]), billingNoteNo: z.string().nullable().default(null),
 });
 export type ApPayment = z.infer<typeof ApPayment>;
+
+// ---------- มัดจำซื้อ (deposit paid to a vendor) ----------
+export const ApDepositReq = z.object({
+  vendorId: z.string(), poNo: z.string().optional(), method: ApPaymentMethod, ref: z.string().optional(), amount: DecNN, date: Ymd.optional(), note: z.string().max(500).default(''),
+});
+export const ApDepositCloseReq = z.object({ action: z.enum(['refund', 'void']), reason: z.string().trim().min(1).max(300) });
+export const ApDepositQuery = pageQuery.extend({ q: z.string().optional(), vendorId: z.string().optional(), status: z.enum(['open', 'all']).default('all') });
+export const ApDeposit = z.object({
+  id: z.string(), no: z.string(), date: Ymd, vendorId: z.string(), vendorName: z.string(), poNo: z.string().nullable(), method: ApPaymentMethod, ref: z.string().nullable(),
+  amount: Dec, used: Dec, remaining: Dec, status: z.enum(['active', 'refunded', 'void']), closedAmount: Dec, closedNote: z.string().nullable(), note: z.string(),
+  payments: z.array(z.object({ no: z.string(), date: Ymd, amount: Dec })), createdBy: z.string(),
+});
+export type ApDeposit = z.infer<typeof ApDeposit>;
+
+// ---------- รับวางบิลซื้อ (vendor billing note) ----------
+export const ApBillingNoteReq = z.object({
+  vendorId: z.string(), billIds: z.array(z.string()).min(1).max(100), vendorDocNo: z.string().max(60).default(''), date: Ymd.optional(), dueDate: Ymd, note: z.string().max(500).default(''),
+});
+export const ApBillingNoteQuery = pageQuery.extend({ q: z.string().optional(), status: z.enum(['open', 'all']).default('all') });
+export const ApBillingNote = z.object({
+  id: z.string(), no: z.string(), date: Ymd, vendorId: z.string(), vendorName: z.string(), vendorDocNo: z.string(), dueDate: Ymd, total: Dec, balance: Dec,
+  status: z.enum(['active', 'void']), paid: z.boolean(), overdueDays: z.number().int(), note: z.string(), voidReason: z.string().nullable(),
+  bills: z.array(z.object({ billId: z.string(), billNo: z.string(), vendorInvoiceNo: z.string(), date: Ymd, dueDate: Ymd, amount: Dec, balance: Dec })),
+  payments: z.array(z.object({ no: z.string(), date: Ymd, amount: Dec })), createdBy: z.string(),
+});
+export type ApBillingNote = z.infer<typeof ApBillingNote>;
+
+// ---------- ปรับปรุงต้นทุน (cost adjustment of remaining lots) ----------
+export const CostAdjSettings = z.object({ enabled: z.boolean(), updatedBy: z.string().nullable(), updatedAt: z.string().nullable() });
+export const CostAdjPreviewQuery = z.object({ productId: z.string(), warehouseId: z.string().optional() });
+export const CostAdjPreview = z.object({ productId: z.string(), warehouseId: z.string().nullable(), qty: Dec, avgCost: Dec, value: Dec, lots: z.number().int() });
+export const CostAdjReq = z.object({
+  lines: z.array(z.object({ productId: z.string(), warehouseId: z.string().nullable().optional(), newCost: DecNN })).min(1).max(100),
+  reason: z.string().trim().min(1).max(300),
+});
+export const CostAdjDecideReq = z.object({ approve: z.boolean(), note: z.string().max(300).default('') });
+export const CostAdjQuery = pageQuery.extend({ status: z.enum(['pending', 'all']).default('all') });
+export const CostAdj = z.object({
+  id: z.string(), no: z.string(), date: Ymd, reason: z.string(), status: z.enum(['pending', 'approved', 'rejected']), valueChange: Dec.nullable(),
+  lines: z.array(z.object({
+    productId: z.string(), sku: z.string(), name: z.string(), unitName: z.string(), warehouseId: z.string().nullable(), warehouseName: z.string().nullable(),
+    qty: Dec, oldCost: Dec, newCost: Dec, change: Dec,
+  })),
+  requestedBy: z.string(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable(), decideNote: z.string(), createdAt: z.string(),
+});
+export type CostAdj = z.infer<typeof CostAdj>;
 
 export const VendorReturnReq = z.object({
   grNo: z.string(), lines: z.array(z.object({ grLineId: z.string(), qty: DecNN })).min(1),
@@ -371,6 +422,14 @@ export const purchasingRoutes = {
   apPayments: 'GET /api/ap/payments',
   apPaymentCreate: 'POST /api/ap/payments',
   apPayment: 'GET /api/ap/payments/:no',
+  apDeposits: 'GET /api/ap/deposits',
+  apDepositCreate: 'POST /api/ap/deposits',
+  apDeposit: 'GET /api/ap/deposits/:no',
+  apDepositClose: 'POST /api/ap/deposits/:no/close',
+  apBillingNotes: 'GET /api/ap/billing-notes',
+  apBillingNoteCreate: 'POST /api/ap/billing-notes',
+  apBillingNote: 'GET /api/ap/billing-notes/:no',
+  apBillingNoteVoid: 'POST /api/ap/billing-notes/:no/void',
   vendorReturns: 'GET /api/ap/vendor-returns',
   vendorReturnCreate: 'POST /api/ap/vendor-returns',
   vendorReturn: 'GET /api/ap/vendor-returns/:no',
@@ -404,6 +463,13 @@ export const purchasingRoutes = {
 
   stockLedger: 'GET /api/stock/ledger',
   stockReorder: 'GET /api/stock/reorder',
+  costAdjSettings: 'GET /api/stock/cost-adjustments/settings',
+  costAdjSettingsUpdate: 'PATCH /api/stock/cost-adjustments/settings',
+  costAdjPreview: 'GET /api/stock/cost-adjustments/preview',
+  costAdjs: 'GET /api/stock/cost-adjustments',
+  costAdjCreate: 'POST /api/stock/cost-adjustments',
+  costAdj: 'GET /api/stock/cost-adjustments/:no',
+  costAdjDecide: 'POST /api/stock/cost-adjustments/:no/decide',
 } as const;
 
 /** Every purchasing route exists on both editions (the delivery-file import is the on-prem way to receive SCG goods). */

@@ -14,6 +14,7 @@ import { LoadMore, useLoadMore } from '../../ui/lists';
 import { NoteField } from '../../ui/NoteField';
 import { ApDueCard } from './shared';
 import { DocLink, DocLinks } from '../../doclink';
+import { BillingNoteList, DepositList, useOpenDeposits } from './ApExtras';
 
 const METHOD_TH = { transfer: 'โอนเงิน', cheque: 'เช็ค', cash: 'เงินสด' } as const;
 const RET_REASONS = ['สินค้าชำรุด / แตก', 'ส่งผิดรุ่น / ผิดสี', 'ส่งเกินจำนวนที่สั่ง', 'คุณภาพไม่ได้มาตรฐาน'];
@@ -22,7 +23,7 @@ export default function Ap() {
   const { can } = useAuth();
   const qc = useQueryClient();
   const aging = useQuery({ queryKey: ['pu', 'aging'], queryFn: () => api('GET', '/api/ap/aging', { schema: ApAging }) });
-  const [pay, setPay] = useState<string | null>(null);
+  const [pay, setPay] = useState<{ vendorId: string; billIds?: string[]; bnNo?: string } | null>(null);
   const [ret, setRet] = useState(false);
   const canWrite = can('fin.ap') === 1;
   const a = aging.data;
@@ -48,7 +49,7 @@ export default function Ap() {
               {!a ? <SkeletonRows cols={4} rows={3} /> : a.vendors.map((v) => (
                 <tr key={v.vendorId}>
                   <td>{v.vendorName}</td><td className="n">{v.bills}</td><td className="n"><b>{fmt(v.balance)}</b></td>
-                  <td><button className="btn sm pri" disabled={!canWrite} onClick={() => setPay(v.vendorId)} data-testid={`pay-${v.vendorName}`}>จ่ายเงิน</button></td>
+                  <td><button className="btn sm pri" disabled={!canWrite} onClick={() => setPay({ vendorId: v.vendorId })} data-testid={`pay-${v.vendorName}`}>จ่ายเงิน</button></td>
                 </tr>
               ))}
               {a && !a.vendors.length && <tr><td colSpan={4} className="empty">ไม่มีเจ้าหนี้ค้างจ่าย</td></tr>}
@@ -56,11 +57,13 @@ export default function Ap() {
           </table>
         </div>
       </div>
+      <BillingNoteList canWrite={canWrite} onChanged={() => void refresh()} onPay={(n) => setPay({ vendorId: n.vendorId, billIds: n.bills.filter((b) => d(b.balance).gt(0)).map((b) => b.billId), bnNo: n.no })} />
       <BillList />
+      <DepositList canWrite={canWrite} onChanged={() => void refresh()} />
       <PaymentList />
       <ReturnList canWrite={canWrite} onNew={() => setRet(true)} />
       <DiscountList />
-      {pay && <PayModal vendorId={pay} onClose={() => setPay(null)} onDone={() => { setPay(null); void refresh(); }} />}
+      {pay && <PayModal vendorId={pay.vendorId} billIds={pay.billIds} bnNo={pay.bnNo} onClose={() => setPay(null)} onDone={() => { setPay(null); void refresh(); }} />}
       {ret && <ReturnModal onClose={() => setRet(false)} onDone={() => { setRet(false); void refresh(); }} />}
     </>
   );
@@ -151,7 +154,7 @@ function PaymentList() {
               <tr key={p.id}>
                 <td className="mono"><DocLink no={p.no} type="PV" /></td><td>{th(p.date)}</td><td>{p.vendorName}<div className="small muted"><DocLinks nos={p.bills.map((b) => b.billNo)} type="AP" /></div></td>
                 <td className="small">{METHOD_TH[p.method]}{p.ref && <div className="muted">{p.ref}</div>}{p.note && <div className="muted">{p.note}</div>}</td>
-                <td className="n">{fmt(p.amount)}</td><td className="n">{d(p.wht).gt(0) ? fmt(p.wht) : '-'}</td><td className="small">{p.createdBy}</td>
+                <td className="n">{fmt(p.amount)}{d(p.depositUsed).gt(0) && <div className="small muted">หักมัดจำ {fmt(p.depositUsed)}</div>}{p.billingNoteNo && <div className="small muted">ใบวางบิล {p.billingNoteNo}</div>}</td><td className="n">{d(p.wht).gt(0) ? fmt(p.wht) : '-'}</td><td className="small">{p.createdBy}</td>
               </tr>
             ))}
             {!loading && !r.rows.length && <tr><td colSpan={7} className="empty">ยังไม่มีการจ่าย</td></tr>}
@@ -187,7 +190,7 @@ function DiscountList() {
 }
 
 // ---------- payment voucher ----------
-function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: () => void; onDone: () => void }) {
+function PayModal({ vendorId, billIds, bnNo, onClose, onDone }: { vendorId: string; billIds?: string[]; bnNo?: string; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const meta = useMeta();
   const vendors = useVendors();
@@ -203,18 +206,25 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
-  const am = amounts ?? Object.fromEntries((bills.data ?? []).map((b) => [b.id, b.balance]));
-  const sel = (bills.data ?? []).filter((b) => /^\d+(\.\d+)?$/.test(am[b.id] ?? '') && d(am[b.id]!).gt(0));
+  const shown = (bills.data ?? []).filter((b) => !billIds || billIds.includes(b.id));
+  const am = amounts ?? Object.fromEntries(shown.map((b) => [b.id, b.balance]));
+  const sel = shown.filter((b) => /^\d+(\.\d+)?$/.test(am[b.id] ?? '') && d(am[b.id]!).gt(0));
   const total = sum(sel.map((b) => am[b.id]!));
+  const deps = useOpenDeposits(vendorId);
+  const [use, setUse] = useState<Record<string, string>>({});
+  const usedDeps = (deps.data ?? []).filter((x) => /^\d+(\.\d+)?$/.test(use[x.id] ?? '') && d(use[x.id]!).gt(0));
+  const depositUsed = sum(usedDeps.map((x) => use[x.id]!));
   const vat = meta.data?.shop.vatRegistered ?? true;
-  const whtAmt = wht ? (vat ? total.div('1.07') : total).times(wht).div(100).toDecimalPlaces(2) : d(0);
+  const cashPart = total.minus(depositUsed);
+  const whtAmt = wht && cashPart.gt(0) ? (vat ? cashPart.div('1.07') : cashPart).times(wht).div(100).toDecimalPlaces(2) : d(0);
   const save = async () => {
     if (!sel.length) return setErr('เลือกใบแจ้งหนี้อย่างน้อย 1 ใบ');
     if (method === 'cheque' && !ref.trim()) return setErr('กรอกเลขที่เช็ค');
     setBusy(true);
     setErr('');
     try {
-      const r = await api('POST', '/api/ap/payments', { body: { vendorId, method, ref: ref.trim() || undefined, whtRate: wht, note: note.trim() || undefined, allocations: sel.map((b) => ({ billId: b.id, amount: d(am[b.id]!).toFixed(2) })) }, schema: ApPayment });
+      const r = await api('POST', '/api/ap/payments', { body: { vendorId, method, ref: ref.trim() || undefined, whtRate: wht, note: note.trim() || undefined, allocations: sel.map((b) => ({ billId: b.id, amount: d(am[b.id]!).toFixed(2) })),
+        deposits: usedDeps.length ? usedDeps.map((x) => ({ depositId: x.id, amount: d(use[x.id]!).toFixed(2) })) : undefined, billingNoteNo: bnNo }, schema: ApPayment });
       toast(`บันทึกจ่าย ${r.no} · จ่ายจริง ฿${fmt(r.net)}`);
       onDone();
     } catch (e) {
@@ -225,12 +235,12 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
   };
   return (
     <Modal onClose={onClose} wide label="จ่ายเงินผู้ขาย">
-      <h3>จ่ายเงินผู้ขาย · {v?.name ?? ''}</h3>
+      <h3>จ่ายเงินผู้ขาย · {v?.name ?? ''}{bnNo && <span className="small muted"> · ตามใบรับวางบิล {bnNo}</span>}</h3>
       <div className="tw">
         <table data-testid="pay-bills">
           <thead><tr><th /><th>เลขที่</th><th>ใบกำกับผู้ขาย</th><th>ครบกำหนด</th><th className="n">คงค้าง</th><th className="n">จ่ายครั้งนี้</th></tr></thead>
           <tbody>
-            {bills.isLoading ? <SkeletonRows cols={6} rows={2} /> : (bills.data ?? []).map((b) => (
+            {bills.isLoading ? <SkeletonRows cols={6} rows={2} /> : shown.map((b) => (
               <tr key={b.id}>
                 <td><input type="checkbox" checked={sel.includes(b)} aria-label={`เลือก ${b.no}`} onChange={(e) => setAmounts({ ...am, [b.id]: e.target.checked ? b.balance : '0' })} /></td>
                 <td className="mono">{b.no}</td><td className="mono small">{b.vendorInvoiceNo}</td><td>{th(b.dueDate)}{b.overdueDays > 0 && <> <Pill k="bad">เกิน {b.overdueDays} วัน</Pill></>}</td>
@@ -241,6 +251,21 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
           </tbody>
         </table>
       </div>
+      {(deps.data?.length ?? 0) > 0 && (
+        <div className="tw" style={{ marginTop: 8 }}>
+          <table data-testid="pay-deposits">
+            <thead><tr><th>หักมัดจำซื้อ</th><th>วันที่</th><th className="n">คงเหลือ</th><th className="n">ใช้หักครั้งนี้</th></tr></thead>
+            <tbody>{deps.data!.map((x) => (
+              <tr key={x.id}>
+                <td><label className="row"><input type="checkbox" checked={usedDeps.includes(x)} aria-label={`ใช้ ${x.no}`} data-testid={`pay-dep-${x.no}`}
+                  onChange={(e) => { const room = total.minus(depositUsed).plus(d(use[x.id] || 0)); setUse({ ...use, [x.id]: e.target.checked ? d(x.remaining).lt(room) ? x.remaining : room.toFixed(2) : '0' }); }} /> <span className="mono">{x.no}</span></label>{x.poNo && <div className="small muted">{x.poNo}</div>}</td>
+                <td>{th(x.date)}</td><td className="n">{fmt(x.remaining)}</td>
+                <td className="n"><input className="pu-qty-in" type="text" inputMode="decimal" value={use[x.id] ?? ''} placeholder="0" aria-label={`หัก ${x.no}`} onChange={(e) => setUse({ ...use, [x.id]: e.target.value })} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
       <div className="fgrid">
         <label className="f">วิธีจ่าย<select value={method} onChange={(e) => setMethod(e.target.value as typeof method)} data-testid="pay-method"><option value="transfer">โอนเงิน</option><option value="cheque">เช็ค</option><option value="cash">เงินสด</option></select></label>
         <label className="f">{method === 'cheque' ? 'เลขที่เช็ค *' : 'เลขอ้างอิง (ถ้ามี)'}<input type="text" value={ref} onChange={(e) => setRef(e.target.value)} /></label>
@@ -249,8 +274,9 @@ function PayModal({ vendorId, onClose, onDone }: { vendorId: string; onClose: ()
       </div>
       <div className="tot">
         <span className="muted">ยอดที่ตัดเจ้าหนี้</span><span>{fmt(total)}</span>
+        {depositUsed.gt(0) && <><span className="muted">หักมัดจำที่จ่ายไปแล้ว</span><span>−{fmt(depositUsed)}</span></>}
         <span className="muted">หัก ณ ที่จ่าย{wht ? ` ${wht}%${vat ? ' (จากยอดก่อน VAT)' : ''}` : ''}</span><span>−{fmt(whtAmt)}</span>
-        <span style={{ fontWeight: 600 }}>โอน / จ่ายจริง</span><span className="big">฿{fmt(total.minus(whtAmt))}</span>
+        <span style={{ fontWeight: 600 }}>โอน / จ่ายจริง</span><span className="big" data-testid="pay-net">฿{fmt(total.minus(whtAmt).minus(depositUsed))}</span>
       </div>
       {err && <div className="err" role="alert">{err}</div>}
       <div className="act"><button className="btn" onClick={onClose}>ยกเลิก</button><button className="btn pri" disabled={busy || !sel.length} onClick={() => void save()} data-testid="pay-save">บันทึกจ่ายและออกใบสำคัญจ่าย</button></div>

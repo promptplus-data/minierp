@@ -57,7 +57,7 @@ export async function stockSheet(tx: Tx, ctx: Ctx, q: { productIds?: string[]; w
   })];
 }
 
-const DOC_TH: Record<string, string> = { GR: 'รับสินค้า', PR: 'คืนผู้ขาย', TR: 'โอนคลัง', ADJ: 'เบิก / ปรับยอด', ABB: 'ขายหน้าร้าน', INV: 'ใบกำกับ', CN: 'รับคืน', OPEN: 'สต็อกเปิด', DO: 'ส่งของ', MO: 'ผลิต' };
+const DOC_TH: Record<string, string> = { CA: 'ปรับปรุงต้นทุน', GR: 'รับสินค้า', PR: 'คืนผู้ขาย', TR: 'โอนคลัง', ADJ: 'เบิก / ปรับยอด', ABB: 'ขายหน้าร้าน', INV: 'ใบกำกับ', CN: 'รับคืน', OPEN: 'สต็อกเปิด', DO: 'ส่งของ', MO: 'ผลิต' };
 
 export async function ledgerSheet(tx: Tx, ctx: Ctx, q: { productIds?: string[]; warehouseIds?: string[]; from?: string; to?: string }): Promise<Sheet> {
   const cost = can(ctx, 'data.cost') === 1;

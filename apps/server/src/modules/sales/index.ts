@@ -10,6 +10,7 @@ import {
   ArAgingQuery, ArBillingNoteReq, CustomerAddressReq, SalesLineCheckReq, ArInvoicesQuery, ArReceiptReq, ArStatementQuery, SalesAbbInvoiceReq, SalesDeliveryReq, SalesDepositActionReq, SalesDepositReq,
   SalesInstallmentsReq, SalesInvoiceReq, SalesOrderReq, SalesPageQuery, SalesPriceListReq, SalesPriceQuery, SalesProjectEditReq, SalesProjectReq, SalesQuoteReq, SalesQuoteStatusReq,
   SalesSettings, SalesSettingsUpdate, VoidReq,
+  CnRequestDecideReq, CnRequestQuery, CnRequestReq, CustomerDepositQuery, CustomerDepositReq,
 } from '@erp/contracts';
 import type { Tx } from '@erp/db';
 import { writeAudit } from '../../lib/audit';
@@ -20,6 +21,7 @@ import type { ErpModule } from '../types';
 import { belowCostApprover, creditInfo, loadCustomer, loadShop, resolveVatMode } from './common';
 import { addCustomerAddress, customerAddresses, lineCheck, salesPeople } from './extras';
 import { createDelivery, deliverySources, getDelivery, listDeliveries, voidDelivery } from './deliveries';
+import * as dep from './deposits';
 import { createInvoice, getInvoice, invoiceFromAbb, listCreditNotes, listInvoices } from './invoices';
 import { createOrder, getOrder, listOrders, voidOrder } from './orders';
 import { createPriceList, getPriceList, listPriceLists, resolveB2bPrice, updatePriceList } from './pricing';
@@ -151,9 +153,24 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
   app.post('/api/sales/projects/:id/deposits', authed(async (tx, ctx, req, reply) => { reply.status(201); return receiveDeposit(tx, d, ctx, param(req, 'id'), SalesDepositReq.parse(req.body)); }));
   app.post('/api/sales/projects/:id/void', authed(async (tx, ctx, req) => voidProject(tx, d, ctx, param(req, 'id'), VoidReq.parse(req.body))));
   app.patch('/api/sales/projects/:id', authed(async (tx, ctx, req) => editProject(tx, d, ctx, param(req, 'id'), SalesProjectEditReq.parse(req.body))));
+  // Customer deposits (any customer); a project deposit keeps the project rules and returns the project.
+  app.get('/api/sales/deposits', authed(async (tx, ctx, req) => dep.listDeposits(tx, ctx, CustomerDepositQuery.parse(req.query))));
+  app.post('/api/sales/deposits', authed(async (tx, ctx, req, reply) => { reply.status(201); return dep.createDeposit(tx, d, ctx, CustomerDepositReq.parse(req.body)); }));
+  app.get('/api/sales/deposits/:no', authed(async (tx, ctx, req) => dep.getDeposit(tx, ctx, param(req, 'no'))));
   app.post('/api/sales/deposits/:no/forfeit', authed(async (tx, ctx, req) => forfeitDeposit(tx, d, ctx, param(req, 'no'), SalesDepositActionReq.parse(req.body ?? {}))));
-  app.post('/api/sales/deposits/:no/refund', authed(async (tx, ctx, req) => refundDeposit(tx, d, ctx, param(req, 'no'), SalesDepositActionReq.parse(req.body ?? {}))));
-  app.post('/api/sales/deposits/:no/void', authed(async (tx, ctx, req) => voidDeposit(tx, d, ctx, param(req, 'no'), VoidReq.parse(req.body))));
+  app.post('/api/sales/deposits/:no/refund', authed(async (tx, ctx, req) => {
+    const body = SalesDepositActionReq.parse(req.body ?? {});
+    return (await dep.isProjectDeposit(tx, param(req, 'no'))) ? refundDeposit(tx, d, ctx, param(req, 'no'), body) : dep.refundDeposit(tx, d, ctx, param(req, 'no'), body);
+  }));
+  app.post('/api/sales/deposits/:no/void', authed(async (tx, ctx, req) => {
+    const body = VoidReq.parse(req.body);
+    return (await dep.isProjectDeposit(tx, param(req, 'no'))) ? voidDeposit(tx, d, ctx, param(req, 'no'), body) : dep.voidDeposit(tx, d, ctx, param(req, 'no'), body);
+  }));
+  app.get('/api/ar/cn-requests', authed(async (tx, ctx, req) => dep.listCnRequests(tx, ctx, CnRequestQuery.parse(req.query))));
+  app.post('/api/ar/cn-requests', authed(async (tx, ctx, req, reply) => { reply.status(201); return dep.createCnRequest(tx, d, ctx, CnRequestReq.parse(req.body)); }));
+  app.get('/api/ar/cn-requests/:no', authed(async (tx, ctx, req) => dep.getCnRequest(tx, ctx, param(req, 'no'))));
+  app.post('/api/ar/cn-requests/:no/decide', authed(async (tx, ctx, req) => dep.decideCnRequest(tx, d, ctx, param(req, 'no'), CnRequestDecideReq.parse(req.body))));
+  app.post('/api/ar/cn-requests/:no/cancel', authed(async (tx, ctx, req) => dep.cancelCnRequest(tx, ctx, param(req, 'no'))));
 
   // ---------- receivables ----------
   app.get('/api/ar/aging', authed(async (tx, ctx, req) => { readAr(ctx); return aging(tx, d, ArAgingQuery.parse(req.query)); }));

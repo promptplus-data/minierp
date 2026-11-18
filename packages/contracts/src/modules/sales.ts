@@ -242,6 +242,8 @@ const InvoiceCommon = {
   payments: z.array(z.object({ method: PaymentMethod, amount: DecNN })).max(6).optional(),
   /** Paid now in full by this method (cash / transfer / QR พร้อมเพย์ / card); required for a cash sales order. */
   payMethod: PaymentMethod.optional(),
+  /** Customer deposits used on this invoice (one type per invoice): มัดจำ pays part of the balance, รับเงินล่วงหน้า is deducted (VAT already charged). */
+  deposits: z.array(z.object({ no: z.string(), amount: DecNN })).max(10).optional(),
   creditApproval: Approval.optional(),
 };
 export const SalesInvoiceReq = z.discriminatedUnion('source', [
@@ -305,6 +307,33 @@ export const SalesDeposit = z.object({
   refund: z.object({ amount: Dec, method: z.string(), date: z.string(), by: z.string() }).nullable(), note: z.string().default(''),
 });
 export type SalesDeposit = z.infer<typeof SalesDeposit>;
+// ---------- customer deposits (any customer, not only projects) ----------
+/** มัดจำ (guarantee) or รับเงินล่วงหน้า (advance) from a customer, optionally for one sales order. */
+export const CustomerDepositReq = z.object({
+  customerId: z.string(), soNo: z.string().optional(), type: SalesDepositType, amount: DecNN, method: PaymentMethod, date: ISODate.optional(), note: z.string().max(500).default(''),
+});
+export const CustomerDepositQuery = pageQuery.extend({ q: z.string().optional(), customerId: z.string().optional(), status: z.enum(['open', 'all']).default('all') });
+export const CustomerDeposit = SalesDeposit.extend({
+  customer: z.object({ id: z.string(), name: z.string() }), soNo: z.string().nullable(), project: z.object({ id: z.string(), no: z.string(), name: z.string() }).nullable(),
+  applications: z.array(z.object({ invoiceNo: z.string(), date: z.string(), amount: Dec })), refundCnNo: z.string().nullable(), createdBy: z.string(),
+});
+export type CustomerDeposit = z.infer<typeof CustomerDeposit>;
+
+// ---------- ขอลดหนี้ขาย (credit-note request, no goods back) ----------
+export const CnRequestReq = z.object({
+  invoiceNo: z.string().min(1), amount: DecNN, reason: z.string().trim().min(1).max(300), note: z.string().max(500).default(''),
+  /** The part not taken off what is still owed goes back this way ('credit' = kept as customer credit). */
+  refundMethod: z.enum(['cash', 'transfer', 'credit']).default('transfer'),
+});
+export const CnRequestDecideReq = z.object({ approve: z.boolean(), note: z.string().max(300).default('') });
+export const CnRequestQuery = pageQuery.extend({ q: z.string().optional(), status: z.enum(['pending', 'all']).default('all') });
+export const CnRequest = z.object({
+  id: z.string(), no: z.string(), date: z.string(), invoiceNo: z.string(), invoiceTotal: Dec, invoiceBalance: Dec, customer: z.object({ id: z.string().nullable(), name: z.string() }),
+  amount: Dec, reason: z.string(), note: z.string(), refundMethod: z.enum(['cash', 'transfer', 'credit']), status: z.enum(['pending', 'approved', 'rejected', 'cancelled']),
+  requestedBy: z.string(), decidedBy: z.string().nullable(), decidedAt: z.string().nullable(), decideNote: z.string(), cnNo: z.string().nullable(), createdAt: z.string(),
+});
+export type CnRequest = z.infer<typeof CnRequest>;
+
 export const SalesProjectFigures = z.object({ value: Dec, delivered: Dec, billed: Dec, collected: Dec, outstanding: Dec, unbilled: Dec });
 export const SalesProject = z.object({
   id: z.string(), no: z.string(), name: z.string(), customer: SalesParty, site: z.string(), contact: z.string(), template: z.string(), note: z.string().default(''),
@@ -412,9 +441,12 @@ export const salesRoutes = {
   salesProjects: 'GET /api/sales/projects', salesProjectCreate: 'POST /api/sales/projects', salesProject: 'GET /api/sales/projects/:id',
   salesProjectInstallments: 'POST /api/sales/projects/:id/installments', salesProjectBill: 'POST /api/sales/projects/:id/installments/:installmentId/bill',
   salesProjectDeposit: 'POST /api/sales/projects/:id/deposits', salesProjectVoid: 'POST /api/sales/projects/:id/void',
+  salesDeposits: 'GET /api/sales/deposits', salesDepositCreate: 'POST /api/sales/deposits', salesDeposit: 'GET /api/sales/deposits/:no',
   salesDepositForfeit: 'POST /api/sales/deposits/:no/forfeit', salesDepositRefund: 'POST /api/sales/deposits/:no/refund', salesDepositVoid: 'POST /api/sales/deposits/:no/void',
   arAging: 'GET /api/ar/aging', arInvoices: 'GET /api/ar/invoices', arDueSoon: 'GET /api/ar/due-soon', arStatement: 'GET /api/ar/statement',
   arBillingNotes: 'GET /api/ar/billing-notes', arBillingNoteCreate: 'POST /api/ar/billing-notes', arBillingNote: 'GET /api/ar/billing-notes/:no', arBillingNoteVoid: 'POST /api/ar/billing-notes/:no/void',
+  arCnRequests: 'GET /api/ar/cn-requests', arCnRequestCreate: 'POST /api/ar/cn-requests', arCnRequest: 'GET /api/ar/cn-requests/:no',
+  arCnRequestDecide: 'POST /api/ar/cn-requests/:no/decide', arCnRequestCancel: 'POST /api/ar/cn-requests/:no/cancel',
   arReceipts: 'GET /api/ar/receipts', arReceiptCreate: 'POST /api/ar/receipts', arReceipt: 'GET /api/ar/receipts/:no', arReceiptVoid: 'POST /api/ar/receipts/:no/void',
 } as const;
 

@@ -15,9 +15,10 @@ import { LoadMore } from '../../ui/lists';
 import { CustomerSelect, Paper, PrintModal, TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocLinks } from '../../doclink';
+import { CnRequestTab } from './CnRequests';
 
-type Tab = 'cust' | 'inv' | 'bn' | 'rc';
-const TABS: [Tab, string][] = [['cust', 'ลูกหนี้รายลูกค้า'], ['inv', 'ใบแจ้งหนี้ค้างชำระ'], ['bn', 'ใบวางบิล'], ['rc', 'ใบเสร็จรับเงิน']];
+type Tab = 'cust' | 'inv' | 'bn' | 'rc' | 'cr';
+const TABS: [Tab, string][] = [['cust', 'ลูกหนี้รายลูกค้า'], ['inv', 'ใบแจ้งหนี้ค้างชำระ'], ['bn', 'ใบวางบิล'], ['rc', 'ใบเสร็จรับเงิน'], ['cr', 'ขอลดหนี้']];
 const RC_METHOD: Record<string, string> = { transfer: 'โอนเงิน', cash: 'เงินสด', cheque: 'เช็ค', promptpay: 'พร้อมเพย์', card: 'บัตร' };
 const today = () => new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10);
 const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -89,6 +90,7 @@ export default function Ar() {
         {tab === 'inv' && <InvoiceTable q={dq} bucket={bucket} />}
         {tab === 'bn' && <BnTable q={dq} />}
         {tab === 'rc' && <RcTable q={dq} />}
+        {tab === 'cr' && <CnRequestTab q={dq} />}
       </div>
       {modal?.kind === 'bn' && <BillingNoteModal customerId={modal.customerId} onClose={() => setModal(null)} />}
       {modal?.kind === 'rc' && <ReceiptModal customerId={modal.customerId} onClose={() => setModal(null)} />}

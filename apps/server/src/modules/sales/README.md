@@ -14,6 +14,8 @@ Files: `quotes.ts orders.ts deliveries.ts invoices.ts receivables.ts projects.ts
 | Pricing / credit | `GET /api/sales/price?doc=quote\|order`, `POST /api/sales/line-check`, price-lists CRUD, `GET /customers/:id/credit`, `GET/PATCH /settings` |
 | Pickers | `GET/POST /api/sales/customers/:id/addresses` (ship-to address book), `GET /api/sales/salespeople` |
 | Projects | `GET/POST /api/sales/projects`, `GET /:id`, `POST /:id/installments`, `/:id/installments/:iid/bill`, `/:id/deposits`, `/:id/void`; `POST /api/sales/deposits/:no/(forfeit|refund|void)` |
+| Customer deposits | `GET/POST /api/sales/deposits`, `GET /:no`; `POST /:no/refund` and `/:no/void` (project deposits keep the project rules) |
+| ขอลดหนี้ขาย | `GET/POST /api/ar/cn-requests`, `GET /:no`, `POST /:no/decide`, `POST /:no/cancel` |
 | AR | `GET/POST /api/ar/billing-notes`, `/:no`, `/:no/void`; `GET/POST /api/ar/receipts`, `/:no`, `/:no/void`; `GET /api/ar/aging`, `/due-soon`, `/invoices`, `/statement` |
 
 ## Rules to tests (apps/server/test/sales)
@@ -30,6 +32,7 @@ Files: `quotes.ts orders.ts deliveries.ts invoices.ts receivables.ts projects.ts
 | Cash SO (ข้อ 4): cash default for no-terms customers, no credit gate, each DO invoice paid on the spot (`payMethod` / `payments`), cash and credit DOs not mixed, gap-free INV numbers | cash-so-ar |
 | BR-16 approver setting (ข้อ 5): owner / owner_or_manager / none (flag + audit `action=flag`), owner-only change | quotes-orders, pos (POS path), core belowcostapprover |
 | POS credit ABB → full INV keeps balance, term, due date (ข้อ 9a); returns credit the owed balance first, rest refunded or customer credit (ข้อ 9b, `docs.ar_applied`); statement = aging | cash-so-ar, core arreturn |
+| มัดจำ (no VAT, part payment) / รับเงินล่วงหน้า (tax invoice on receipt, deducted with its VAT) for any customer, one kind per invoice, voiding the invoice frees the deposit, refund (advance → credit note), ขอลดหนี้ with manager / owner approval (not self) | deposits |
 | Idempotent demo seed | seed |
 
 Web e2e `e2e/sales-flow.spec.ts`: customer quick-create from the SO form, partial Thai search, stock on the SO line,

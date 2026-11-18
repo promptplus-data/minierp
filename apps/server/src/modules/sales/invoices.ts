@@ -20,6 +20,7 @@ import {
   totalsOf, userRef, type BuiltLine, type CustomerRow, type PartyCols,
 } from './common';
 import { makePricer } from './pricing';
+import { planDeposits, recordApplications, type DepositPlan } from './deposits';
 
 export interface InvoiceLineIn {
   productId: string; name: string; unitName: string; unitFactor: string; qty: string; baseQty: string; unitPrice: string; discount: string;
@@ -78,10 +79,19 @@ function settleMode(req: { payments?: { method: string; amount: string }[]; payM
   if (req.payMethod && req.payments?.length) throw E.validation('Give payments or payMethod, not both');
   const payments = req.payMethod ? [{ method: req.payMethod, amount: total }] : req.payments;
   const p = (payments ?? []).filter((x) => d(x.amount).gt(0));
+  if (!d(total).gt(0)) return { kind: 'cash', payments: [], arBalance: '0.00' }; // fully paid by a deposit
   if (!p.length) return { kind: 'credit', payments: [], arBalance: total };
   const paid = sum(p.map((x) => x.amount));
   if (!paid.eq(d(total))) throw E.validation(`Payments ${money(paid)} must equal the invoice total ${total}`, { total, paid: money(paid) });
   return { kind: 'cash', payments: p.map((x) => ({ method: x.method, amount: money(x.amount) })), arBalance: '0.00' };
+}
+
+/** Deposits used on an invoice: the totals to print / tax and what is still to be paid. */
+function afterDeposits(totals: DepositPlan['totals'], plan: DepositPlan | null) {
+  if (!plan) return { totals, due: totals.total, ext: {} };
+  const billed = plan.type === 'advance' ? plan.totals : totals;
+  const due = plan.type === 'advance' ? billed.total : money(d(totals.total).minus(d(plan.amount)));
+  return { totals: billed, due, ext: { grossAmount: totals.total, depositDeduct: plan.amount, depositType: plan.type, textLines: [plan.textLine] } };
 }
 
 async function requireTaxId(tx: Tx, ctx: Ctx, c: CustomerRow): Promise<void> {
@@ -127,10 +137,13 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
       where dl.delivery_id = any($1::uuid[]) order by dv.created_at, dl.line_no`,
     [r.rows.map((x) => x.id)],
   );
-  const totals = calcDoc(dl.rows.map((l) => ({ qty: 1, unitPrice: l.value, vat: l.vat })), vatMode);
-  const settle = settleMode(req, totals.total);
+  const docTotals = calcDoc(dl.rows.map((l) => ({ qty: 1, unitPrice: l.value, vat: l.vat })), vatMode);
+  const plan = req.deposits?.length ? await planDeposits(tx, customer.id, req.deposits, docTotals) : null;
+  const dep = afterDeposits(docTotals, plan);
+  const totals = dep.totals;
+  const settle = settleMode(req, dep.due);
   if (cashSo[0] && settle.kind === 'credit') {
-    throw E.validation('A cash sales order is paid when invoiced: choose how the customer pays', { need: 'payment', total: totals.total, field: 'payMethod' });
+    throw E.validation('A cash sales order is paid when invoiced: choose how the customer pays', { need: 'payment', total: dep.due, field: 'payMethod' });
   }
   const date = req.date ?? deps.today();
   const term = settle.kind === 'cash' ? { t: 'cash' as const } : first.term ?? customer.term;
@@ -141,10 +154,11 @@ async function fromDeliveries(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesIn
       unitPrice: qty4(d(l.value).div(d(l.qty))), discount: '0', net: l.value, after: l.value, vat: l.vat, cogs: l.cogs, free: l.free,
     })),
     search: [...dl.rows.map((l) => l.name), ...r.rows.map((x) => `${x.no} ${x.so_no ?? ''}`)],
-    ext: { kind: settle.kind, source: 'delivery', soId: r.rows.length === 1 || r.rows.every((x) => x.so_id === first.so_id) ? first.so_id : null, term, dueDate: dueDate(date, term), attn: req.attn, note: req.note, salespersonId: first.salesperson_id },
+    ext: { kind: settle.kind, source: 'delivery', soId: r.rows.length === 1 || r.rows.every((x) => x.so_id === first.so_id) ? first.so_id : null, term, dueDate: dueDate(date, term), attn: req.attn, note: req.note, salespersonId: first.salesperson_id, ...dep.ext },
   });
+  await recordApplications(tx, ctx, inv.id, plan);
   for (const x of r.rows) await tx.query(`insert into sales_invoice_deliveries (tenant_id, invoice_doc_id, delivery_id) values ($1,$2,$3)`, [ctx.tenantId, inv.id, x.id]);
-  await writeAudit(tx, ctx, [{ action: 'create', object: 'INV', ref: inv.no, detail: `${customer.name} · ฿${fmtTHB(totals.total)} · จาก ${r.rows.map((x) => x.no).join(', ')} · ${settle.kind === 'cash' ? 'เงินสด' : `ครบกำหนด ${dueDate(date, term)}`}` }]);
+  await writeAudit(tx, ctx, [{ action: 'create', object: 'INV', ref: inv.no, detail: `${customer.name} · ฿${fmtTHB(totals.total)} · จาก ${r.rows.map((x) => x.no).join(', ')}${plan ? ` · หัก${plan.type === 'advance' ? 'เงินล่วงหน้า' : 'มัดจำ'} ${plan.uses.map((u) => u.no).join(', ')} ฿${fmtTHB(plan.amount)}` : ''} · ${settle.kind === 'cash' ? 'เงินสด' : `ครบกำหนด ${dueDate(date, term)}`}` }]);
   return getInvoice(tx, deps, ctx, inv.no);
 }
 
@@ -153,8 +167,11 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   await requireTaxId(tx, ctx, customer);
   const vatMode = await resolveVatMode(tx, ctx, req.vatMode);
   const lines = await buildLines(tx, req.lines, { allowFree: false });
-  const totals = totalsOf(lines, vatMode, req.billDiscount);
-  const settle = settleMode(req, totals.total);
+  const docTotals = totalsOf(lines, vatMode, req.billDiscount);
+  const plan = req.deposits?.length ? await planDeposits(tx, customer.id, req.deposits, docTotals) : null;
+  const dep = afterDeposits(docTotals, plan);
+  const settle = settleMode(req, dep.due);
+  const totals = docTotals;
   const term: SalesTerm = settle.kind === 'cash' ? { t: 'cash' } : req.term ?? customer.term;
   const wh = await requireWarehouse(tx, req.warehouseId);
   const salesperson = await requireUser(tx, req.salespersonId ?? ctx.userId);
@@ -181,24 +198,25 @@ async function direct(tx: Tx, deps: Deps, ctx: Ctx, req: Extract<SalesInvoiceReq
   if (bc.audit) audits.push(bc.audit);
   audits.push(...giveawayAudits(lines, 'INV', lines.map((l) => planOf.get(l)?.cogs ?? null)));
   if (settle.kind === 'credit') {
-    const cr = await creditGate(tx, deps, ctx, customer, term, totals.total, req.creditApproval, `ใบกำกับ ${no} ${customer.name}`);
+    const cr = await creditGate(tx, deps, ctx, customer, term, dep.due, req.creditApproval, `ใบกำกับ ${no} ${customer.name}`);
     if (cr.audit) audits.push(cr.audit);
   }
   const inv = await insertInvoice(tx, ctx, {
-    date, customer, vatMode, totals, payments: settle.payments, arBalance: settle.arBalance, warehouseId: wh.id,
+    date, customer, vatMode, totals: dep.totals, payments: settle.payments, arBalance: settle.arBalance, warehouseId: wh.id,
     lines: lines.map((l, i) => ({
       productId: l.product!.id, name: l.name, unitName: l.unitName, unitFactor: l.unitFactor, qty: l.qty, baseQty: l.baseQty, unitPrice: l.unitPrice,
       discount: discAmt(l), net: totals.lines[i]!.net, after: totals.lines[i]!.after, vat: l.vat, cogs: planOf.get(l)?.cogs ?? null, free: l.giveaway === true,
     })),
     search: lines.map((l) => `${l.name} ${l.product!.sku}`),
-    ext: { kind: settle.kind, source: 'direct', term, dueDate: dueDate(date, term), goodsLeft: req.goodsLeft, attn: req.attn, note: req.note, salespersonId: salesperson },
+    ext: { kind: settle.kind, source: 'direct', term, dueDate: dueDate(date, term), goodsLeft: req.goodsLeft, attn: req.attn, note: req.note, salespersonId: salesperson, ...dep.ext },
   }, no);
+  await recordApplications(tx, ctx, inv.id, plan);
   if (pg.approval) await tx.query(`update sales_invoices set price_approval = $2 where doc_id = $1`, [inv.id, JSON.stringify(pg.approval)]);
   for (const [i, l] of lines.entries()) {
     const pl = planOf.get(l);
     if (pl) await applyOut(tx, ctx, wh.id, pl, { docType: 'INV', docNo: no, docId: inv.id, docLineId: inv.lineIds[i]!, note: req.goodsLeft ? 'ขายเชื่อ · ลูกค้าฝากของไว้ที่ร้าน' : 'ขายส่ง / เงินเชื่อ' });
   }
-  audits.push({ action: 'create', object: 'INV', ref: no, detail: `${customer.name} · ฿${fmtTHB(totals.total)} · ${lines.length} รายการ · ${wh.name}${req.goodsLeft ? ' · ฝากของไว้ที่ร้าน' : ''} · ${settle.kind === 'cash' ? 'เงินสด' : `ครบกำหนด ${dueDate(date, term)}`}` });
+  audits.push({ action: 'create', object: 'INV', ref: no, detail: `${customer.name} · ฿${fmtTHB(dep.totals.total)}${plan ? ` · หัก${plan.type === 'advance' ? 'เงินล่วงหน้า' : 'มัดจำ'} ${plan.uses.map((u) => u.no).join(', ')} ฿${fmtTHB(plan.amount)}` : ''} · ${lines.length} รายการ · ${wh.name}${req.goodsLeft ? ' · ฝากของไว้ที่ร้าน' : ''} · ${settle.kind === 'cash' ? 'เงินสด' : `ครบกำหนด ${dueDate(date, term)}`}` });
   await writeAudit(tx, ctx, audits.map((a) => ({ ref: no, ...a })));
   return getInvoice(tx, deps, ctx, no);
 }

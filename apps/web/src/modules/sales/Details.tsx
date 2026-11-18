@@ -10,6 +10,7 @@ import { useMeta } from '../../data';
 import { fmt, fq, Modal, Pill, th, useToast } from '../../ui';
 import { DeliveryModal, DocFormModal, InvoiceFromDeliveriesModal, KindPill } from './Forms';
 import { ProjectSetupModal } from './Projects';
+import { CnRequestModal } from './CnRequests';
 import { DocLink, DocLinks, RouteLink } from '../../doclink';
 import {
   balPill, DLV_STATUS, METHOD_TH, Paper, PrintModal, priceSourceText, ProfitSummary, QT_STATUS, SOURCE_TH, StatusPill, taxRows, TERM_TH, SO_TERM_TH, useSalesInvalidate, VoidDocModal, VoidedNote, VoidPill,
@@ -288,7 +289,8 @@ export function InvoiceDetail() {
   const nav = useNavigate();
   const meta = useMeta();
   const invalidate = useSalesInvalidate();
-  const [m, setM] = useState<null | 'print' | 'void' | 'deliver'>(null);
+  const toast = useToast();
+  const [m, setM] = useState<null | 'print' | 'void' | 'deliver' | 'cr'>(null);
   const q = useQuery({ queryKey: ['invoice', no], queryFn: () => api('GET', `/api/sales/invoices/${encodeURIComponent(no)}`, { schema: SalesInvoice }), retry: false });
   if (q.isLoading) return <Loading />;
   // a POS full tax invoice has no B2B record: its document page is the core sales-document screen
@@ -307,6 +309,7 @@ export function InvoiceDetail() {
             <button className="btn sm" onClick={() => setM('print')}>พิมพ์</button>
             {live && d(x.arBalance).gt(0) && can('fin.ar') === 1 && <button className="btn sm pri" onClick={() => nav(`/ar?customer=${x.customer.id}&receive=1`)} data-testid="inv-receive">รับชำระ</button>}
             {live && x.goodsLeft && left && (can('sales.doc') === 1 || can('inv.receive') === 1) && <button className="btn sm" onClick={() => setM('deliver')}>ออกใบส่งของ (ของฝาก)</button>}
+            {live && (can('sales.doc') === 1 || can('fin.ar') === 1) && x.source !== 'deposit' && <button className="btn sm" onClick={() => setM('cr')} data-testid="inv-cn-request">ขอลดหนี้</button>}
             {live && !!can('sales.voidDoc') && <button className="btn sm bad" onClick={() => setM('void')} data-testid="void">ยกเลิก</button>}
           </span>
         </h2>
@@ -331,6 +334,7 @@ export function InvoiceDetail() {
       <div className="card"><Paper {...invoicePaper(x, vatShop)} /></div>
       {m === 'print' && <PrintModal title={x.doc.no} onClose={() => setM(null)}><Paper {...invoicePaper(x, vatShop)} /></PrintModal>}
       {m === 'deliver' && <DeliveryModal initial={{ kind: 'INV', no: x.doc.no }} onClose={() => setM(null)} />}
+      {m === 'cr' && <CnRequestModal invoiceNo={x.doc.no} onClose={() => setM(null)} onDone={(no) => { setM(null); toast(`ส่งคำขอ ${no} รออนุมัติ (ดูที่ ลูกหนี้ › ขอลดหนี้)`); }} />}
       {m === 'void' && (
         <VoidDocModal what={x.doc.no} url={`/api/sales/docs/${encodeURIComponent(x.doc.no)}/void`} total={x.doc.totals.total} onClose={() => setM(null)} onDone={() => void invalidate()}
           effects={['ต้องยกเลิกใบเสร็จรับเงิน ใบวางบิล และใบส่งของที่อ้างอิงก่อน', ...(x.source === 'direct' ? ['คืนสต็อกเข้าล็อตเดิมตามต้นทุนเดิม'] : []), 'ใบกำกับที่ยกเลิกต้องเก็บต้นฉบับและสำเนาไว้ครบชุด เลขที่เดิมไม่นำกลับมาใช้']} />
@@ -343,7 +347,8 @@ export function invoicePaper(x: SalesInvoice, vatShop: boolean) {
   const nv = x.doc.vatMode === 'none' || !vatShop;
   const title = nv ? (x.kind === 'credit' ? 'ใบแจ้งหนี้' : 'ใบเสร็จรับเงิน') : x.kind === 'credit' ? 'ใบกำกับภาษี / ใบแจ้งหนี้' : 'ใบกำกับภาษี / ใบเสร็จรับเงิน';
   const rows = x.doc.lines.length
-    ? x.doc.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice, disc: l.discount, amt: l.net }))
+    ? [...x.doc.lines.map((l) => ({ name: l.free ? `${l.name} (ของแถม)` : l.name, qty: l.qty, unit: l.unitName, price: l.unitPrice as string | null, disc: l.discount, amt: l.net })),
+      ...(x.depositType === 'advance' ? x.textLines.map((t) => ({ name: t.name, qty: null, unit: '', price: null, disc: '0', amt: x.doc.vatMode === 'exc' && !nv ? d(t.amount).div('1.07').toDecimalPlaces(2).toFixed(2) : t.amount })) : [])]
     : x.textLines.map((t) => ({ name: t.name, qty: null, unit: '', price: null, amt: t.amount }));
   const totals = taxRows(x.doc.totals, nv ? 'none' : x.doc.vatMode);
   if (x.depositType === 'guarantee' && d(x.depositDeduct).gt(0)) totals.push(['หักเงินมัดจำ', `−${fmt(x.depositDeduct)}`], ['ยอดที่ต้องชำระ', fmt(d(x.doc.totals.total).minus(d(x.depositDeduct))), true]);

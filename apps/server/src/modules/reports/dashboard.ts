@@ -79,7 +79,9 @@ export async function dashboard(tx: Tx, deps: Deps, ctx: Ctx): Promise<ReportDas
   let approvals: ReportDashboard['approvals'] = null;
   const canAdj = can(ctx, 'inv.adjApprove') === 1;
   const canLeave = can(ctx, 'hr.leave') === 1;
-  if (canAdj || canLeave) {
+  const canCn = can(ctx, 'sales.return') === 1;
+  const canCost = canAdj && can(ctx, 'data.cost') === 1;
+  if (canAdj || canLeave || canCn) {
     const items: NonNullable<ReportDashboard['approvals']>['items'] = [];
     let count = 0;
     if (canAdj) {
@@ -87,6 +89,18 @@ export async function dashboard(tx: Tx, deps: Deps, ctx: Ctx): Promise<ReportDas
         `select no, reason, created_at, count(*) over ()::int n from adjust_requests where status = 'pending' order by created_at limit 5`);
       count += r.rows[0]?.n ?? 0;
       items.push(...r.rows.map((x) => ({ kind: 'stock-adjust', no: x.no, label: `ขอปรับยอดสต็อก · ${x.reason}`, at: x.created_at.toISOString(), path: `/stock?req=${encodeURIComponent(x.no)}` })));
+    }
+    if (canCn) {
+      const r = await tx.query<{ no: string; inv: string; amount: string; created_at: Date; n: number }>(
+        `select r.no, x.no inv, r.amount::text, r.created_at, count(*) over ()::int n from ar_cn_requests r join docs x on x.id = r.invoice_doc_id where r.status = 'pending' order by r.created_at limit 5`);
+      count += r.rows[0]?.n ?? 0;
+      items.push(...r.rows.map((x) => ({ kind: 'cn-request', no: x.no, label: `ขอลดหนี้ ${x.inv} · ฿${Number(x.amount).toLocaleString('th-TH', { minimumFractionDigits: 2 })}`, at: x.created_at.toISOString(), path: `/ar?tab=cr&no=${encodeURIComponent(x.no)}` })));
+    }
+    if (canCost) {
+      const r = await tx.query<{ no: string; reason: string; created_at: Date; n: number }>(
+        `select no, reason, created_at, count(*) over ()::int n from cost_adjustments where status = 'pending' order by created_at limit 5`);
+      count += r.rows[0]?.n ?? 0;
+      items.push(...r.rows.map((x) => ({ kind: 'cost-adjust', no: x.no, label: `ขอปรับปรุงต้นทุน · ${x.reason}`, at: x.created_at.toISOString(), path: `/stock-ledger?tab=cost&no=${encodeURIComponent(x.no)}` })));
     }
     if (canLeave) {
       const r = await tx.query<{ no: string; name: string; days: string; created_at: Date; n: number }>(

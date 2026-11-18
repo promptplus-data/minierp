@@ -5,13 +5,15 @@
  */
 import { z } from 'zod';
 import {
-  ApBillUpdate, ApBillQuery, ApPaymentReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
+  ApBillUpdate, ApBillQuery, ApPaymentReq, ApDepositReq, ApDepositCloseReq, ApDepositQuery, ApBillingNoteReq, ApBillingNoteQuery, CostAdjDecideReq, CostAdjPreviewQuery, CostAdjQuery, CostAdjReq, DeliveryCommitReq, DeliveryPreviewReq, GrDraftConfirmReq, GrDraftCreateProductReq, GrDraftQuery, GrDraftUpdate,
   GrListQuery, GrVoidReq, ImportCommitReq, PoPrefillQuery, PoQuery, PoReasonReq, PoReq, ImportKind, ImportPreviewReq, ImportTemplateQuery, LedgerExportQuery, LedgerQuery, StockExportQuery, PurchasingSettingsPatch, StockCountEntryReq,
   StockCountOpenReq, StockCountQuery, StockCountRecountReq, VendorReturnReq, pageQuery,
 } from '@erp/contracts';
 import { requireAny } from '../../lib/context';
 import type { ErpModule } from '../types';
 import * as ap from './ap';
+import * as apx from './apx';
+import * as ca from './costadj';
 import * as dl from './delivery';
 import * as gv from './grvoid';
 import * as hub from './importhub';
@@ -52,6 +54,14 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   app.get('/api/ap/bills', authed(async (tx, ctx, req) => ap.listBills(tx, deps, ctx, ApBillQuery.parse(req.query))));
   app.get('/api/ap/bills/:no', authed(async (tx, ctx, req) => ap.getBill(tx, deps, ctx, params(req).no)));
   app.patch('/api/ap/bills/:no', authed(async (tx, ctx, req) => ap.updateBill(tx, deps, ctx, params(req).no, ApBillUpdate.parse(req.body))));
+  app.get('/api/ap/deposits', authed(async (tx, ctx, req) => apx.listDeposits(tx, ctx, ApDepositQuery.parse(req.query))));
+  app.post('/api/ap/deposits', authed(async (tx, ctx, req, reply) => { reply.status(201); return apx.createDeposit(tx, deps, ctx, ApDepositReq.parse(req.body)); }));
+  app.get('/api/ap/deposits/:no', authed(async (tx, ctx, req) => apx.getDeposit(tx, ctx, params(req).no)));
+  app.post('/api/ap/deposits/:no/close', authed(async (tx, ctx, req) => apx.closeDeposit(tx, ctx, params(req).no, ApDepositCloseReq.parse(req.body))));
+  app.get('/api/ap/billing-notes', authed(async (tx, ctx, req) => apx.listBillingNotes(tx, deps, ctx, ApBillingNoteQuery.parse(req.query))));
+  app.post('/api/ap/billing-notes', authed(async (tx, ctx, req, reply) => { reply.status(201); return apx.createBillingNote(tx, deps, ctx, ApBillingNoteReq.parse(req.body)); }));
+  app.get('/api/ap/billing-notes/:no', authed(async (tx, ctx, req) => apx.getBillingNote(tx, deps, ctx, params(req).no)));
+  app.post('/api/ap/billing-notes/:no/void', authed(async (tx, ctx, req) => apx.voidBillingNote(tx, deps, ctx, params(req).no, PoReasonReq.parse(req.body).reason)));
   app.get('/api/ap/aging', authed(async (tx, ctx) => ap.aging(tx, deps, ctx)));
   app.get('/api/ap/payments', authed(async (tx, ctx, req) => ap.listPayments(tx, ctx, pageQuery.parse(req.query))));
   app.post('/api/ap/payments', authed(async (tx, ctx, req, reply) => {
@@ -110,6 +120,13 @@ export const purchasingModule: ErpModule = async (app, { deps, authed }) => {
   app.post('/api/stock-counts/:id/submit', authed(async (tx, ctx, req) => sx.submitCount(tx, deps, ctx, params(req).id)));
   app.post('/api/stock-counts/:id/cancel', authed(async (tx, ctx, req) => sx.cancelCount(tx, ctx, params(req).id)));
   app.post('/api/stock-counts/:id/recount', authed(async (tx, ctx, req) => sx.recountLines(tx, ctx, params(req).id, StockCountRecountReq.parse(req.body))));
+  app.get('/api/stock/cost-adjustments/settings', authed(async (tx, ctx) => ca.getSettings(tx, ctx)));
+  app.patch('/api/stock/cost-adjustments/settings', authed(async (tx, ctx, req) => ca.updateSettings(tx, ctx, z.object({ enabled: z.boolean() }).parse(req.body))));
+  app.get('/api/stock/cost-adjustments/preview', authed(async (tx, ctx, req) => ca.preview(tx, ctx, CostAdjPreviewQuery.parse(req.query))));
+  app.get('/api/stock/cost-adjustments', authed(async (tx, ctx, req) => ca.list(tx, ctx, CostAdjQuery.parse(req.query))));
+  app.post('/api/stock/cost-adjustments', authed(async (tx, ctx, req, reply) => { reply.status(201); return ca.create(tx, deps, ctx, CostAdjReq.parse(req.body)); }));
+  app.get('/api/stock/cost-adjustments/:no', authed(async (tx, ctx, req) => ca.get(tx, ctx, params(req).no)));
+  app.post('/api/stock/cost-adjustments/:no/decide', authed(async (tx, ctx, req) => ca.decide(tx, ctx, params(req).no, CostAdjDecideReq.parse(req.body))));
   app.get('/api/stock/ledger', authed(async (tx, ctx, req) => sx.ledger(tx, ctx, LedgerQuery.parse(req.query))));
   // Excel / CSV of the stock page and the ledger for the picked products and warehouses.
   app.get('/api/stock/export', authed(async (tx, ctx, req, reply) => {

@@ -10,17 +10,19 @@ import { AbbInvoiceModal, DeliveryModal, DocFormModal, InvoiceFromDeliveriesModa
 import { balPill, DLV_STATUS, QT_STATUS, SalesSettingsModal, SOURCE_TH, StatusPill, VoidPill } from './shared';
 import { ErrorBanner } from '../../errors';
 import { DocLink, DocLinks } from '../../doclink';
+import { DepositsTab, ReceiveDepositModal } from './Deposits';
 
-type Tab = 'qt' | 'so' | 'do' | 'inv' | 'cn';
-const TABS: [Tab, string][] = [['qt', 'ใบเสนอราคา'], ['so', 'ใบสั่งขาย'], ['do', 'ใบส่งของ'], ['inv', 'ใบกำกับภาษี'], ['cn', 'ใบลดหนี้']];
+type Tab = 'qt' | 'so' | 'do' | 'inv' | 'cn' | 'dp';
+const TABS: [Tab, string][] = [['qt', 'ใบเสนอราคา'], ['so', 'ใบสั่งขาย'], ['do', 'ใบส่งของ'], ['inv', 'ใบกำกับภาษี'], ['cn', 'ใบลดหนี้'], ['dp', 'มัดจำ / รับล่วงหน้า']];
 const FILTERS: Record<Tab, [string, string][]> = {
   qt: [['', 'ทั้งหมด'], ['open', 'รอลูกค้า'], ['accepted', 'ลูกค้ายอมรับ'], ['expired', 'หมดอายุ'], ['lost', 'ไม่ได้งาน'], ['void', 'ยกเลิก']],
   so: [['', 'ทั้งหมด'], ['open', 'ยังส่งไม่ครบ'], ['delivered', 'ส่งครบแล้ว'], ['void', 'ยกเลิก']],
   do: [['', 'ทั้งหมด'], ['unbilled', 'รอออกใบกำกับ'], ['void', 'ยกเลิก']],
   inv: [['', 'ทั้งหมด'], ['open', 'ค้างชำระ'], ['paid', 'ชำระแล้ว'], ['goodsLeft', 'ฝากของไว้'], ['void', 'ยกเลิก']],
   cn: [['', 'ทั้งหมด']],
+  dp: [['', 'ทั้งหมด']],
 };
-const URL: Record<Tab, string> = { qt: '/api/sales/quotations', so: '/api/sales/orders', do: '/api/sales/deliveries', inv: '/api/sales/invoices', cn: '/api/sales/credit-notes' };
+const URL: Record<Tab, string> = { qt: '/api/sales/quotations', so: '/api/sales/orders', do: '/api/sales/deliveries', inv: '/api/sales/invoices', cn: '/api/sales/credit-notes', dp: '/api/sales/deposits' };
 
 export default function B2b() {
   const { can } = useAuth();
@@ -29,7 +31,7 @@ export default function B2b() {
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim(), 250);
-  const [modal, setModal] = useState<null | 'QT' | 'SO' | 'INV' | 'DO' | 'INVDO' | 'ABB' | 'SET'>(null);
+  const [modal, setModal] = useState<null | 'QT' | 'SO' | 'INV' | 'DO' | 'INVDO' | 'ABB' | 'SET' | 'DEP'>(null);
   const canDoc = can('sales.doc') === 1;
   const canDeliver = canDoc || can('inv.receive') === 1;
   const setTab = (t: Tab) => { setStatus(''); setSp({ tab: t }, { replace: true }); };
@@ -45,6 +47,7 @@ export default function B2b() {
             {canDeliver && <button className="btn" onClick={() => setModal('DO')} data-testid="new-do">+ ใบส่งของ</button>}
             {canDoc && <button className="btn" onClick={() => setModal('INVDO')} data-testid="new-inv-do">ออกใบกำกับจากใบส่งของ</button>}
             {canDoc && <button className="btn" onClick={() => setModal('INV')} data-testid="new-inv">+ ใบกำกับ (ขายตรง)</button>}
+            {(canDoc || can('fin.ar') === 1) && <button className="btn" onClick={() => setModal('DEP')} data-testid="new-deposit">+ รับมัดจำ / เงินล่วงหน้า</button>}
             {(canDoc || can('pos.sell') === 1) && <button className="btn" onClick={() => setModal('ABB')} data-testid="new-abb-inv">ใบกำกับเต็มรูปจากอย่างย่อ</button>}
             {can('sys.settings') === 1 && <button className="btn" onClick={() => setModal('SET')} data-testid="sales-settings">ตั้งค่าเอกสารขาย</button>}
           </span>
@@ -60,7 +63,7 @@ export default function B2b() {
             </div>
           )}
         </div>
-        <DocTable tab={tab} status={status} q={dq} />
+        {tab === 'dp' ? <DepositsTab q={dq} /> : <DocTable tab={tab} status={status} q={dq} />}
       </div>
       <div className="card">
         <h2>ลำดับเอกสารขายส่ง/เงินเชื่อ</h2>
@@ -76,6 +79,7 @@ export default function B2b() {
       {modal === 'INVDO' && <InvoiceFromDeliveriesModal onClose={() => setModal(null)} />}
       {modal === 'ABB' && <AbbInvoiceModal onClose={() => setModal(null)} />}
       {modal === 'SET' && <SalesSettingsModal onClose={() => setModal(null)} />}
+      {modal === 'DEP' && <ReceiveDepositModal onClose={() => setModal(null)} />}
     </>
   );
 }
