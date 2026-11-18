@@ -68,9 +68,9 @@ export const salesModule: ErpModule = async (app, { deps, authed }) => {
       }
     }
     await tx.query(
-      `insert into sales_settings (tenant_id, quote_valid_days, default_credit_limit, bank_accounts) values ($1, coalesce($2, 15), coalesce($3, 50000), coalesce($4, '[]'::jsonb))
-       on conflict (tenant_id) do update set quote_valid_days = coalesce($2, sales_settings.quote_valid_days), default_credit_limit = coalesce($3, sales_settings.default_credit_limit),
-         bank_accounts = coalesce($4, sales_settings.bank_accounts), updated_at = now()`,
+      `insert into sales_settings (tenant_id, quote_valid_days, default_credit_limit, bank_accounts) values ($1, coalesce($2::int, 15), coalesce($3::numeric, 50000), coalesce($4::jsonb, '[]'::jsonb))
+       on conflict (tenant_id) do update set quote_valid_days = coalesce($2::int, sales_settings.quote_valid_days), default_credit_limit = coalesce($3::numeric, sales_settings.default_credit_limit),
+         bank_accounts = coalesce($4::jsonb, sales_settings.bank_accounts), updated_at = now()`,
       [ctx.tenantId, b.quoteValidDays ?? null, b.defaultCreditLimit ?? null, b.banks ? JSON.stringify(b.banks) : null],
     );
     await writeAudit(tx, ctx, [{ action: 'update', object: 'sales-settings', detail: Object.keys(b).join(', ') }]);

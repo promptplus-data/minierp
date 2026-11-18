@@ -22,6 +22,16 @@ const quoteBody = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+describe('sales settings', () => {
+  it('saves a credit limit with decimals as the form sends it (also when the shop has no settings row yet)', async () => {
+    const body = { quoteValidDays: 15, defaultCreditLimit: '50000.00', banks: [{ bank: 'กสิกรไทย', branch: 'สาขาหลัก', account: '123-4-56789-0', name: 'ร้านทดสอบ' }] };
+    const saved = await ok(env.owner.patch('/api/sales/settings', { ...body, defaultCreditLimit: '75000.50' }));
+    expect(saved).toMatchObject({ quoteValidDays: 15, defaultCreditLimit: '75000.50', banks: [{ account: '123-4-56789-0' }] });
+    await env.pool.query(`delete from sales_settings`);
+    expect(await ok(env.owner.patch('/api/sales/settings', body))).toMatchObject({ defaultCreditLimit: '50000.00' });
+  });
+});
+
 describe('quotations', () => {
   it('saves free-text lines, a 15-day validity, exc VAT totals, no stock; price below list and below cost need approvals', async () => {
     const before = await env.pool.query(`select count(*)::int n from stock_moves`);
